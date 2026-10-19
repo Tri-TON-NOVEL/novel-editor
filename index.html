@@ -1,0 +1,341 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>小説エディター</title>
+<meta name="description" content="小説家になろう・アルファポリス向けの小説エディター">
+<meta name="theme-color" content="#2f5d50">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="小説エディター">
+<link rel="stylesheet" href="styles.css">
+</head>
+<body>
+<header class="toolbar">
+  <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
+  <div class="brand">小説エディター</div>
+  <nav class="actions">
+    <button type="button" data-action="library">作品一覧</button>
+    <button type="button" data-action="new-project">新しい作品</button>
+    <details class="menu">
+      <summary>ファイル</summary>
+      <div class="menu-list">
+        <button type="button" data-action="file-open">ファイルを開く…</button>
+        <button type="button" data-action="file-save">ファイルに保存</button>
+        <button type="button" data-action="file-save-as">名前を付けて保存…</button>
+        <hr>
+        <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
+        <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
+      </div>
+    </details>
+    <details class="menu" id="cloud-menu">
+      <summary>クラウド</summary>
+      <div class="menu-list" id="cloud-menu-list"></div>
+    </details>
+    <button type="button" data-action="settings">設定</button>
+  </nav>
+  <div class="status" id="status" aria-live="polite"></div>
+</header>
+
+<div class="workspace">
+  <aside class="sidebar" id="sidebar">
+    <section class="field">
+      <div class="field-head">
+        <label for="novel-title">小説タイトル</label>
+        <span class="count" id="count-novel-title"></span>
+        <button type="button" class="copy" data-copy="novel-title">コピー</button>
+      </div>
+      <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
+    </section>
+
+    <label class="site-select">投稿先
+      <select id="site">
+        <option value="narou">小説家になろう</option>
+        <option value="alpha">アルファポリス</option>
+      </select>
+    </label>
+
+    <nav class="nav">
+      <button type="button" class="nav-item" data-view="memo">作品メモ・設定</button>
+      <button type="button" class="nav-item" data-view="report">活動報告</button>
+      <div class="nav-head">
+        <span>エピソード</span>
+        <button type="button" class="tool" data-action="add-episode">＋ 追加</button>
+      </div>
+      <ol class="episode-list" id="episode-list"></ol>
+    </nav>
+  </aside>
+  <div class="drawer-backdrop" data-action="toggle-drawer"></div>
+
+  <main class="main">
+    <!-- エピソード -->
+    <section class="view" id="view-episode">
+      <section class="field">
+        <div class="field-head">
+          <label for="ep-title" id="ep-label">エピソードタイトル</label>
+          <span class="count" id="count-ep-title"></span>
+          <span class="spacer"></span>
+          <button type="button" class="tool" data-action="move-up" title="前へ移動">↑</button>
+          <button type="button" class="tool" data-action="move-down" title="後ろへ移動">↓</button>
+          <button type="button" class="tool danger" data-action="delete-episode">削除</button>
+          <button type="button" class="copy" data-copy="ep-title">コピー</button>
+        </div>
+        <input id="ep-title" type="text" autocomplete="off" placeholder="エピソードタイトル（サブタイトル）">
+      </section>
+
+      <div class="tabs" role="tablist">
+        <button type="button" role="tab" data-tab="body" aria-selected="true">本文</button>
+        <button type="button" role="tab" data-tab="plot" aria-selected="false">プロット</button>
+      </div>
+
+      <div class="panes">
+        <section class="field pane" data-pane="body">
+          <!-- 前書き（なろうのみ） -->
+          <details class="extra narou-only" id="foreword-box">
+            <summary>前書き <span class="count" id="count-foreword"></span></summary>
+            <div class="extra-body">
+              <div class="field-head">
+                <span class="spacer"></span>
+                <button type="button" class="copy" data-copy="foreword">コピー</button>
+              </div>
+              <textarea id="foreword" rows="3" spellcheck="false" placeholder="前書き（サブタイトルの前に表示されます）"></textarea>
+            </div>
+          </details>
+
+          <div class="field-head">
+            <label for="body">本文</label>
+            <span class="count" id="count-body"></span>
+            <span class="site-badge" id="site-badge"></span>
+          </div>
+          <div class="editor-tools" role="toolbar" aria-label="入力補助">
+            <button type="button" class="tool" data-insert="ruby" title="選択した文字にルビを振る">ルビ</button>
+            <button type="button" class="tool" data-insert="dots" title="選択した文字に傍点を付ける">傍点</button>
+            <button type="button" class="tool narou-only" data-insert="image" title="みてみんの画像から挿絵を入れる">挿絵</button>
+            <details class="menu">
+              <summary class="tool">記号</summary>
+              <div class="menu-list symbol-list" id="symbol-list"></div>
+            </details>
+            <button type="button" class="tool" data-action="auto-indent" title="段落の先頭に全角スペースを入れる">字下げ</button>
+            <button type="button" class="tool" data-action="replace" title="文字列をまとめて置き換える">置換</button>
+            <span class="spacer"></span>
+            <button type="button" class="copy" data-copy="body">コピー</button>
+          </div>
+          <textarea id="body" spellcheck="false" placeholder="本文"></textarea>
+
+          <!-- 後書き（なろうのみ） -->
+          <details class="extra narou-only" id="afterword-box">
+            <summary>後書き <span class="count" id="count-afterword"></span></summary>
+            <div class="extra-body">
+              <div class="field-head template-row">
+                <select id="tpl-afterword" aria-label="後書きのひな型"></select>
+                <button type="button" class="tool" data-tpl-apply="afterword">ひな型を使う</button>
+                <button type="button" class="tool" data-tpl-save="afterword">ひな型に登録</button>
+                <button type="button" class="copy" data-copy="afterword">コピー</button>
+              </div>
+              <textarea id="afterword" rows="3" spellcheck="false" placeholder="後書き"></textarea>
+            </div>
+          </details>
+        </section>
+
+        <section class="field pane" data-pane="plot">
+          <div class="field-head">
+            <label for="plot">プロット</label>
+            <span class="count" id="count-plot"></span>
+            <span class="spacer"></span>
+            <button type="button" class="copy" data-copy="plot">コピー</button>
+          </div>
+          <textarea id="plot" spellcheck="false" placeholder="このエピソードのプロット・メモ"></textarea>
+        </section>
+      </div>
+    </section>
+
+    <!-- 作品メモ・設定 -->
+    <section class="view" id="view-memo" hidden>
+      <section class="field">
+        <div class="field-head"><label for="narou-url">なろうの作品URL</label></div>
+        <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
+      </section>
+      <section class="field">
+        <div class="field-head"><label for="alpha-url">アルファポリスの作品URL</label></div>
+        <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
+      </section>
+      <p class="hint">URL は活動報告のひな型の {URL} {なろうURL} {アルファURL} に使われます。なろうは「作品URL＋話数」でエピソードのURLになります。</p>
+      <section class="field grow">
+        <div class="field-head">
+          <label for="memo">作品メモ（全体プロット・設定・登場人物など）</label>
+          <span class="count" id="count-memo"></span>
+          <span class="spacer"></span>
+          <button type="button" class="copy" data-copy="memo">コピー</button>
+        </div>
+        <textarea id="memo" spellcheck="false" placeholder="全体プロット、世界観、登場人物など"></textarea>
+      </section>
+    </section>
+
+    <!-- 活動報告 -->
+    <section class="view" id="view-report" hidden>
+      <div class="report-bar">
+        <label>対象エピソード
+          <select id="report-episode"></select>
+        </label>
+        <button type="button" data-action="manage-templates">ひな型の管理</button>
+      </div>
+      <div class="report-grid">
+        <section class="card">
+          <h2>X（旧Twitter）</h2>
+          <div class="template-row">
+            <select id="tpl-x" aria-label="X のひな型"></select>
+            <button type="button" class="tool" data-tpl-apply="x">ひな型を使う</button>
+            <button type="button" class="tool" data-tpl-save="x">ひな型に登録</button>
+          </div>
+          <section class="field grow">
+            <div class="field-head">
+              <label for="x-text">投稿文</label>
+              <span class="count" id="count-x"></span>
+              <span class="spacer"></span>
+              <button type="button" class="tool" data-action="open-x">X で開く</button>
+              <button type="button" class="copy" data-copy="x-text">コピー</button>
+            </div>
+            <textarea id="x-text" spellcheck="false" placeholder="X に投稿する文章"></textarea>
+          </section>
+        </section>
+
+        <section class="card">
+          <h2>なろう 活動報告</h2>
+          <div class="template-row">
+            <select id="tpl-narou" aria-label="活動報告のひな型"></select>
+            <button type="button" class="tool" data-tpl-apply="narou">ひな型を使う</button>
+            <button type="button" class="tool" data-tpl-save="narou">ひな型に登録</button>
+          </div>
+          <section class="field">
+            <div class="field-head">
+              <label for="narou-report-title">タイトル</label>
+              <span class="count" id="count-narou-report-title"></span>
+              <span class="spacer"></span>
+              <button type="button" class="copy" data-copy="narou-report-title">コピー</button>
+            </div>
+            <input id="narou-report-title" type="text" autocomplete="off" placeholder="活動報告のタイトル">
+          </section>
+          <section class="field grow">
+            <div class="field-head">
+              <label for="narou-report-body">本文</label>
+              <span class="count" id="count-narou-report-body"></span>
+              <span class="spacer"></span>
+              <button type="button" class="copy" data-copy="narou-report-body">コピー</button>
+            </div>
+            <textarea id="narou-report-body" spellcheck="false" placeholder="活動報告の本文"></textarea>
+          </section>
+        </section>
+      </div>
+    </section>
+  </main>
+</div>
+
+<dialog id="library-dialog">
+  <form method="dialog" class="dialog">
+    <h2>作品一覧 <small>（この端末に自動保存されている作品）</small></h2>
+    <ul class="list" id="library-list"></ul>
+    <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="cloud-dialog">
+  <form method="dialog" class="dialog">
+    <h2 id="cloud-dialog-title">クラウドから開く</h2>
+    <ul class="list" id="cloud-list"></ul>
+    <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="image-dialog">
+  <form method="dialog" class="dialog" id="image-form">
+    <h2>挿絵を入れる（なろう）</h2>
+    <label class="stack">みてみんの画像ページURL、または挿絵タグ
+      <input name="url" type="text" autocomplete="off" placeholder="https://50921.mitemin.net/i1149234/">
+    </label>
+    <p class="hint">本文に直接 URL を貼り付けても自動で <code>&lt;i1149234|50921&gt;</code> に変わります。アルファポリス用にコピーすると、挿絵の位置に目印が入ります。</p>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="ok" class="primary">挿入</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="replace-dialog">
+  <form method="dialog" class="dialog" id="replace-form">
+    <h2>一括置換</h2>
+    <label class="stack">置換する文字列 <input name="from" type="text" autocomplete="off" required></label>
+    <label class="stack">置換後の文字列 <input name="to" type="text" autocomplete="off"></label>
+    <label class="stack">範囲
+      <select name="scope">
+        <option value="episode">このエピソードだけ</option>
+        <option value="all">全エピソード</option>
+      </select>
+    </label>
+    <p class="hint" id="replace-preview"></p>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="ok" class="primary">すべて置換</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="templates-dialog">
+  <form method="dialog" class="dialog">
+    <h2>ひな型の管理</h2>
+    <p class="hint">使える差し込み文字：<span id="template-vars"></span></p>
+    <ul class="list" id="template-list"></ul>
+    <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="template-edit-dialog">
+  <form method="dialog" class="dialog" id="template-edit-form">
+    <h2 id="template-edit-heading">ひな型</h2>
+    <label class="stack">名前 <input name="name" type="text" autocomplete="off" required></label>
+    <label class="stack" id="template-edit-title">タイトル（活動報告） <input name="title" type="text" autocomplete="off"></label>
+    <label class="stack">本文 <textarea name="body" rows="8" spellcheck="false"></textarea></label>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="save" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="settings-dialog">
+  <form method="dialog" class="dialog" id="settings-form">
+    <h2>設定</h2>
+    <fieldset>
+      <legend>表示</legend>
+      <label>本文の書体
+        <select name="font">
+          <option value="serif">明朝体</option>
+          <option value="sans">ゴシック体</option>
+        </select>
+      </label>
+      <label>文字サイズ
+        <select name="fontSize">
+          <option value="16">小（16px）</option>
+          <option value="18">中（18px）</option>
+          <option value="20">大（20px）</option>
+          <option value="22">特大（22px）</option>
+        </select>
+      </label>
+    </fieldset>
+    <fieldset id="provider-settings">
+      <legend>クラウド接続</legend>
+    </fieldset>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="save" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

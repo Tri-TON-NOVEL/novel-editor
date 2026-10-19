@@ -1,0 +1,994 @@
+import { db, prefs } from './db.js';
+import {
+  newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars, episodeLabel,
+} from './format.js';
+import {
+  SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertRuby, countImages,
+  miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES,
+} from './notation.js';
+import { localFile, WORK_TYPES, TEXT_TYPES } from './localfile.js';
+import { providers } from './providers/index.js';
+
+const $ = (id) => document.getElementById(id);
+const AUTOSAVE_MS = 600;
+
+const el = {
+  novelTitle: $('novel-title'),
+  site: $('site'),
+  epTitle: $('ep-title'),
+  foreword: $('foreword'),
+  body: $('body'),
+  afterword: $('afterword'),
+  plot: $('plot'),
+  memo: $('memo'),
+  narouUrl: $('narou-url'),
+  alphaUrl: $('alpha-url'),
+  xText: $('x-text'),
+  nrTitle: $('narou-report-title'),
+  nrBody: $('narou-report-body'),
+  reportEpisode: $('report-episode'),
+};
+
+let project = null;     // 編集中の作品
+let epIndex = 0;        // 編集中のエピソード
+let view = 'episode';   // 'episode' | 'memo' | 'report'
+let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
+let saveTimer = null;
+let dirty = false;
+let lastSavedAt = null;
+
+const episode = () => project.episodes[epIndex];
+
+// ---------- 共通 ----------
+
+function fmtTime(iso) {
+  const d = new Date(iso);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return sameDay
+    ? d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' })
+    : d.toLocaleString('ja-JP', { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+}
+
+let toastTimer = null;
+function toast(msg, isError = false) {
+  const t = $('toast');
+  t.textContent = msg;
+  t.classList.toggle('error', isError);
+  t.classList.add('show');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), isError ? 5000 : 2500);
+}
+
+function fail(e) {
+  console.error(e);
+  toast(e.message || String(e), true);
+}
+
+function li(className, text) {
+  return Object.assign(document.createElement('li'), { className, textContent: text });
+}
+
+function button(text, onClick, className = '') {
+  const b = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className });
+  b.addEventListener('click', () => Promise.resolve().then(onClick).catch(fail));
+  return b;
+}
+
+function listItem(title, meta, buttons, current = false) {
+  const item = li(current ? 'current' : '', '');
+  const main = document.createElement('div');
+  main.className = 'item-main';
+  main.innerHTML = '<div class="item-title"></div><div class="item-meta"></div>';
+  main.firstChild.textContent = title;
+  main.lastChild.textContent = meta;
+  item.append(main, ...buttons);
+  return item;
+}
+
+function isEmptyProject(p) {
+  const r = p.reports || {};
+  return !p.title && !p.memo && !r.x && !r.narouTitle && !r.narouBody
+    && p.episodes.length === 1 && !p.episodes[0].title && !p.episodes[0].body && !p.episodes[0].plot;
+}
+
+function totalChars(p) {
+  return p.episodes.reduce((n, e) => n + countChars(e.body).all, 0);
+}
+
+function updateStatus() {
+  const parts = [];
+  if (!db.persistent) parts.push('⚠ この環境では端末に保存できません');
+  else if (dirty) parts.push('編集中…');
+  else if (lastSavedAt) parts.push('端末に自動保存 ' + fmtTime(lastSavedAt));
+  parts.push('投稿先: ' + SITES[project.site].short);
+  if (fileHandle) parts.push('ファイル: ' + fileHandle.name);
+  for (const p of providers) if (project.links?.[p.id]) parts.push(p.label + ' 連携');
+  $('status').textContent = parts.join(' ・ ');
+}
+
+function setCount(id, text) {
+  const { all, noSpace } = countChars(text);
+  $('count-' + id).textContent = noSpace === all ? `${all.toLocaleString()}字` : `${all.toLocaleString()}字（空白・改行除く ${noSpace.toLocaleString()}字）`;
+}
+
+function setXCount() {
+  const n = xLength(el.xText.value);
+  const c = $('count-x');
+  c.textContent = `${n}/280（全角換算 ${Math.ceil(n / 2)}/140字）`;
+  c.classList.toggle('over', n > 280);
+}
+
+function updateCounts() {
+  setCount('novel-title', el.novelTitle.value);
+  setCount('ep-title', el.epTitle.value);
+  setCount('foreword', el.foreword.value);
+  setCount('body', el.body.value);
+  setCount('afterword', el.afterword.value);
+  setCount('plot', el.plot.value);
+  setCount('memo', el.memo.value);
+  setCount('narou-report-title', el.nrTitle.value);
+  setCount('narou-report-body', el.nrBody.value);
+  setXCount();
+}
+
+// ---------- 自動保存 ----------
+
+async function flush() {
+  if (!dirty || !project) return;
+  clearTimeout(saveTimer);
+  dirty = false;
+  try {
+    await db.put(project);
+    lastSavedAt = project.updatedAt;
+  } catch (e) {
+    dirty = true;
+    fail(e);
+  }
+  updateStatus();
+}
+
+function changed() {
+  project.updatedAt = new Date().toISOString();
+  dirty = true;
+  updateStatus();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, AUTOSAVE_MS);
+}
+
+// 入力欄 → 作品データ
+const bindings = [
+  [el.novelTitle, (v) => { project.title = v; }],
+  [el.epTitle, (v) => { episode().title = v; renderEpisodeList(); }],
+  [el.foreword, (v) => { episode().foreword = v; }],
+  [el.body, (v) => { episode().body = v; }],
+  [el.afterword, (v) => { episode().afterword = v; }],
+  [el.plot, (v) => { episode().plot = v; }],
+  [el.memo, (v) => { project.memo = v; }],
+  [el.narouUrl, (v) => { project.narouUrl = v.trim(); }],
+  [el.alphaUrl, (v) => { project.alphaUrl = v.trim(); }],
+  [el.xText, (v) => { project.reports.x = v; }],
+  [el.nrTitle, (v) => { project.reports.narouTitle = v; }],
+  [el.nrBody, (v) => { project.reports.narouBody = v; }],
+];
+
+// ---------- 画面表示 ----------
+
+function renderEpisodeList() {
+  const list = $('episode-list');
+  list.replaceChildren();
+  project.episodes.forEach((ep, i) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button' });
+    b.dataset.ep = i;
+    b.innerHTML = '<span class="ep-num"></span><span class="ep-title"></span>';
+    b.firstChild.textContent = episodeLabel(i);
+    b.lastChild.textContent = ep.title || '（無題）';
+    if (view === 'episode' && i === epIndex) b.classList.add('active');
+    const del = Object.assign(document.createElement('button'), {
+      type: 'button', className: 'ep-delete', textContent: '削除', title: `${episodeLabel(i)}を削除`,
+    });
+    del.dataset.epDelete = i;
+    const item = document.createElement('li');
+    item.append(b, del);
+    list.append(item);
+  });
+}
+
+function showEpisode() {
+  const ep = episode();
+  el.epTitle.value = ep.title;
+  el.foreword.value = ep.foreword;
+  el.body.value = ep.body;
+  el.afterword.value = ep.afterword;
+  el.plot.value = ep.plot;
+  // 前書き・後書きは中身があるときだけ開いておく
+  $('foreword-box').open = !!ep.foreword;
+  $('afterword-box').open = !!ep.afterword;
+  $('ep-label').textContent = `${episodeLabel(epIndex)} エピソードタイトル`;
+  updateCounts();
+}
+
+// 投稿先に合わせて、使える機能（ボタン・前書き・後書き）を切り替える
+function applySite() {
+  document.body.dataset.site = project.site;
+  $('site-badge').textContent = SITES[project.site].label + 'モード';
+  el.body.placeholder = project.site === 'narou'
+    ? '本文\n\nみてみんの画像URL（https://〜.mitemin.net/i〜/）を貼り付けると、挿絵タグに自動で変わります'
+    : '本文';
+}
+
+function setView(next) {
+  view = next;
+  for (const v of ['episode', 'memo', 'report']) $('view-' + v).hidden = v !== view;
+  document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
+  if (view === 'report') renderReportView();
+  renderEpisodeList();
+  document.body.classList.remove('drawer-open');
+}
+
+function selectEpisode(i) {
+  epIndex = Math.max(0, Math.min(i, project.episodes.length - 1));
+  prefs.set('ep:' + project.id, epIndex);
+  showEpisode();
+  setView('episode');
+}
+
+function showProject(p, handle = null) {
+  project = normalize(p);
+  fileHandle = handle;
+  el.novelTitle.value = project.title;
+  el.site.value = project.site;
+  el.memo.value = project.memo;
+  el.narouUrl.value = project.narouUrl;
+  el.alphaUrl.value = project.alphaUrl;
+  el.xText.value = project.reports.x;
+  el.nrTitle.value = project.reports.narouTitle;
+  el.nrBody.value = project.reports.narouBody;
+  epIndex = Math.min(prefs.get('ep:' + project.id, 0), project.episodes.length - 1);
+  lastSavedAt = project.updatedAt;
+  dirty = false;
+  prefs.set('currentId', project.id);
+  applySite();
+  showEpisode();
+  setView('episode');
+  updateStatus();
+}
+
+async function switchTo(p, handle = null) {
+  await flush();
+  // 何も書いていない作品は一覧に残さない
+  if (project && p.id !== project.id && isEmptyProject(project) && !Object.keys(project.links || {}).length) {
+    await db.remove(project.id);
+  }
+  await db.put(p);
+  showProject(p, handle);
+}
+
+// ---------- エピソード操作 ----------
+
+function addEpisode() {
+  project.episodes.push(newEpisode());
+  changed();
+  selectEpisode(project.episodes.length - 1);
+  el.epTitle.focus();
+}
+
+function moveEpisode(delta) {
+  const to = epIndex + delta;
+  if (to < 0 || to >= project.episodes.length) return;
+  const eps = project.episodes;
+  [eps[epIndex], eps[to]] = [eps[to], eps[epIndex]];
+  changed();
+  selectEpisode(to);
+}
+
+// 間違って消さないよう、2回確認する
+function deleteEpisode(index = epIndex) {
+  const ep = project.episodes[index];
+  const name = `${episodeLabel(index)}「${ep.title || '無題'}」`;
+  const size = countChars(ep.body).all;
+  const last = project.episodes.length === 1;
+  if (!confirm(last ? `${name}の内容を消しますか？` : `${name}を削除しますか？`)) return;
+  if (!confirm(`【最終確認】本当に${name}を削除しますか？\n本文 ${size.toLocaleString()}字が消え、元に戻せません。`)) return;
+  if (last) project.episodes[0] = newEpisode();
+  else project.episodes.splice(index, 1);
+  changed();
+  const next = index < epIndex ? epIndex - 1 : Math.min(epIndex, project.episodes.length - 1);
+  if (view === 'episode') selectEpisode(next);
+  else { epIndex = next; renderEpisodeList(); }
+  toast(`${name}を削除しました`);
+}
+
+function changeSite(site) {
+  const prev = project.site;
+  project.site = site;
+  changed();
+  applySite();
+  const target = SITES[site].label;
+  const fields = ['foreword', 'body', 'afterword'];
+  const needs = project.episodes.some((e) => fields.some((f) => convertRuby(site, e[f]) !== e[f]));
+  if (needs && confirm(`ルビ・傍点を${target}の書き方に変換しますか？\n（「キャンセル」なら原稿はそのままで、コピー時だけ変換されます）`)) {
+    for (const e of project.episodes) for (const f of fields) e[f] = convertRuby(site, e[f]);
+    showEpisode();
+    toast(`${target}モードにして、ルビ・傍点を変換しました`);
+  } else if (prev !== site) {
+    const hidden = site === 'alpha' && project.episodes.some((e) => e.foreword || e.afterword);
+    toast(`${target}モードにしました` + (hidden ? '（前書き・後書きは非表示。内容は残っています）' : ''));
+  }
+  updateStatus();
+}
+
+// ---------- 作品一覧 ----------
+
+async function allProjects() {
+  return (await db.all()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+}
+
+async function createProject() {
+  await flush();
+  if (isEmptyProject(project)) { el.novelTitle.focus(); return; }
+  await switchTo(newProject({ site: project.site }));
+  el.novelTitle.focus();
+  toast('新しい作品を作成しました');
+}
+
+async function renderLibrary() {
+  const list = $('library-list');
+  list.replaceChildren();
+  const projects = await allProjects();
+  if (!projects.length) { list.append(li('empty', '作品がありません')); return; }
+  for (const p of projects) {
+    const current = p.id === project.id;
+    const buttons = [];
+    if (!current) buttons.push(button('開く', async () => { $('library-dialog').close(); await switchTo(p); }));
+    buttons.push(button('削除', async () => {
+      if (!confirm(`「${p.title || '無題'}」をこの端末から削除しますか？\n（クラウドやファイルに保存したものは消えません）`)) return;
+      await db.remove(p.id);
+      if (current) {
+        dirty = false;
+        const next = (await allProjects())[0] || newProject();
+        await db.put(next);
+        showProject(next);
+      }
+      renderLibrary();
+    }, 'danger'));
+    const meta = `${p.episodes.length}話 ・ 本文 ${totalChars(p).toLocaleString()}字 ・ ${fmtTime(p.updatedAt)}`;
+    list.append(listItem(p.title || '（無題）', meta, buttons, current));
+  }
+}
+
+async function openLibrary() {
+  await flush();
+  await renderLibrary();
+  $('library-dialog').showModal();
+}
+
+// 読み込んだ内容を端末の作品に入れる。同じ作品（タイトルと作成日時が同じ）があればそれを更新する
+async function importContent(content, links = {}) {
+  const projects = await allProjects();
+  const same = projects.find((p) => p.createdAt === content.createdAt && p.title === content.title)
+    || projects.find((p) => Object.entries(links).some(([k, v]) => p.links?.[k] === v));
+  if (same) {
+    const localNewer = content.updatedAt && same.updatedAt > content.updatedAt;
+    if (localNewer && serialize(same) !== serialize({ ...same, ...content })
+      && !confirm('この端末の内容の方が新しいようです。\n読み込んだ内容で上書きしますか？\n（「キャンセル」で端末の内容を開きます）')) {
+      return { ...same, links: { ...same.links, ...links } };
+    }
+    return normalize({ ...same, ...content, id: same.id, links: { ...same.links, ...links } });
+  }
+  if (isEmptyProject(project) && !Object.keys(project.links || {}).length) {
+    return normalize({ ...content, id: project.id, links });
+  }
+  return normalize({ ...newProject(), ...content, links });
+}
+
+// ---------- ローカルファイル ----------
+
+async function fileOpen() {
+  const r = await localFile.open();
+  if (!r) return;
+  await switchTo(await importContent(parse(r.text, r.name)), r.handle);
+  toast(`「${r.name}」を開きました`);
+}
+
+async function fileSave() {
+  if (!fileHandle) return fileSaveAs();
+  await flush();
+  await localFile.write(fileHandle, serialize(project));
+  toast(`「${fileHandle.name}」に保存しました`);
+  updateStatus();
+}
+
+async function fileSaveAs() {
+  await flush();
+  const r = await localFile.saveAs(serialize(project), fileName(project.title, '.json'), WORK_TYPES, 'application/json');
+  if (!r) return;
+  if (r === 'downloaded') {
+    toast('ファイルを書き出しました（ダウンロード／「ファイル」アプリ）');
+  } else {
+    fileHandle = r;
+    toast(`「${r.name}」に保存しました`);
+  }
+  updateStatus();
+}
+
+async function exportEpisode() {
+  const ep = episode();
+  if (!ep.body) { toast('本文は空です'); return; }
+  const name = fileName(`${project.title || '無題'}_${episodeLabel(epIndex)}`, '.txt');
+  const r = await localFile.saveAs(convert(project.site, ep.body), name, TEXT_TYPES, 'text/plain');
+  if (r) toast(`${episodeLabel(epIndex)}を書き出しました（${SITES[project.site].short}用）`);
+}
+
+async function exportAll() {
+  const text = project.episodes
+    .map((e, i) => `${episodeLabel(i)}　${e.title}\n\n${convert(project.site, e.body)}`)
+    .join('\n\n――――――――――\n\n');
+  const head = project.title ? project.title + '\n\n' : '';
+  const r = await localFile.saveAs(head + text, fileName(project.title, '.txt'), TEXT_TYPES, 'text/plain');
+  if (r) toast(`全${project.episodes.length}話を書き出しました（${SITES[project.site].short}用）`);
+}
+
+// ---------- クラウド ----------
+
+async function cloudSave(p) {
+  await flush();
+  const id = await p.save(serialize(project), fileName(project.title, '.json'), project.links?.[p.id]);
+  project.links = { ...project.links, [p.id]: id };
+  await db.put(project);
+  toast(`${p.label}に保存しました`);
+  updateStatus();
+}
+
+async function cloudOpen(p) {
+  await flush();
+  const dialog = $('cloud-dialog');
+  const list = $('cloud-list');
+  $('cloud-dialog-title').textContent = p.label + 'から開く';
+  list.replaceChildren(li('empty', '読み込み中…'));
+  dialog.showModal();
+  let files;
+  try {
+    files = await p.list();
+  } catch (e) {
+    dialog.close();
+    throw e;
+  }
+  list.replaceChildren();
+  if (!files.length) { list.append(li('empty', `${p.label}に保存した作品はまだありません`)); return; }
+  for (const f of files) {
+    const open = button('開く', async () => {
+      dialog.close();
+      const content = parse(await p.load(f.id), f.name);
+      await switchTo(await importContent(content, { [p.id]: f.id }));
+      toast(`${p.label}から「${content.title || '無題'}」を開きました`);
+    });
+    list.append(listItem(f.name.replace(/\.json$/i, ''), '更新 ' + fmtTime(f.modifiedTime), [open]));
+  }
+}
+
+function buildCloudMenu() {
+  const list = $('cloud-menu-list');
+  list.replaceChildren();
+  providers.forEach((p, i) => {
+    if (i) list.append(document.createElement('hr'));
+    list.append(Object.assign(document.createElement('div'), { className: 'menu-label', textContent: p.label }));
+    const add = (text, fn) => list.append(button(text, () => { closeMenus(); return fn(); }));
+    if (!p.isConfigured()) { add('接続の設定…', openSettings); return; }
+    add(`${p.label}に保存`, () => cloudSave(p));
+    add(`${p.label}から開く…`, () => cloudOpen(p));
+    if (p.isSignedIn()) add('ログアウト', () => { p.signOut(); toast(p.label + 'からログアウトしました'); });
+    else add('ログイン', async () => { await p.signIn(); toast(p.label + 'にログインしました'); });
+  });
+}
+
+// ---------- コピー・編集補助 ----------
+
+const copySources = {
+  'novel-title': () => ['小説タイトル', project.title],
+  'ep-title': () => ['エピソードタイトル', episode().title],
+  foreword: () => ['前書き', convert(project.site, episode().foreword)],
+  body: () => ['本文', convert(project.site, episode().body)],
+  afterword: () => ['後書き', convert(project.site, episode().afterword)],
+  plot: () => ['プロット', episode().plot],
+  memo: () => ['作品メモ', project.memo],
+  'x-text': () => ['X の投稿文', project.reports.x],
+  'narou-report-title': () => ['活動報告のタイトル', project.reports.narouTitle],
+  'narou-report-body': () => ['活動報告の本文', project.reports.narouBody],
+};
+
+async function writeClipboard(text) {
+  try {
+    await navigator.clipboard.writeText(text);
+    return true;
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    ta.setAttribute('readonly', '');
+    ta.style.cssText = 'position:fixed;top:0;left:0;opacity:0';
+    document.body.append(ta);
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand('copy');
+    ta.remove();
+    return ok;
+  }
+}
+
+async function copyField(key) {
+  const [label, text] = copySources[key]();
+  if (!text) { toast(label + 'は空です'); return; }
+  const ok = await writeClipboard(text);
+  if (!ok) { toast('コピーできませんでした', true); return; }
+  let msg = `${label}をコピーしました（${countChars(text).all.toLocaleString()}字）`;
+  if (key === 'body') {
+    msg = `${label}を${SITES[project.site].short}用にコピーしました（${countChars(text).all.toLocaleString()}字）`;
+    const images = countImages(episode().body);
+    if (project.site === 'alpha' && images) msg += `　※挿絵${images}か所は【挿絵】の位置に手で入れてください`;
+  }
+  toast(msg);
+}
+
+// 選択範囲を text に置き換える（「元に戻す」が効くよう execCommand を優先）
+function replaceSelection(target, text, start = target.selectionStart, end = target.selectionEnd) {
+  target.focus();
+  target.setSelectionRange(start, end);
+  if (!document.execCommand('insertText', false, text)) {
+    target.setRangeText(text, start, end, 'end');
+    target.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+}
+
+// 入力補助の対象：最後に触った 前書き／本文／後書き
+let editTarget = null;
+const target = () => editTarget || el.body;
+
+function insertRuby() {
+  const t = target();
+  const { selectionStart: s, selectionEnd: e } = t;
+  const sel = t.value.slice(s, e).replace(/\n/g, '');
+  if (project.site === 'narou' && [...sel].length > RUBY_LIMIT) {
+    toast(`なろうのルビは${RUBY_LIMIT}文字までです（選択 ${[...sel].length}文字）`, true);
+    return;
+  }
+  replaceSelection(t, ruby(project.site, sel, ''), s, e);
+  const caret = s + (sel ? rubyCaretOffset(project.site, sel) : 1);
+  t.setSelectionRange(caret, caret);
+}
+
+function insertDots() {
+  const t = target();
+  const { selectionStart: s, selectionEnd: e } = t;
+  if (s === e) { toast('傍点を付ける文字を選択してから押してください'); return; }
+  replaceSelection(t, dots(project.site, t.value.slice(s, e)), s, e);
+}
+
+function insertSymbol(sym) {
+  const t = target();
+  const { selectionStart: s, selectionEnd: e } = t;
+  // 「」などの対の記号は、選択した文字を囲む
+  const pair = sym.length === 2 && /^[「『（【]/.test(sym);
+  const sel = t.value.slice(s, e);
+  replaceSelection(t, pair ? sym[0] + sel + sym[1] : sym, s, e);
+  if (pair && !sel) t.setSelectionRange(s + 1, s + 1);
+}
+
+function runAutoIndent() {
+  const t = el.body;
+  const next = autoIndent(t.value);
+  if (next === t.value) { toast('字下げが必要な段落はありません'); return; }
+  if (!confirm('段落の先頭を一字下げますか？\n（「 などで始まる行、すでに字下げしてある行は除きます）')) return;
+  const lines = next.split('\n').filter((l, i) => l !== t.value.split('\n')[i]).length;
+  replaceSelection(t, next, 0, t.value.length);
+  t.setSelectionRange(0, 0);
+  t.scrollTop = 0;
+  toast(`${lines}か所を字下げしました（元に戻す：Ctrl+Z）`);
+}
+
+// ---------- 一括置換 ----------
+
+function replaceFields() {
+  return project.site === 'narou' ? ['foreword', 'body', 'afterword'] : ['body'];
+}
+
+function countMatches(from, scope) {
+  if (!from) return 0;
+  const eps = scope === 'all' ? project.episodes : [episode()];
+  return eps.reduce((n, e) => n + replaceFields().reduce((m, f) => m + e[f].split(from).length - 1, 0), 0);
+}
+
+function updateReplacePreview() {
+  const form = $('replace-form');
+  const n = countMatches(form.from.value, form.scope.value);
+  $('replace-preview').textContent = form.from.value ? `${n}か所見つかりました` : '';
+}
+
+function openReplace() {
+  const form = $('replace-form');
+  const t = target();
+  const sel = t.value.slice(t.selectionStart, t.selectionEnd);
+  form.from.value = sel.includes('\n') ? '' : sel;
+  form.to.value = '';
+  form.scope.value = 'episode';
+  updateReplacePreview();
+  $('replace-dialog').showModal();
+  form.from.focus();
+}
+
+function runReplace() {
+  const form = $('replace-form');
+  const { value: from } = form.from;
+  const to = form.to.value;
+  const n = countMatches(from, form.scope.value);
+  if (!n) { toast('置換する文字列が見つかりませんでした'); return; }
+  const eps = form.scope.value === 'all' ? project.episodes : [episode()];
+  for (const e of eps) for (const f of replaceFields()) e[f] = e[f].split(from).join(to);
+  changed();
+  showEpisode();
+  toast(`「${from}」を「${to}」に${n}か所置換しました`);
+}
+
+let imageCaret = [0, 0];
+function openImageDialog() {
+  if (project.site !== 'narou') return;
+  imageCaret = [el.body.selectionStart, el.body.selectionEnd];
+  const form = $('image-form');
+  form.url.value = '';
+  $('image-dialog').showModal();
+  form.url.focus();
+}
+
+function insertImage(value) {
+  const v = value.trim();
+  const tag = /^<i\d+\|\d+>$/.test(v) ? v : (hasMiteminUrl(v) ? miteminToTag(v).trim() : null);
+  if (!tag || !/^<i\d+\|\d+>$/.test(tag)) {
+    toast('みてみんの画像ページURL（https://〜.mitemin.net/i〜/）を入れてください', true);
+    return;
+  }
+  const [s, e] = imageCaret;
+  replaceSelection(el.body, tag, s, e);
+  toast(`挿絵タグ ${tag} を入れました`);
+}
+
+// みてみんの挿絵はなろうのみ
+function onBodyPaste(e) {
+  if (project.site !== 'narou') return;
+  const text = e.clipboardData?.getData('text/plain');
+  if (!text || !hasMiteminUrl(text)) return;
+  e.preventDefault();
+  replaceSelection(el.body, miteminToTag(text));
+  toast('みてみんのURLを挿絵タグに変換しました');
+}
+
+function selectTab(name) {
+  document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
+  document.querySelectorAll('[data-pane]').forEach((p) => p.classList.toggle('active', p.dataset.pane === name));
+}
+
+// ---------- 活動報告・ひな型 ----------
+
+const KIND_LABEL = { x: 'X', narou: '活動報告', afterword: '後書き' };
+const KINDS = Object.keys(KIND_LABEL);
+
+function templates() {
+  const stored = prefs.get('templates', null);
+  if (!stored) return structuredClone(DEFAULT_TEMPLATES);
+  // 後から増えた種類の初期ひな型を一度だけ足す
+  for (const kind of KINDS) {
+    if (prefs.get('seeded:' + kind, false)) continue;
+    if (!stored.some((t) => t.kind === kind)) stored.push(...structuredClone(DEFAULT_TEMPLATES.filter((t) => t.kind === kind)));
+    prefs.set('seeded:' + kind, true);
+    prefs.set('templates', stored);
+  }
+  return stored;
+}
+
+function saveTemplates(list) {
+  prefs.set('templates', list);
+  renderTemplateSelects();
+}
+
+function renderTemplateSelects() {
+  for (const kind of KINDS) {
+    const sel = $('tpl-' + kind);
+    const keep = sel.value;
+    sel.replaceChildren();
+    const list = templates().filter((t) => t.kind === kind);
+    if (!list.length) sel.append(new Option('（ひな型なし）', ''));
+    for (const t of list) sel.append(new Option(t.name, t.id));
+    if (list.some((t) => t.id === keep)) sel.value = keep;
+  }
+}
+
+function renderReportView() {
+  const sel = el.reportEpisode;
+  const keep = sel.value === '' ? project.episodes.length - 1 : Number(sel.value);
+  sel.replaceChildren();
+  project.episodes.forEach((e, i) => sel.append(new Option(`${episodeLabel(i)}　${e.title || '（無題）'}`, String(i))));
+  sel.value = String(Math.min(keep, project.episodes.length - 1));
+  renderTemplateSelects();
+  updateCounts();
+}
+
+function applyTemplate(kind) {
+  const t = templates().find((x) => x.id === $('tpl-' + kind).value);
+  if (!t) { toast('ひな型を選んでください'); return; }
+  if (kind === 'afterword') {
+    if (el.afterword.value && !confirm('今の後書きをひな型で置き換えますか？')) return;
+    $('afterword-box').open = true;
+    replaceSelection(el.afterword, fillTemplate(t.body, project, epIndex), 0, el.afterword.value.length);
+    toast(`ひな型「${t.name}」を差し込みました`);
+    return;
+  }
+  const index = Number(el.reportEpisode.value) || 0;
+  if (kind === 'x') {
+    if (el.xText.value && !confirm('今の投稿文をひな型で置き換えますか？')) return;
+    el.xText.value = fillTemplate(t.body, project, index);
+    el.xText.dispatchEvent(new Event('input', { bubbles: true }));
+  } else {
+    if ((el.nrTitle.value || el.nrBody.value) && !confirm('今の活動報告をひな型で置き換えますか？')) return;
+    el.nrTitle.value = fillTemplate(t.title || '', project, index);
+    el.nrBody.value = fillTemplate(t.body, project, index);
+    el.nrTitle.dispatchEvent(new Event('input', { bubbles: true }));
+    el.nrBody.dispatchEvent(new Event('input', { bubbles: true }));
+  }
+  toast(`ひな型「${t.name}」を差し込みました`);
+}
+
+let editingTemplate = null;
+function editTemplate(t) {
+  editingTemplate = t;
+  const form = $('template-edit-form');
+  $('template-edit-heading').textContent = `${KIND_LABEL[t.kind]}のひな型`;
+  $('template-edit-title').hidden = t.kind !== 'narou';
+  form.name.value = t.name;
+  form.title.value = t.title || '';
+  form.body.value = t.body;
+  $('template-edit-dialog').showModal();
+}
+
+// 今の文章をもとに新しいひな型を作る
+function templateFromCurrent(kind) {
+  const t = {
+    x: { kind, name: '', title: '', body: el.xText.value },
+    narou: { kind, name: '', title: el.nrTitle.value, body: el.nrBody.value },
+    afterword: { kind, name: '', title: '', body: el.afterword.value },
+  }[kind];
+  editTemplate({ id: null, ...t });
+}
+
+function saveEditedTemplate() {
+  const form = $('template-edit-form');
+  const t = { ...editingTemplate, name: form.name.value.trim() || '無題のひな型', title: form.title.value, body: form.body.value };
+  const list = templates();
+  if (t.id) list[list.findIndex((x) => x.id === t.id)] = t;
+  else list.push({ ...t, id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) });
+  saveTemplates(list);
+  if ($('templates-dialog').open) renderTemplateList();
+  toast(`ひな型「${t.name}」を保存しました`);
+}
+
+function renderTemplateList() {
+  const list = $('template-list');
+  list.replaceChildren();
+  const all = templates();
+  for (const kind of KINDS) {
+    const add = button(`＋ ${KIND_LABEL[kind]}のひな型を追加`, () => editTemplate({ id: null, kind, name: '', title: '', body: '' }));
+    const head = li('', '');
+    head.append(add);
+    list.append(head);
+    for (const t of all.filter((x) => x.kind === kind)) {
+      const edit = button('編集', () => editTemplate(t));
+      const del = button('削除', () => {
+        if (!confirm(`ひな型「${t.name}」を削除しますか？`)) return;
+        saveTemplates(templates().filter((x) => x.id !== t.id));
+        renderTemplateList();
+      }, 'danger');
+      list.append(listItem(`${KIND_LABEL[kind]}：${t.name}`, (t.title ? t.title + ' / ' : '') + t.body.replace(/\n/g, ' ').slice(0, 60), [edit, del]));
+    }
+  }
+}
+
+function openX() {
+  const text = project.reports.x;
+  if (!text) { toast('投稿文が空です'); return; }
+  window.open('https://x.com/intent/post?text=' + encodeURIComponent(text), '_blank', 'noopener');
+}
+
+// ---------- 設定 ----------
+
+function applyPrefs() {
+  document.documentElement.dataset.font = prefs.get('font', 'serif');
+  document.documentElement.style.setProperty('--body-size', prefs.get('fontSize', '18') + 'px');
+}
+
+function openSettings() {
+  const form = $('settings-form');
+  form.font.value = prefs.get('font', 'serif');
+  form.fontSize.value = prefs.get('fontSize', '18');
+  const box = $('provider-settings');
+  box.querySelectorAll(':scope > :not(legend)').forEach((n) => n.remove());
+  for (const p of providers) {
+    for (const s of p.settings) {
+      const label = document.createElement('label');
+      label.textContent = s.label;
+      label.append(Object.assign(document.createElement('input'), {
+        type: 'text', name: s.key, value: prefs.get(s.key, ''), placeholder: s.placeholder || '', autocomplete: 'off', spellcheck: false,
+      }));
+      box.append(label);
+      if (s.hint) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: s.hint }));
+    }
+  }
+  $('settings-dialog').showModal();
+}
+
+function saveSettings() {
+  const form = $('settings-form');
+  prefs.set('font', form.font.value);
+  prefs.set('fontSize', form.fontSize.value);
+  for (const p of providers) {
+    for (const s of p.settings) {
+      const v = form.elements[s.key].value.trim();
+      if (v !== prefs.get(s.key, '')) { prefs.set(s.key, v); p.signOut(); }
+    }
+    p.preload();
+  }
+  applyPrefs();
+  toast('設定を保存しました');
+}
+
+// ---------- イベント ----------
+
+function closeMenus(except) {
+  document.querySelectorAll('details.menu[open]').forEach((d) => { if (d !== except) d.open = false; });
+}
+
+function quickSave() {
+  const p = providers.find((x) => project.links?.[x.id] && x.isConfigured());
+  if (p) return cloudSave(p);
+  return fileSave();
+}
+
+const actions = {
+  'toggle-drawer': () => document.body.classList.toggle('drawer-open'),
+  library: openLibrary,
+  'new-project': createProject,
+  settings: openSettings,
+  'file-open': fileOpen,
+  'file-save': fileSave,
+  'file-save-as': fileSaveAs,
+  'export-episode': exportEpisode,
+  'export-all': exportAll,
+  'add-episode': addEpisode,
+  'move-up': () => moveEpisode(-1),
+  'move-down': () => moveEpisode(1),
+  'delete-episode': () => deleteEpisode(),
+  'manage-templates': () => { renderTemplateList(); $('templates-dialog').showModal(); },
+  'open-x': openX,
+  'auto-indent': runAutoIndent,
+  replace: openReplace,
+};
+
+const inserts = { ruby: insertRuby, dots: insertDots, image: openImageDialog };
+
+// フォーム内のキャンセルボタン（type="button" value="cancel"）でダイアログを閉じる
+function bindDialog(id, onOk) {
+  const dialog = $(id);
+  dialog.addEventListener('click', (e) => {
+    if (e.target.matches('button[value="cancel"]')) dialog.close('cancel');
+  });
+  // 決定ボタンで送信された時点で処理する（close イベントは描画のタイミングまで遅れることがあるため）
+  if (onOk) {
+    dialog.querySelector('form').addEventListener('submit', (e) => {
+      if (['ok', 'save'].includes(e.submitter?.value)) Promise.resolve().then(onOk).catch(fail);
+    });
+  }
+}
+
+function bindEvents() {
+  for (const [input, apply] of bindings) {
+    input.addEventListener('input', () => {
+      apply(input.value);
+      changed();
+      updateCounts();
+    });
+  }
+  el.site.addEventListener('change', () => changeSite(el.site.value));
+  el.body.addEventListener('paste', onBodyPaste);
+  for (const t of [el.foreword, el.body, el.afterword]) t.addEventListener('focus', () => { editTarget = t; });
+
+  $('symbol-list').append(...SYMBOLS.map((s) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: s });
+    b.dataset.symbol = s;
+    return b;
+  }));
+
+  document.addEventListener('click', (e) => {
+    const b = e.target.closest('button, .drawer-backdrop');
+    const d = b?.dataset || {};
+    if (d.action) {
+      closeMenus();
+      Promise.resolve().then(actions[d.action]).catch(fail);
+    } else if (d.copy) {
+      copyField(d.copy).catch(fail);
+    } else if (d.insert) {
+      inserts[d.insert]();
+    } else if (d.tab) {
+      selectTab(d.tab);
+    } else if (d.view) {
+      setView(d.view);
+    } else if (d.ep !== undefined) {
+      selectEpisode(Number(d.ep));
+    } else if (d.epDelete !== undefined) {
+      deleteEpisode(Number(d.epDelete));
+    } else if (d.symbol) {
+      insertSymbol(d.symbol);
+      closeMenus();
+    } else if (d.tplApply) {
+      applyTemplate(d.tplApply);
+    } else if (d.tplSave) {
+      templateFromCurrent(d.tplSave);
+    }
+    if (!e.target.closest('details.menu')) closeMenus();
+  });
+  // 入力補助のボタンを押しても本文の選択範囲が外れないようにする
+  document.querySelectorAll('[data-insert], [data-symbol], .editor-tools summary')
+    .forEach((b) => b.addEventListener('pointerdown', (e) => e.preventDefault()));
+
+  const rf = $('replace-form');
+  for (const name of ['from', 'scope']) rf.elements[name].addEventListener('input', updateReplacePreview);
+
+  document.querySelectorAll('details.menu').forEach((d) => d.addEventListener('toggle', () => {
+    if (!d.open) return;
+    closeMenus(d);
+    if (d.id === 'cloud-menu') buildCloudMenu();
+  }));
+
+  bindDialog('settings-dialog', saveSettings);
+  bindDialog('image-dialog', () => insertImage($('image-form').url.value));
+  bindDialog('template-edit-dialog', saveEditedTemplate);
+  bindDialog('replace-dialog', runReplace);
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+      e.preventDefault();
+      quickSave().catch(fail);
+    } else if (e.key === 'Escape') {
+      closeMenus();
+      document.body.classList.remove('drawer-open');
+    }
+  });
+
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
+  window.addEventListener('pagehide', () => { flush(); });
+}
+
+// 旧形式（1作品＝1原稿）のデータを作品＋エピソード形式へ移す
+async function migrate() {
+  const old = await db.oldWorks();
+  if (!old.length) return;
+  for (const w of old) await db.put({ ...fromSingle(w), id: w.id, links: w.links || {} });
+  await db.clearOldWorks();
+}
+
+async function init() {
+  applyPrefs();
+  bindEvents();
+  selectTab('body');
+  $('template-vars').textContent = TEMPLATE_VARS.join(' ');
+  renderTemplateSelects();
+  providers.forEach((p) => p.preload());
+  await migrate();
+
+  let p = null;
+  const id = prefs.get('currentId');
+  if (id) p = await db.get(id);
+  if (!p) p = (await allProjects())[0];
+  if (!p) { p = newProject(); await db.put(p); }
+  showProject(p);
+
+  if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
+    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker 登録失敗', e));
+  }
+}
+
+init().catch(fail);
