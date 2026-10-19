@@ -14,6 +14,8 @@ import { providers } from './providers/index.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
+// 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
+const APP_VERSION = '2026.10.19-10';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1367,7 +1369,11 @@ function bindEvents() {
     const d = b?.dataset || {};
     if (d.action) {
       closeMenus();
-      Promise.resolve().then(actions[d.action]).catch(fail);
+      if (!actions[d.action]) {
+        toast(`このボタンの処理が見つかりません（${d.action}）。Ctrl+Shift+R で再読み込みしてください`, true);
+      } else {
+        Promise.resolve().then(actions[d.action]).catch(fail);
+      }
     } else if (d.copy) {
       copyField(d.copy).catch(fail);
     } else if (d.insert) {
@@ -1474,7 +1480,12 @@ async function migrate() {
   await db.clearOldWorks();
 }
 
+// 思わぬエラーは画面に出す（ボタンが「無反応」に見えないように）
+window.addEventListener('error', (e) => toast('エラー：' + (e.message || '不明なエラー'), true));
+window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.reason?.message || String(e.reason)), true));
+
 async function init() {
+  $('app-version').textContent = `エディターの版：${APP_VERSION}`;
   applyPrefs();
   bindEvents();
   selectTab('body');
