@@ -90,4 +90,15 @@ export const prefs = {
   set(key, value) {
     try { localStorage.setItem('novel-editor:' + key, JSON.stringify(value)); } catch { /* 保存できなくても続行 */ }
   },
+  // すべての設定値（バックアップ用）
+  entries() {
+    const out = {};
+    try {
+      for (let i = 0; i < localStorage.length; i++) {
+        const k = localStorage.key(i);
+        if (k.startsWith('novel-editor:')) out[k.slice('novel-editor:'.length)] = JSON.parse(localStorage.getItem(k));
+      }
+    } catch { /* 読めなければ空 */ }
+    return out;
+  },
 };

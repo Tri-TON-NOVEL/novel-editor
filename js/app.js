@@ -1,7 +1,9 @@
 import { db, prefs } from './db.js';
 import {
-  newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars, episodeLabel,
+  newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars, episodeName,
 } from './format.js';
+import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
+import { makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence } from './backup.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertRuby, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES,
@@ -15,12 +17,12 @@ const AUTOSAVE_MS = 600;
 const el = {
   novelTitle: $('novel-title'),
   site: $('site'),
+  synopsis: $('synopsis'),
   epTitle: $('ep-title'),
   foreword: $('foreword'),
   body: $('body'),
   afterword: $('afterword'),
   plot: $('plot'),
-  memo: $('memo'),
   narouUrl: $('narou-url'),
   alphaUrl: $('alpha-url'),
   xText: $('x-text'),
@@ -31,7 +33,8 @@ const el = {
 
 let project = null;     // 編集中の作品
 let epIndex = 0;        // 編集中のエピソード
-let view = 'episode';   // 'episode' | 'memo' | 'report'
+let view = 'episode';   // VIEWS のいずれか
+const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'report'];
 let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
 let saveTimer = null;
 let dirty = false;
@@ -87,7 +90,8 @@ function listItem(title, meta, buttons, current = false) {
 
 function isEmptyProject(p) {
   const r = p.reports || {};
-  return !p.title && !p.memo && !r.x && !r.narouTitle && !r.narouBody
+  return !p.title && !p.synopsis && !r.x && !r.narouTitle && !r.narouBody
+    && !p.chapters.some((c) => c.plot) && !p.world.items.length && !p.characters.items.length
     && p.episodes.length === 1 && !p.episodes[0].title && !p.episodes[0].body && !p.episodes[0].plot;
 }
 
@@ -120,12 +124,12 @@ function setXCount() {
 
 function updateCounts() {
   setCount('novel-title', el.novelTitle.value);
+  setCount('synopsis', el.synopsis.value);
   setCount('ep-title', el.epTitle.value);
   setCount('foreword', el.foreword.value);
   setCount('body', el.body.value);
   setCount('afterword', el.afterword.value);
   setCount('plot', el.plot.value);
-  setCount('memo', el.memo.value);
   setCount('narou-report-title', el.nrTitle.value);
   setCount('narou-report-body', el.nrBody.value);
   setXCount();
@@ -158,12 +162,12 @@ function changed() {
 // 入力欄 → 作品データ
 const bindings = [
   [el.novelTitle, (v) => { project.title = v; }],
+  [el.synopsis, (v) => { project.synopsis = v; }],
   [el.epTitle, (v) => { episode().title = v; renderEpisodeList(); }],
   [el.foreword, (v) => { episode().foreword = v; }],
   [el.body, (v) => { episode().body = v; }],
   [el.afterword, (v) => { episode().afterword = v; }],
   [el.plot, (v) => { episode().plot = v; }],
-  [el.memo, (v) => { project.memo = v; }],
   [el.narouUrl, (v) => { project.narouUrl = v.trim(); }],
   [el.alphaUrl, (v) => { project.alphaUrl = v.trim(); }],
   [el.xText, (v) => { project.reports.x = v; }],
@@ -177,14 +181,11 @@ function renderEpisodeList() {
   const list = $('episode-list');
   list.replaceChildren();
   project.episodes.forEach((ep, i) => {
-    const b = Object.assign(document.createElement('button'), { type: 'button' });
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: episodeName(ep) });
     b.dataset.ep = i;
-    b.innerHTML = '<span class="ep-num"></span><span class="ep-title"></span>';
-    b.firstChild.textContent = episodeLabel(i);
-    b.lastChild.textContent = ep.title || '（無題）';
     if (view === 'episode' && i === epIndex) b.classList.add('active');
     const del = Object.assign(document.createElement('button'), {
-      type: 'button', className: 'ep-delete', textContent: '削除', title: `${episodeLabel(i)}を削除`,
+      type: 'button', className: 'ep-delete', textContent: '削除', title: `「${episodeName(ep)}」を削除`,
     });
     del.dataset.epDelete = i;
     const item = document.createElement('li');
@@ -203,7 +204,6 @@ function showEpisode() {
   // 前書き・後書きは中身があるときだけ開いておく
   $('foreword-box').open = !!ep.foreword;
   $('afterword-box').open = !!ep.afterword;
-  $('ep-label').textContent = `${episodeLabel(epIndex)} エピソードタイトル`;
   updateCounts();
 }
 
@@ -218,9 +218,12 @@ function applySite() {
 
 function setView(next) {
   view = next;
-  for (const v of ['episode', 'memo', 'report']) $('view-' + v).hidden = v !== view;
+  for (const v of VIEWS) $('view-' + v).hidden = v !== view;
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
   if (view === 'report') renderReportView();
+  if (view === 'outline') outline.render();
+  if (view === 'world') worldTable.render();
+  if (view === 'characters') characterTable.render();
   renderEpisodeList();
   document.body.classList.remove('drawer-open');
 }
@@ -237,7 +240,7 @@ function showProject(p, handle = null) {
   fileHandle = handle;
   el.novelTitle.value = project.title;
   el.site.value = project.site;
-  el.memo.value = project.memo;
+  el.synopsis.value = project.synopsis;
   el.narouUrl.value = project.narouUrl;
   el.alphaUrl.value = project.alphaUrl;
   el.xText.value = project.reports.x;
@@ -284,7 +287,7 @@ function moveEpisode(delta) {
 // 間違って消さないよう、2回確認する
 function deleteEpisode(index = epIndex) {
   const ep = project.episodes[index];
-  const name = `${episodeLabel(index)}「${ep.title || '無題'}」`;
+  const name = `「${episodeName(ep)}」`;
   const size = countChars(ep.body).all;
   const last = project.episodes.length === 1;
   if (!confirm(last ? `${name}の内容を消しますか？` : `${name}を削除しますか？`)) return;
@@ -386,6 +389,7 @@ async function importContent(content, links = {}) {
 async function fileOpen() {
   const r = await localFile.open();
   if (!r) return;
+  if (isBackup(r.text)) { openRestoreDialog(r.text, r.name); return; }
   await switchTo(await importContent(parse(r.text, r.name)), r.handle);
   toast(`「${r.name}」を開きました`);
 }
@@ -411,17 +415,68 @@ async function fileSaveAs() {
   updateStatus();
 }
 
+// ---------- 全体バックアップ・復元 ----------
+
+const BACKUP_REMIND_DAYS = 7;
+
+async function backupAll() {
+  await flush();
+  const { text, count } = await makeBackup();
+  const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
+  if (!r) return;
+  prefs.set('lastBackupAt', new Date().toISOString());
+  toast(`${count}作品と、ひな型・設定をバックアップしました`);
+}
+
+let pendingBackup = null;
+function openRestoreDialog(text, name = '') {
+  pendingBackup = parseBackup(text);
+  const when = pendingBackup.createdAt ? new Date(pendingBackup.createdAt).toLocaleString('ja-JP') : '不明';
+  const titles = pendingBackup.projects.map((p) => p.title || '（無題）');
+  $('restore-info').textContent =
+    `${name ? `「${name}」\n` : ''}作成日時：${when}\n作品：${titles.length}件（${titles.slice(0, 5).join('、')}${titles.length > 5 ? ' ほか' : ''}）\nひな型・設定も戻します。`;
+  $('restore-dialog').showModal();
+}
+
+async function restoreFromFile() {
+  const r = await localFile.open();
+  if (!r) return;
+  openRestoreDialog(r.text, r.name);
+}
+
+async function runRestore(mode) {
+  if (!pendingBackup) return;
+  if (mode === 'replace' && !confirm('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？')) return;
+  await flush();
+  const n = await restoreBackup(pendingBackup, mode);
+  pendingBackup = null;
+  prefs.set('restoredMessage', `${n}作品をバックアップから復元しました`);
+  location.reload();
+}
+
+async function remindBackup() {
+  const projects = await db.all();
+  if (!projects.some((p) => !isEmptyProject(normalize(p)))) return;
+  const last = prefs.get('lastBackupAt', null);
+  const days = last ? Math.floor((Date.now() - new Date(last)) / 86400000) : null;
+  if (days === null || days >= BACKUP_REMIND_DAYS) {
+    toast(days === null
+      ? 'まだ全体のバックアップがありません。「ファイル」→「すべてをバックアップ」で保存しておくと安心です'
+      : `最後のバックアップから${days}日たっています。「ファイル」→「すべてをバックアップ」をおすすめします`);
+  }
+}
+
 async function exportEpisode() {
   const ep = episode();
   if (!ep.body) { toast('本文は空です'); return; }
-  const name = fileName(`${project.title || '無題'}_${episodeLabel(epIndex)}`, '.txt');
+  const name = fileName(`${project.title || '無題'}_${ep.title || epIndex + 1}`, '.txt');
   const r = await localFile.saveAs(convert(project.site, ep.body), name, TEXT_TYPES, 'text/plain');
-  if (r) toast(`${episodeLabel(epIndex)}を書き出しました（${SITES[project.site].short}用）`);
+  if (r) toast(`「${episodeName(ep)}」を書き出しました（${SITES[project.site].short}用）`);
 }
 
 async function exportAll() {
   const text = project.episodes
-    .map((e, i) => `${episodeLabel(i)}　${e.title}\n\n${convert(project.site, e.body)}`)
+    .map((e) => `${e.title}\n\n${convert(project.site, e.body)}`)
     .join('\n\n――――――――――\n\n');
   const head = project.title ? project.title + '\n\n' : '';
   const r = await localFile.saveAs(head + text, fileName(project.title, '.txt'), TEXT_TYPES, 'text/plain');
@@ -485,12 +540,12 @@ function buildCloudMenu() {
 
 const copySources = {
   'novel-title': () => ['小説タイトル', project.title],
+  synopsis: () => ['あらすじ', project.synopsis],
   'ep-title': () => ['エピソードタイトル', episode().title],
   foreword: () => ['前書き', convert(project.site, episode().foreword)],
   body: () => ['本文', convert(project.site, episode().body)],
   afterword: () => ['後書き', convert(project.site, episode().afterword)],
   plot: () => ['プロット', episode().plot],
-  memo: () => ['作品メモ', project.memo],
   'x-text': () => ['X の投稿文', project.reports.x],
   'narou-report-title': () => ['活動報告のタイトル', project.reports.narouTitle],
   'narou-report-body': () => ['活動報告の本文', project.reports.narouBody],
@@ -513,6 +568,17 @@ async function writeClipboard(text) {
     return ok;
   }
 }
+
+async function copyText(text, label) {
+  const ok = await writeClipboard(text);
+  toast(ok ? `${label}をコピーしました` : 'コピーできませんでした', !ok);
+}
+
+// 全体プロット・設定・登場人物の画面
+const sectionOpts = { onChange: () => changed(), toast, copy: (t, label) => copyText(t, label).catch(fail) };
+const outline = chapterList($('chapters'), () => project.chapters, sectionOpts);
+const worldTable = categorizedTable($('world-tables'), () => project.world, { ...sectionOpts, columns: WORLD_COLUMNS, itemLabel: '項目' });
+const characterTable = categorizedTable($('character-tables'), () => project.characters, { ...sectionOpts, columns: CHARACTER_COLUMNS, itemLabel: '人物' });
 
 async function copyField(key) {
   const [label, text] = copySources[key]();
@@ -703,7 +769,7 @@ function renderReportView() {
   const sel = el.reportEpisode;
   const keep = sel.value === '' ? project.episodes.length - 1 : Number(sel.value);
   sel.replaceChildren();
-  project.episodes.forEach((e, i) => sel.append(new Option(`${episodeLabel(i)}　${e.title || '（無題）'}`, String(i))));
+  project.episodes.forEach((e, i) => sel.append(new Option(episodeName(e), String(i))));
   sel.value = String(Math.min(keep, project.episodes.length - 1));
   renderTemplateSelects();
   updateCounts();
@@ -794,6 +860,78 @@ function openX() {
   window.open('https://x.com/intent/post?text=' + encodeURIComponent(text), '_blank', 'noopener');
 }
 
+// ---------- リンク（よく使うサイト。全作品共通） ----------
+
+const DEFAULT_LINKS = [
+  { name: '小説家になろう', url: 'https://syosetu.com/' },
+  { name: 'アルファポリス', url: 'https://www.alphapolis.co.jp/' },
+  { name: 'みてみん', url: 'https://mitemin.net/' },
+];
+
+function links() {
+  return prefs.get('links', null) || DEFAULT_LINKS;
+}
+
+function normalizeUrl(url) {
+  const u = (url || '').trim();
+  if (!u) return '';
+  return /^https?:\/\//i.test(u) ? u : 'https://' + u;
+}
+
+// 別のウインドウで開く（iPad などウインドウを分けられない環境では新しいタブ）
+function openLink(url) {
+  window.open(normalizeUrl(url), '_blank', 'noopener,noreferrer,width=1200,height=900');
+}
+
+function buildLinksMenu() {
+  const list = $('links-menu-list');
+  list.replaceChildren();
+  const all = links();
+  if (!all.length) list.append(Object.assign(document.createElement('div'), { className: 'menu-label', textContent: 'リンクがありません' }));
+  for (const l of all) {
+    const b = button(l.name, () => { closeMenus(); openLink(l.url); });
+    b.title = l.url;
+    list.append(b);
+  }
+  list.append(document.createElement('hr'), button('リンクを編集…', () => {
+    closeMenus();
+    openSettings();
+    $('link-settings').scrollIntoView({ block: 'start' });
+  }));
+}
+
+let editingLinks = [];
+function renderLinkEditor() {
+  const list = $('link-list');
+  list.replaceChildren();
+  editingLinks.forEach((l, i) => {
+    const name = Object.assign(document.createElement('input'), { type: 'text', value: l.name, placeholder: 'サイト名', autocomplete: 'off' });
+    // type="url" だと「https://」なしの入力で保存できなくなるため text にする（保存時に補う）
+    const url = Object.assign(document.createElement('input'), { type: 'text', inputMode: 'url', value: l.url, placeholder: 'https://', autocomplete: 'off', spellcheck: false });
+    name.setAttribute('aria-label', 'サイト名');
+    url.setAttribute('aria-label', 'URL');
+    name.addEventListener('input', () => { l.name = name.value; });
+    url.addEventListener('input', () => { l.url = url.value; });
+    const move = (d) => {
+      const j = i + d;
+      if (j < 0 || j >= editingLinks.length) return;
+      [editingLinks[i], editingLinks[j]] = [editingLinks[j], editingLinks[i]];
+      renderLinkEditor();
+    };
+    const item = document.createElement('li');
+    item.append(name, url,
+      button('開く', () => { if (l.url.trim()) openLink(l.url); else toast('URL を入れてください'); }, 'tool'),
+      button('↑', () => move(-1), 'tool'),
+      button('↓', () => move(1), 'tool'),
+      button('削除', () => {
+        if (!confirm(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`)) return;
+        editingLinks.splice(i, 1);
+        renderLinkEditor();
+      }, 'tool danger'));
+    list.append(item);
+  });
+}
+
 // ---------- 設定 ----------
 
 function applyPrefs() {
@@ -818,6 +956,8 @@ function openSettings() {
       if (s.hint) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: s.hint }));
     }
   }
+  editingLinks = structuredClone(links());
+  renderLinkEditor();
   $('settings-dialog').showModal();
 }
 
@@ -825,6 +965,10 @@ function saveSettings() {
   const form = $('settings-form');
   prefs.set('font', form.font.value);
   prefs.set('fontSize', form.fontSize.value);
+  prefs.set('links', editingLinks
+    .map((l) => ({ name: l.name.trim(), url: normalizeUrl(l.url) }))
+    .filter((l) => l.url)
+    .map((l) => ({ ...l, name: l.name || l.url })));
   for (const p of providers) {
     for (const s of p.settings) {
       const v = form.elements[s.key].value.trim();
@@ -866,6 +1010,8 @@ const actions = {
   'open-x': openX,
   'auto-indent': runAutoIndent,
   replace: openReplace,
+  backup: backupAll,
+  restore: restoreFromFile,
 };
 
 const inserts = { ruby: insertRuby, dots: insertDots, image: openImageDialog };
@@ -882,6 +1028,45 @@ function bindDialog(id, onOk) {
       if (['ok', 'save'].includes(e.submitter?.value)) Promise.resolve().then(onOk).catch(fail);
     });
   }
+}
+
+// 本文とプロットの境目をドラッグして幅を変える（比率は端末に記憶）
+const SPLIT_DEFAULT = 2 / 3;
+function applySplit(ratio) {
+  const r = Math.min(0.85, Math.max(0.25, ratio));
+  const panes = document.querySelector('.panes');
+  panes.style.setProperty('--split-body', `${r}fr`);
+  panes.style.setProperty('--split-plot', `${1 - r}fr`);
+  return r;
+}
+
+function bindSplitter() {
+  const splitter = $('splitter');
+  const panes = document.querySelector('.panes');
+  applySplit(prefs.get('split', SPLIT_DEFAULT));
+  let ratio = null;
+  splitter.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    splitter.setPointerCapture(e.pointerId);
+    splitter.classList.add('dragging');
+    document.body.classList.add('resizing');
+    ratio = prefs.get('split', SPLIT_DEFAULT);
+  });
+  splitter.addEventListener('pointermove', (e) => {
+    if (ratio === null) return;
+    const rect = panes.getBoundingClientRect();
+    ratio = applySplit((e.clientX - rect.left) / rect.width);
+  });
+  const end = () => {
+    if (ratio === null) return;
+    prefs.set('split', ratio);
+    ratio = null;
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+  };
+  splitter.addEventListener('pointerup', end);
+  splitter.addEventListener('pointercancel', end);
+  splitter.addEventListener('dblclick', () => { prefs.set('split', applySplit(SPLIT_DEFAULT)); });
 }
 
 function bindEvents() {
@@ -941,12 +1126,24 @@ function bindEvents() {
     if (!d.open) return;
     closeMenus(d);
     if (d.id === 'cloud-menu') buildCloudMenu();
+    if (d.id === 'links-menu') buildLinksMenu();
   }));
 
   bindDialog('settings-dialog', saveSettings);
   bindDialog('image-dialog', () => insertImage($('image-form').url.value));
   bindDialog('template-edit-dialog', saveEditedTemplate);
   bindDialog('replace-dialog', runReplace);
+  bindDialog('restore-dialog');
+  $('add-link').addEventListener('click', () => {
+    editingLinks.push({ name: '', url: '' });
+    renderLinkEditor();
+    $('link-list').lastElementChild.querySelector('input').focus();
+  });
+  $('restore-form').addEventListener('submit', (e) => {
+    const mode = e.submitter?.value;
+    if (mode === 'merge' || mode === 'replace') runRestore(mode).catch(fail);
+  });
+  bindSplitter();
 
   document.addEventListener('keydown', (e) => {
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
@@ -985,6 +1182,15 @@ async function init() {
   if (!p) p = (await allProjects())[0];
   if (!p) { p = newProject(); await db.put(p); }
   showProject(p);
+
+  requestPersistence();
+  const restored = prefs.get('restoredMessage', null);
+  if (restored) {
+    prefs.set('restoredMessage', null);
+    toast(restored);
+  } else {
+    setTimeout(() => remindBackup().catch(() => {}), 1500);
+  }
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker 登録失敗', e));

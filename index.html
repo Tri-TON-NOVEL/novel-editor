@@ -29,11 +29,18 @@
         <hr>
         <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
         <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
+        <hr>
+        <button type="button" data-action="backup">すべてをバックアップ…</button>
+        <button type="button" data-action="restore">バックアップから復元…</button>
       </div>
     </details>
     <details class="menu" id="cloud-menu">
       <summary>クラウド</summary>
       <div class="menu-list" id="cloud-menu-list"></div>
+    </details>
+    <details class="menu" id="links-menu">
+      <summary>リンク</summary>
+      <div class="menu-list" id="links-menu-list"></div>
     </details>
     <button type="button" data-action="settings">設定</button>
   </nav>
@@ -42,6 +49,13 @@
 
 <div class="workspace">
   <aside class="sidebar" id="sidebar">
+    <label class="site-select">投稿先
+      <select id="site">
+        <option value="narou">小説家になろう</option>
+        <option value="alpha">アルファポリス</option>
+      </select>
+    </label>
+
     <section class="field">
       <div class="field-head">
         <label for="novel-title">小説タイトル</label>
@@ -51,15 +65,11 @@
       <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
     </section>
 
-    <label class="site-select">投稿先
-      <select id="site">
-        <option value="narou">小説家になろう</option>
-        <option value="alpha">アルファポリス</option>
-      </select>
-    </label>
-
     <nav class="nav">
-      <button type="button" class="nav-item" data-view="memo">作品メモ・設定</button>
+      <button type="button" class="nav-item" data-view="synopsis">あらすじ</button>
+      <button type="button" class="nav-item" data-view="outline">全体プロット</button>
+      <button type="button" class="nav-item" data-view="world">設定</button>
+      <button type="button" class="nav-item" data-view="characters">登場人物</button>
       <button type="button" class="nav-item" data-view="report">活動報告</button>
       <div class="nav-head">
         <span>エピソード</span>
@@ -93,18 +103,6 @@
 
       <div class="panes">
         <section class="field pane" data-pane="body">
-          <!-- 前書き（なろうのみ） -->
-          <details class="extra narou-only" id="foreword-box">
-            <summary>前書き <span class="count" id="count-foreword"></span></summary>
-            <div class="extra-body">
-              <div class="field-head">
-                <span class="spacer"></span>
-                <button type="button" class="copy" data-copy="foreword">コピー</button>
-              </div>
-              <textarea id="foreword" rows="3" spellcheck="false" placeholder="前書き（サブタイトルの前に表示されます）"></textarea>
-            </div>
-          </details>
-
           <div class="field-head">
             <label for="body">本文</label>
             <span class="count" id="count-body"></span>
@@ -125,6 +123,18 @@
           </div>
           <textarea id="body" spellcheck="false" placeholder="本文"></textarea>
 
+          <!-- 前書き（なろうのみ） -->
+          <details class="extra narou-only" id="foreword-box">
+            <summary>前書き <span class="count" id="count-foreword"></span></summary>
+            <div class="extra-body">
+              <div class="field-head">
+                <span class="spacer"></span>
+                <button type="button" class="copy" data-copy="foreword">コピー</button>
+              </div>
+              <textarea id="foreword" rows="3" spellcheck="false" placeholder="前書き（なろうではサブタイトルの前に表示されます）"></textarea>
+            </div>
+          </details>
+
           <!-- 後書き（なろうのみ） -->
           <details class="extra narou-only" id="afterword-box">
             <summary>後書き <span class="count" id="count-afterword"></span></summary>
@@ -140,6 +150,8 @@
           </details>
         </section>
 
+        <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="本文とプロットの幅を変える（ダブルクリックで元に戻す）" title="ドラッグで幅を変更／ダブルクリックで元に戻す"></div>
+
         <section class="field pane" data-pane="plot">
           <div class="field-head">
             <label for="plot">プロット</label>
@@ -152,30 +164,53 @@
       </div>
     </section>
 
-    <!-- 作品メモ・設定 -->
-    <section class="view" id="view-memo" hidden>
-      <section class="field">
-        <div class="field-head"><label for="narou-url">なろうの作品URL</label></div>
-        <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
-      </section>
-      <section class="field">
-        <div class="field-head"><label for="alpha-url">アルファポリスの作品URL</label></div>
-        <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
-      </section>
-      <p class="hint">URL は活動報告のひな型の {URL} {なろうURL} {アルファURL} に使われます。なろうは「作品URL＋話数」でエピソードのURLになります。</p>
+    <!-- あらすじ -->
+    <section class="view" id="view-synopsis" hidden>
       <section class="field grow">
         <div class="field-head">
-          <label for="memo">作品メモ（全体プロット・設定・登場人物など）</label>
-          <span class="count" id="count-memo"></span>
+          <label for="synopsis" class="view-title">あらすじ</label>
+          <span class="count" id="count-synopsis"></span>
           <span class="spacer"></span>
-          <button type="button" class="copy" data-copy="memo">コピー</button>
+          <button type="button" class="copy" data-copy="synopsis">コピー</button>
         </div>
-        <textarea id="memo" spellcheck="false" placeholder="全体プロット、世界観、登場人物など"></textarea>
+        <textarea id="synopsis" spellcheck="false" placeholder="作品のあらすじ（投稿サイトの「あらすじ」欄に貼り付ける文章）"></textarea>
       </section>
+    </section>
+
+    <!-- 全体プロット（章ごと） -->
+    <section class="view" id="view-outline" hidden>
+      <h1 class="view-title">全体プロット</h1>
+      <div class="chapter-editor" id="chapters"></div>
+    </section>
+
+    <!-- 設定（分類つきの表） -->
+    <section class="view scroll" id="view-world" hidden>
+      <h1 class="view-title">設定</h1>
+      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。</p>
+      <div class="tables" id="world-tables"></div>
+    </section>
+
+    <!-- 登場人物（分類つきの表） -->
+    <section class="view scroll" id="view-characters" hidden>
+      <h1 class="view-title">登場人物</h1>
+      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。</p>
+      <div class="tables" id="character-tables"></div>
     </section>
 
     <!-- 活動報告 -->
     <section class="view" id="view-report" hidden>
+      <details class="extra" id="url-box">
+        <summary>作品URL（ひな型の {URL} に使います）</summary>
+        <div class="extra-body url-grid">
+          <label>なろうの作品URL
+            <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
+          </label>
+          <label>アルファポリスの作品URL
+            <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
+          </label>
+          <p class="hint">なろうは「作品URL＋何番目のエピソードか」でエピソードのURLになります。</p>
+        </div>
+      </details>
       <div class="report-bar">
         <label>対象エピソード
           <select id="report-episode"></select>
@@ -263,6 +298,20 @@
   </form>
 </dialog>
 
+<dialog id="restore-dialog">
+  <form method="dialog" class="dialog" id="restore-form">
+    <h2>バックアップから復元</h2>
+    <p id="restore-info"></p>
+    <p class="hint">「追加・上書き」：バックアップの作品を戻します。この端末にしかない作品は残ります。<br>
+      「すべて入れ替え」：この端末の作品をすべて消してから、バックアップの内容にします。</p>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="replace" class="danger">すべて入れ替え</button>
+      <button value="merge" class="primary">追加・上書き</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="replace-dialog">
   <form method="dialog" class="dialog" id="replace-form">
     <h2>一括置換</h2>
@@ -323,6 +372,12 @@
           <option value="22">特大（22px）</option>
         </select>
       </label>
+    </fieldset>
+    <fieldset id="link-settings">
+      <legend>リンク（よく使うサイト）</legend>
+      <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。</p>
+      <ul class="link-list" id="link-list"></ul>
+      <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
     </fieldset>
     <fieldset id="provider-settings">
       <legend>クラウド接続</legend>

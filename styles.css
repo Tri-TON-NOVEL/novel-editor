@@ -119,6 +119,7 @@ button:disabled { opacity: .5; cursor: default; }
   min-height: 0;
   display: grid;
   grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
 }
 .sidebar {
   display: flex;
@@ -159,7 +160,7 @@ button:disabled { opacity: .5; cursor: default; }
 .episode-list .ep-num { color: var(--muted); margin-right: 6px; font-size: 12px; }
 .episode-list button.active .ep-num { color: inherit; }
 
-.main { min-width: 0; min-height: 0; display: flex; }
+.main { min-width: 0; min-height: 0; display: flex; overflow: hidden; }
 .view {
   flex: 1;
   min-width: 0;
@@ -206,9 +207,27 @@ textarea {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
-  gap: 12px;
+  grid-template-columns: minmax(0, var(--split-body, 2fr)) 14px minmax(0, var(--split-plot, 1fr));
 }
+/* 本文とプロットの境目（ドラッグで幅を変える） */
+.splitter {
+  cursor: col-resize;
+  touch-action: none;
+  position: relative;
+}
+.splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 6px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--border);
+  transition: background .15s;
+}
+.splitter:hover::after, .splitter.dragging::after { background: var(--accent); }
+body.resizing { cursor: col-resize; user-select: none; }
 .pane { min-height: 0; }
 .tabs { display: none; }
 
@@ -249,6 +268,63 @@ body[data-site="narou"] .alpha-only { display: none !important; }
   font-size: 13px;
 }
 .episode-list .ep-delete:hover { color: var(--danger); background: var(--hover); }
+
+/* 全体プロット・設定・登場人物 */
+.view.scroll { overflow-y: auto; }
+.view-title { margin: 0; font-size: 18px; }
+.chapters, .tables { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+.chapter, .cat {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.cat .cat-name { flex: 1; min-width: 160px; font-weight: 700; background: var(--bg); }
+
+/* 全体プロット：章をプルダウンで切り替え */
+.chapter-editor { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 8px; }
+.chapter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.chapter-bar select { flex: 1; min-width: 180px; max-width: 420px; width: auto; font-weight: 700; }
+.chapter-editor .chapter-title { font-family: var(--font-body); font-size: 18px; }
+.chapter-editor .chapter-plot { flex: 1; min-height: 0; font-size: max(16px, calc(var(--body-size) - 2px)); line-height: 1.8; }
+.cat-head { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.cat-head .spacer { flex: 1; }
+.add-cat { align-self: flex-start; border-style: dashed; }
+.add-row { align-self: flex-start; }
+
+.table-wrap { overflow-x: auto; }
+.grid { width: 100%; border-collapse: collapse; min-width: 760px; table-layout: fixed; }
+.grid th.ops { width: 9.5em; }
+.grid th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 700; padding: 4px 6px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+.grid td { padding: 3px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.grid textarea {
+  flex: none;
+  display: block;
+  width: 100%;
+  min-height: 36px;
+  resize: none;
+  overflow: hidden;
+  padding: 6px 8px;
+  font-family: var(--font-ui);
+  font-size: 16px;
+  line-height: 1.5;
+  border-color: transparent;
+  background: transparent;
+}
+.grid textarea:hover { border-color: var(--border); }
+.grid textarea:focus { border-color: var(--accent); background: var(--bg); }
+.grid .cat-cell { width: 9em; }
+.grid .cat-select { padding: 6px; font-size: 14px; }
+.grid .ops { width: 1%; white-space: nowrap; }
+.grid .ops .tool { min-height: 30px; padding: 2px 8px; }
+.grid .empty-row td { color: var(--muted); font-size: 13px; padding: 10px 6px; }
+
+.url-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px 12px; }
+.url-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.url-grid .hint { grid-column: 1 / -1; }
 
 /* 活動報告 */
 .report-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
@@ -297,10 +373,24 @@ body[data-site="narou"] .alpha-only { display: none !important; }
   .tabs button { flex: 1; }
   .tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
   .panes { grid-template-columns: minmax(0, 1fr); }
+  .splitter { display: none; }
   .pane:not(.active) { display: none; }
   .status { width: 100%; margin-left: 0; }
   .report-grid { grid-template-columns: minmax(0, 1fr); overflow-y: auto; }
   .report-grid .card { min-height: 360px; }
+  .url-grid { grid-template-columns: minmax(0, 1fr); }
+
+  /* 表は1行ずつカード形式にする */
+  .grid { min-width: 0; }
+  .grid thead { display: none; }
+  .grid tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 8px; padding: 8px 0; border-bottom: 1px solid var(--border); }
+  .grid td { display: block; border: 0; padding: 0; }
+  .grid td::before { content: attr(data-label); display: block; font-size: 11px; color: var(--muted); padding: 2px 8px 0; }
+  .grid td.wide, .grid td.ops, .grid .empty-row td { grid-column: 1 / -1; }
+  .grid .cat-cell { width: auto; }
+  .grid td.ops { display: flex; gap: 6px; justify-content: flex-end; width: auto; }
+  .grid td.ops::before { display: none; }
+  .grid textarea { border-color: var(--border); background: var(--bg); }
 }
 
 /* ダイアログ */
@@ -315,13 +405,23 @@ dialog {
   box-shadow: var(--shadow);
 }
 dialog::backdrop { background: rgba(0, 0, 0, .4); }
-.dialog { display: flex; flex-direction: column; gap: 12px; padding: 18px; max-height: calc(100dvh - 50px); }
+.dialog { display: flex; flex-direction: column; gap: 12px; padding: 18px; max-height: calc(100dvh - 50px); overflow-y: auto; }
+#settings-dialog { width: min(680px, calc(100vw - 32px)); }
+.link-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.link-list li { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.6fr) auto auto auto auto; gap: 4px; align-items: center; }
+.link-list input { padding: 6px 8px; }
+.link-list .tool { padding: 4px 8px; }
+.add-link { align-self: flex-start; }
+@media (max-width: 560px) {
+  .link-list li { grid-template-columns: repeat(4, auto); }
+  .link-list input { grid-column: 1 / -1; }
+}
 .dialog h2 { margin: 0; font-size: 18px; }
 .dialog h2 small { font-size: 12px; color: var(--muted); font-weight: 400; }
 .dialog-foot { display: flex; justify-content: flex-end; gap: 8px; }
 .dialog fieldset { border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 10px; padding: 10px 12px; }
 .dialog fieldset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
-.dialog input[type="text"], .dialog select {
+.dialog input[type="text"], .dialog input[type="url"], .dialog select {
   background: var(--bg);
   border: 1px solid var(--border);
   border-radius: 6px;
@@ -332,6 +432,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .dialog .stack { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .dialog textarea { flex: none; background: var(--bg); font-size: 16px; line-height: 1.6; }
 .dialog code { font-size: 12px; }
+#restore-info { margin: 0; white-space: pre-line; line-height: 1.7; }
 
 .list { list-style: none; margin: 0; padding: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
 .list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }
