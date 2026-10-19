@@ -1,20 +1,23 @@
 // 全体バックアップ：端末内のすべての作品・ひな型・設定を1つのファイルにまとめる
-import { db, prefs } from './db.js';
+import { db, prefs, versions } from './db.js';
 import { normalize } from './format.js';
 
 export const BACKUP_FORMAT = 'novel-editor-backup';
 
 export async function makeBackup() {
   const projects = await db.all();
+  const allVersions = await versions.all();
   return {
     text: JSON.stringify({
       format: BACKUP_FORMAT,
       version: 1,
       createdAt: new Date().toISOString(),
       projects,
+      versions: allVersions,
       prefs: prefs.entries(),
     }, null, 1),
     count: projects.length,
+    versionCount: allVersions.length,
   };
 }
 
@@ -36,9 +39,13 @@ export function parseBackup(text) {
 export async function restoreBackup(backup, mode) {
   if (mode === 'replace') {
     for (const p of await db.all()) await db.remove(p.id);
+    await versions.clear();
   }
   for (const p of backup.projects) {
     if (p && p.id) await db.put(normalize(p));
+  }
+  for (const v of backup.versions || []) {
+    if (v && v.id && v.projectId) await versions.put(v);
   }
   const saved = backup.prefs || {};
   for (const [key, value] of Object.entries(saved)) {

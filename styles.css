@@ -89,6 +89,26 @@ button:disabled { opacity: .5; cursor: default; }
 .brand { font-weight: 700; color: var(--accent); }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; }
+.actions .history { padding: 6px 10px; }
+button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
+:root[data-theme="dark"] button.warn { background: #3a3220; border-color: #8a6d1f; color: #f2d48a; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) button.warn { background: #3a3220; border-color: #8a6d1f; color: #f2d48a; } }
+.button-row { display: flex; flex-wrap: wrap; gap: 6px; }
+
+/* 設定のタブ */
+.settings-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); }
+.settings-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; background: transparent; padding: 8px 14px; }
+.settings-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); font-weight: 700; }
+.settings-panel { display: flex; flex-direction: column; gap: 12px; min-height: 280px; }
+.settings-panel[hidden] { display: none; }
+#settings-dialog .list { max-height: 300px; }
+.cloud-provider { display: flex; flex-direction: column; gap: 6px; }
+.cloud-provider + .cloud-provider { border-top: 1px solid var(--border); padding-top: 8px; }
+
+/* エピソードの版 */
+.ep-version { display: inline-flex; gap: 4px; align-items: center; }
+.ep-version select { width: auto; max-width: 240px; padding: 4px 8px; font-size: 14px; }
+#autobackup-status { margin: 0; font-size: 14px; }
 
 .menu { position: relative; }
 .menu summary { list-style: none; }
@@ -433,6 +453,12 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .dialog textarea { flex: none; background: var(--bg); font-size: 16px; line-height: 1.6; }
 .dialog code { font-size: 12px; }
 #restore-info { margin: 0; white-space: pre-line; line-height: 1.7; }
+.dialog-foot.wrap { flex-wrap: wrap; }
+.version-info { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; margin: 0; }
+.version-info dt { color: var(--muted); font-size: 13px; }
+.version-info dd { margin: 0; white-space: pre-line; }
+.version-info .plus { color: var(--accent); }
+.version-info .minus { color: var(--danger); }
 
 .list { list-style: none; margin: 0; padding: 0; overflow: auto; display: flex; flex-direction: column; gap: 6px; min-height: 60px; }
 .list li { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; }

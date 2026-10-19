@@ -18,6 +18,8 @@
   <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
   <div class="brand">小説エディター</div>
   <nav class="actions">
+    <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶ 戻す</button>
+    <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷ やり直す</button>
     <button type="button" data-action="library">作品一覧</button>
     <button type="button" data-action="new-project">新しい作品</button>
     <details class="menu">
@@ -29,14 +31,7 @@
         <hr>
         <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
         <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
-        <hr>
-        <button type="button" data-action="backup">すべてをバックアップ…</button>
-        <button type="button" data-action="restore">バックアップから復元…</button>
       </div>
-    </details>
-    <details class="menu" id="cloud-menu">
-      <summary>クラウド</summary>
-      <div class="menu-list" id="cloud-menu-list"></div>
     </details>
     <details class="menu" id="links-menu">
       <summary>リンク</summary>
@@ -45,6 +40,7 @@
     <button type="button" data-action="settings">設定</button>
   </nav>
   <div class="status" id="status" aria-live="polite"></div>
+  <button type="button" class="warn" id="autobackup-resume" data-action="autobackup-resume" hidden>⚠ 自動バックアップを再開</button>
 </header>
 
 <div class="workspace">
@@ -88,9 +84,12 @@
           <label for="ep-title" id="ep-label">エピソードタイトル</label>
           <span class="count" id="count-ep-title"></span>
           <span class="spacer"></span>
+          <span class="ep-version">
+            <select id="ep-version" aria-label="このエピソードの版"></select>
+            <button type="button" class="tool" data-action="ep-version-up" title="今の内容を新しい版として残す">＋ 版を上げる</button>
+          </span>
           <button type="button" class="tool" data-action="move-up" title="前へ移動">↑</button>
           <button type="button" class="tool" data-action="move-down" title="後ろへ移動">↓</button>
-          <button type="button" class="tool danger" data-action="delete-episode">削除</button>
           <button type="button" class="copy" data-copy="ep-title">コピー</button>
         </div>
         <input id="ep-title" type="text" autocomplete="off" placeholder="エピソードタイトル（サブタイトル）">
@@ -298,6 +297,33 @@
   </form>
 </dialog>
 
+<dialog id="version-save-dialog">
+  <form method="dialog" class="dialog" id="version-save-form">
+    <h2>作品全体を保存</h2>
+    <p class="hint">今の作品全体（全エピソード・プロット・設定・登場人物など）を、この名前で残します。</p>
+    <label class="stack">名前 <input name="name" type="text" autocomplete="off" required></label>
+    <label class="stack">メモ（任意） <textarea name="memo" rows="3" spellcheck="false" placeholder="例：第2章を大幅に書き直す前"></textarea></label>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="ok" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="version-dialog">
+  <form method="dialog" class="dialog" id="version-form">
+    <h2 id="version-title">版</h2>
+    <dl class="version-info" id="version-info"></dl>
+    <p class="hint">「この版に戻す」を押すと、戻す直前の状態も自動で版として残るので、あとから元に戻せます。</p>
+    <div class="dialog-foot wrap">
+      <button type="button" value="cancel">閉じる</button>
+      <button value="delete" class="danger">削除</button>
+      <button value="copy" id="version-copy">別の作品として開く</button>
+      <button value="restore" class="primary">この版に戻す</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="restore-dialog">
   <form method="dialog" class="dialog" id="restore-form">
     <h2>バックアップから復元</h2>
@@ -356,6 +382,15 @@
 <dialog id="settings-dialog">
   <form method="dialog" class="dialog" id="settings-form">
     <h2>設定</h2>
+    <div class="settings-tabs" role="tablist">
+      <button type="button" role="tab" data-stab="display">表示</button>
+      <button type="button" role="tab" data-stab="links">リンク</button>
+      <button type="button" role="tab" data-stab="backup">バックアップ</button>
+      <button type="button" role="tab" data-stab="cloud">クラウド</button>
+    </div>
+
+    <!-- 表示 -->
+    <div class="settings-panel" data-spanel="display" role="tabpanel">
     <fieldset>
       <legend>表示</legend>
       <label>本文の書体
@@ -373,15 +408,59 @@
         </select>
       </label>
     </fieldset>
+    </div>
+
+    <!-- リンク -->
+    <div class="settings-panel" data-spanel="links" role="tabpanel" hidden>
     <fieldset id="link-settings">
       <legend>リンク（よく使うサイト）</legend>
       <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。</p>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
     </fieldset>
-    <fieldset id="provider-settings">
-      <legend>クラウド接続</legend>
+    </div>
+
+    <!-- バックアップ -->
+    <div class="settings-panel" data-spanel="backup" role="tabpanel" hidden>
+    <fieldset>
+      <legend>この作品のバックアップ版（作品全体）</legend>
+      <p class="hint">作品全体（全エピソード・プロット・設定など）をまるごと残したものです。書いている間は10分ごと、画面を閉じるときにも自動で残ります（最新30件）。</p>
+      <div class="button-row">
+        <button type="button" data-action="project-version-save">＋ 今の作品全体を保存…</button>
+      </div>
+      <ul class="list" id="project-versions"></ul>
     </fieldset>
+    <fieldset>
+      <legend>全体バックアップ（全作品・ひな型・設定）</legend>
+      <div class="button-row">
+        <button type="button" data-action="backup">すべてをバックアップ…</button>
+        <button type="button" data-action="restore">バックアップから復元…</button>
+      </div>
+    </fieldset>
+    <fieldset id="autobackup-settings">
+      <legend>自動バックアップ</legend>
+      <p id="autobackup-status"></p>
+      <div class="button-row" id="autobackup-buttons">
+        <button type="button" id="autobackup-choose">フォルダを選ぶ…</button>
+        <button type="button" id="autobackup-now">今すぐバックアップ</button>
+        <button type="button" id="autobackup-stop" class="danger">止める</button>
+      </div>
+      <p class="hint" id="autobackup-hint">フォルダを選んでおくと、書くのを止めて30秒たったとき・画面を閉じるときに、全作品のバックアップをそのフォルダへ自動で保存します（1日1ファイル、14日分）。
+        OneDrive・iCloud Drive・Google ドライブの同期フォルダを選べば、クラウドにも自動で残ります。</p>
+    </fieldset>
+    </div>
+
+    <!-- クラウド -->
+    <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
+    <fieldset id="cloud-actions">
+      <legend>この作品をクラウドに保存・開く</legend>
+      <div id="cloud-action-list"></div>
+    </fieldset>
+    <fieldset id="provider-settings">
+      <legend>クラウド接続の設定</legend>
+    </fieldset>
+    </div>
+
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
       <button value="save" class="primary">保存</button>

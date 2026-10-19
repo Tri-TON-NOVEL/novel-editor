@@ -1,9 +1,10 @@
-import { db, prefs } from './db.js';
+import { db, prefs, versions } from './db.js';
 import {
   newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars, episodeName,
 } from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import { makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence } from './backup.js';
+import * as autoBackup from './autobackup.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertRuby, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES,
@@ -105,6 +106,10 @@ function updateStatus() {
   else if (dirty) parts.push('編集中…');
   else if (lastSavedAt) parts.push('端末に自動保存 ' + fmtTime(lastSavedAt));
   parts.push('投稿先: ' + SITES[project.site].short);
+  if (autoBackup.getState() === 'on') {
+    const last = autoBackup.lastWrittenAt();
+    parts.push('自動バックアップ' + (last ? ' ' + fmtTime(last) : ' 有効'));
+  }
   if (fileHandle) parts.push('ファイル: ' + fileHandle.name);
   for (const p of providers) if (project.links?.[p.id]) parts.push(p.label + ' 連携');
   $('status').textContent = parts.join(' ・ ');
@@ -154,6 +159,8 @@ async function flush() {
 function changed() {
   project.updatedAt = new Date().toISOString();
   dirty = true;
+  autoDirty = true;
+  autoBackup.schedule();
   updateStatus();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, AUTOSAVE_MS);
@@ -205,6 +212,7 @@ function showEpisode() {
   $('foreword-box').open = !!ep.foreword;
   $('afterword-box').open = !!ep.afterword;
   updateCounts();
+  renderEpisodeVersions().catch(() => {});
 }
 
 // 投稿先に合わせて、使える機能（ボタン・前書き・後書き）を切り替える
@@ -249,6 +257,8 @@ function showProject(p, handle = null) {
   epIndex = Math.min(prefs.get('ep:' + project.id, 0), project.episodes.length - 1);
   lastSavedAt = project.updatedAt;
   dirty = false;
+  autoDirty = false;
+  lastAutoVersionAt = Date.now();
   prefs.set('currentId', project.id);
   applySite();
   showEpisode();
@@ -258,6 +268,7 @@ function showProject(p, handle = null) {
 
 async function switchTo(p, handle = null) {
   await flush();
+  await autoVersion(60_000);
   // 何も書いていない作品は一覧に残さない
   if (project && p.id !== project.id && isEmptyProject(project) && !Object.keys(project.links || {}).length) {
     await db.remove(project.id);
@@ -294,6 +305,7 @@ function deleteEpisode(index = epIndex) {
   if (!confirm(`【最終確認】本当に${name}を削除しますか？\n本文 ${size.toLocaleString()}字が消え、元に戻せません。`)) return;
   if (last) project.episodes[0] = newEpisode();
   else project.episodes.splice(index, 1);
+  removeEpisodeVersions(ep.id).catch(() => {});
   changed();
   const next = index < epIndex ? epIndex - 1 : Math.min(epIndex, project.episodes.length - 1);
   if (view === 'episode') selectEpisode(next);
@@ -344,8 +356,9 @@ async function renderLibrary() {
     const buttons = [];
     if (!current) buttons.push(button('開く', async () => { $('library-dialog').close(); await switchTo(p); }));
     buttons.push(button('削除', async () => {
-      if (!confirm(`「${p.title || '無題'}」をこの端末から削除しますか？\n（クラウドやファイルに保存したものは消えません）`)) return;
+      if (!(await confirmProjectDelete(p))) return;
       await db.remove(p.id);
+      await versions.removeProject(p.id);
       if (current) {
         dirty = false;
         const next = (await allProjects())[0] || newProject();
@@ -357,6 +370,22 @@ async function renderLibrary() {
     const meta = `${p.episodes.length}話 ・ 本文 ${totalChars(p).toLocaleString()}字 ・ ${fmtTime(p.updatedAt)}`;
     list.append(listItem(p.title || '（無題）', meta, buttons, current));
   }
+}
+
+// 作品の削除は3段階で確認する（最後は作品名の入力）
+async function confirmProjectDelete(p) {
+  const n = normalize(p);
+  const name = n.title || '無題';
+  const vcount = (await versions.list(p.id)).length;
+  if (!confirm(`作品「${name}」をこの端末から削除しますか？`)) return false;
+  if (!confirm(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
+    + `プロット・設定・登場人物、バージョン${vcount}件がすべて消えます。\n`
+    + '（「ファイルに保存」やバックアップ、クラウドに保存したものは残ります）\n本当に削除しますか？')) return false;
+  const word = n.title || '削除';
+  const typed = prompt(`【最終確認】削除するには、${n.title ? '作品名' : '「削除」'}を正確に入力してください。\n${word}`);
+  if (typed === null) return false;
+  if (typed.trim() !== word) { toast('入力が一致しなかったので、削除しませんでした'); return false; }
+  return true;
 }
 
 async function openLibrary() {
@@ -415,17 +444,209 @@ async function fileSaveAs() {
   updateStatus();
 }
 
+// ---------- 版 ----------
+// 版は2種類。どちらも versions ストアに入れ、kind で分ける。
+//   エピソードの版（kind: 'episode'）… エピソードごとの編集の版。エピソード欄の「版」から上げる・戻す
+//   作品全体のバックアップ版（kind なし／'project'）… 設定の「バックアップ」タブ。自動でも残る
+
+const newVersionId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
+const isEpisodeVersion = (v) => v.kind === 'episode';
+
+// --- エピソードの版 ---
+
+const EP_FIELDS = ['title', 'foreword', 'body', 'afterword', 'plot'];
+
+async function episodeVersions(episodeId = episode().id) {
+  return (await versions.list(project.id)).filter((v) => isEpisodeVersion(v) && v.episodeId === episodeId);
+}
+
+async function saveEpisodeVersion(name, ep = episode()) {
+  await flush();
+  const data = Object.fromEntries(EP_FIELDS.map((f) => [f, ep[f]]));
+  const v = {
+    id: newVersionId(),
+    kind: 'episode',
+    projectId: project.id,
+    episodeId: ep.id,
+    name,
+    memo: '',
+    createdAt: new Date().toISOString(),
+    chars: countChars(ep.body).all,
+    data,
+  };
+  await versions.put(v);
+  return v;
+}
+
+async function renderEpisodeVersions() {
+  const sel = $('ep-version');
+  const list = await episodeVersions();
+  sel.replaceChildren(new Option(list.length ? `今の内容（版 ${list.length}件）` : '版はまだありません', ''));
+  for (const v of list) sel.append(new Option(`${v.name}　${fmtTime(v.createdAt)}　${v.chars.toLocaleString()}字`, v.id));
+  sel.value = '';
+}
+
+async function episodeVersionUp() {
+  const ep = episode();
+  // 「第○版」の続きの番号にする（「○○に戻す前」は数えない）
+  const n = Math.max(0, ...(await episodeVersions()).map((x) => Number(/^第(\d+)版$/.exec(x.name)?.[1] || 0))) + 1;
+  const v = await saveEpisodeVersion(`第${n}版`, ep);
+  await renderEpisodeVersions();
+  toast(`「${episodeName(ep)}」を ${v.name} として残しました`);
+}
+
+async function removeEpisodeVersions(episodeId) {
+  for (const v of await episodeVersions(episodeId)) await versions.remove(v.id);
+}
+
+// --- 作品全体のバックアップ版 ---
+
+// 作品の中身だけを取り出したコピー（id・クラウド連携は含めない）
+function snapshot() {
+  return JSON.parse(serialize(project)).project;
+}
+
+async function projectVersions() {
+  return (await versions.list(project.id)).filter((v) => !isEpisodeVersion(v));
+}
+
+async function saveVersion(name, memo = '', auto = false) {
+  await flush();
+  const v = {
+    id: newVersionId(),
+    kind: 'project',
+    projectId: project.id,
+    name,
+    memo,
+    auto,
+    createdAt: new Date().toISOString(),
+    chars: totalChars(project),
+    episodes: project.episodes.length,
+    data: snapshot(),
+  };
+  await versions.put(v);
+  return v;
+}
+
+// 自動で残す：書いている間は10分ごと、画面を閉じる・切り替えるときにも（作品ごとに最新30件）
+const AUTO_VERSION_MS = 10 * 60_000;
+const AUTO_VERSION_KEEP = 30;
+let autoDirty = false;
+let lastAutoVersionAt = Date.now();
+
+async function autoVersion(minInterval = AUTO_VERSION_MS) {
+  if (!autoDirty || !project || Date.now() - lastAutoVersionAt < minInterval) return;
+  autoDirty = false;
+  lastAutoVersionAt = Date.now();
+  const time = new Date().toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+  await saveVersion(`自動保存 ${time}`, '', true);
+  const autos = (await projectVersions()).filter((v) => v.auto);
+  for (const old of autos.slice(AUTO_VERSION_KEEP)) await versions.remove(old.id);
+}
+
+async function openVersionSave() {
+  const n = (await projectVersions()).filter((v) => !v.auto).length + 1;
+  const form = $('version-save-form');
+  form.name.value = `バックアップ${n}`;
+  form.memo.value = '';
+  $('version-save-dialog').showModal();
+  form.name.select();
+}
+
+// 設定の「バックアップ」タブの一覧
+async function renderProjectVersions() {
+  const list = $('project-versions');
+  list.replaceChildren();
+  const all = await projectVersions();
+  if (!all.length) { list.append(li('empty', 'まだありません')); return; }
+  for (const v of all) {
+    const meta = `${new Date(v.createdAt).toLocaleString('ja-JP')} ・ ${v.episodes}話 ・ ${v.chars.toLocaleString()}字${v.auto ? ' ・ 自動' : ''}`;
+    list.append(listItem(v.name, meta, [button('開く', () => openVersion(v.id))]));
+  }
+}
+
+// --- 版の確認画面（共通） ---
+
+let currentVersion = null;
+async function openVersion(id) {
+  const v = await versions.get(id);
+  if (!v) { toast('この版は見つかりませんでした', true); return; }
+  currentVersion = v;
+  const ep = isEpisodeVersion(v) ? project.episodes.find((e) => e.id === v.episodeId) : null;
+  $('version-title').textContent = v.name;
+  $('version-copy').hidden = isEpisodeVersion(v);
+  const info = $('version-info');
+  info.replaceChildren();
+  const row = (label, value, cls = '') => {
+    info.append(Object.assign(document.createElement('dt'), { textContent: label }),
+      Object.assign(document.createElement('dd'), { textContent: value, className: cls }));
+  };
+  const now = isEpisodeVersion(v) ? countChars(ep?.body || '').all : totalChars(project);
+  const diff = v.chars - now;
+  row('保存日時', new Date(v.createdAt).toLocaleString('ja-JP'));
+  if (isEpisodeVersion(v)) {
+    row('エピソード', v.data.title || '（無題）');
+    row('本文', `${v.chars.toLocaleString()}字`);
+  } else {
+    row('小説タイトル', v.data.title || '（無題）');
+    row('エピソード', `${v.episodes}話（今は${project.episodes.length}話）`);
+    row('本文の合計', `${v.chars.toLocaleString()}字`);
+  }
+  row('今との差', diff === 0 ? '同じ' : `今より ${Math.abs(diff).toLocaleString()}字 ${diff > 0 ? '多い' : '少ない'}`, diff > 0 ? 'plus' : diff < 0 ? 'minus' : '');
+  if (v.memo) row('メモ', v.memo);
+  $('version-dialog').showModal();
+}
+
+async function restoreVersion(v) {
+  if (!confirm(`「${v.name}」の内容に戻しますか？\n今の内容は「${v.name}に戻す前」として自動で残ります。`)) return;
+  if (isEpisodeVersion(v)) {
+    const index = project.episodes.findIndex((e) => e.id === v.episodeId);
+    if (index < 0) { toast('このエピソードは削除されています', true); return; }
+    const ep = project.episodes[index];
+    await saveEpisodeVersion(`${v.name}に戻す前`, ep);
+    Object.assign(ep, v.data);
+    changed();
+    selectEpisode(index);
+    toast(`「${episodeName(ep)}」を ${v.name} に戻しました`);
+    return;
+  }
+  await saveVersion(`${v.name}に戻す前`, `${new Date().toLocaleString('ja-JP')} に「${v.name}」へ戻す前の状態`);
+  const restored = normalize({ ...v.data, id: project.id, links: project.links, createdAt: project.createdAt });
+  restored.updatedAt = new Date().toISOString();
+  await db.put(restored);
+  showProject(restored, fileHandle);
+  $('settings-dialog').close();
+  toast(`作品全体を「${v.name}」に戻しました`);
+}
+
+async function copyVersion(v) {
+  const p = normalize({ ...newProject(), ...v.data, title: `${v.data.title || '無題'}（${v.name}）` });
+  p.updatedAt = new Date().toISOString();
+  await switchTo(p);
+  $('settings-dialog').close();
+  toast(`「${v.name}」を別の作品として開きました（作品一覧から元の作品に戻れます）`);
+}
+
+async function deleteVersion(v) {
+  if (!confirm(`版「${v.name}」を削除しますか？`)) return;
+  if (!confirm(`【最終確認】「${v.name}」は元に戻せません。削除しますか？`)) return;
+  await versions.remove(v.id);
+  toast(`版「${v.name}」を削除しました`);
+  if (isEpisodeVersion(v)) renderEpisodeVersions();
+  else renderProjectVersions();
+}
+
 // ---------- 全体バックアップ・復元 ----------
 
 const BACKUP_REMIND_DAYS = 7;
 
 async function backupAll() {
   await flush();
-  const { text, count } = await makeBackup();
+  const { text, count, versionCount } = await makeBackup();
   const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
   if (!r) return;
   prefs.set('lastBackupAt', new Date().toISOString());
-  toast(`${count}作品と、ひな型・設定をバックアップしました`);
+  toast(`${count}作品（バージョン${versionCount}件）と、ひな型・設定をバックアップしました`);
 }
 
 let pendingBackup = null;
@@ -521,19 +742,28 @@ async function cloudOpen(p) {
   }
 }
 
-function buildCloudMenu() {
-  const list = $('cloud-menu-list');
-  list.replaceChildren();
-  providers.forEach((p, i) => {
-    if (i) list.append(document.createElement('hr'));
-    list.append(Object.assign(document.createElement('div'), { className: 'menu-label', textContent: p.label }));
-    const add = (text, fn) => list.append(button(text, () => { closeMenus(); return fn(); }));
-    if (!p.isConfigured()) { add('接続の設定…', openSettings); return; }
-    add(`${p.label}に保存`, () => cloudSave(p));
-    add(`${p.label}から開く…`, () => cloudOpen(p));
-    if (p.isSignedIn()) add('ログアウト', () => { p.signOut(); toast(p.label + 'からログアウトしました'); });
-    else add('ログイン', async () => { await p.signIn(); toast(p.label + 'にログインしました'); });
-  });
+// 設定の「クラウド」タブ：保存・開く・ログインのボタン
+function renderCloudActions() {
+  const box = $('cloud-action-list');
+  box.replaceChildren();
+  for (const p of providers) {
+    const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
+    section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
+    const row = Object.assign(document.createElement('div'), { className: 'button-row' });
+    if (!p.isConfigured()) {
+      section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '下の「クラウド接続の設定」にクライアントIDを入れて「保存」を押すと使えるようになります。' }));
+    } else {
+      row.append(
+        button(`${p.label}に保存`, () => cloudSave(p)),
+        button(`${p.label}から開く…`, () => { $('settings-dialog').close(); return cloudOpen(p); }),
+        p.isSignedIn()
+          ? button('ログアウト', () => { p.signOut(); renderCloudActions(); toast(p.label + 'からログアウトしました'); })
+          : button('ログイン', async () => { await p.signIn(); renderCloudActions(); toast(p.label + 'にログインしました'); }));
+      section.append(row);
+      if (project.links?.[p.id]) section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'この作品は保存先と連携しています（Ctrl+S／⌘S でも保存できます）。' }));
+    }
+    box.append(section);
+  }
 }
 
 // ---------- コピー・編集補助 ----------
@@ -895,8 +1125,7 @@ function buildLinksMenu() {
   }
   list.append(document.createElement('hr'), button('リンクを編集…', () => {
     closeMenus();
-    openSettings();
-    $('link-settings').scrollIntoView({ block: 'start' });
+    openSettings('links');
   }));
 }
 
@@ -939,7 +1168,15 @@ function applyPrefs() {
   document.documentElement.style.setProperty('--body-size', prefs.get('fontSize', '18') + 'px');
 }
 
-function openSettings() {
+function selectSettingsTab(name) {
+  document.querySelectorAll('[data-stab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stab === name)));
+  document.querySelectorAll('[data-spanel]').forEach((p) => { p.hidden = p.dataset.spanel !== name; });
+  prefs.set('settingsTab', name);
+  if (name === 'backup') renderProjectVersions().catch(fail);
+  if (name === 'cloud') renderCloudActions();
+}
+
+function openSettings(tab = prefs.get('settingsTab', 'display')) {
   const form = $('settings-form');
   form.font.value = prefs.get('font', 'serif');
   form.fontSize.value = prefs.get('fontSize', '18');
@@ -958,6 +1195,7 @@ function openSettings() {
   }
   editingLinks = structuredClone(links());
   renderLinkEditor();
+  selectSettingsTab(tab);
   $('settings-dialog').showModal();
 }
 
@@ -996,7 +1234,7 @@ const actions = {
   'toggle-drawer': () => document.body.classList.toggle('drawer-open'),
   library: openLibrary,
   'new-project': createProject,
-  settings: openSettings,
+  settings: () => openSettings(),
   'file-open': fileOpen,
   'file-save': fileSave,
   'file-save-as': fileSaveAs,
@@ -1005,14 +1243,46 @@ const actions = {
   'add-episode': addEpisode,
   'move-up': () => moveEpisode(-1),
   'move-down': () => moveEpisode(1),
-  'delete-episode': () => deleteEpisode(),
+  'ep-version-up': episodeVersionUp,
+  'project-version-save': openVersionSave,
   'manage-templates': () => { renderTemplateList(); $('templates-dialog').showModal(); },
   'open-x': openX,
   'auto-indent': runAutoIndent,
   replace: openReplace,
   backup: backupAll,
   restore: restoreFromFile,
+  undo: () => undoRedo('undo'),
+  redo: () => undoRedo('redo'),
+  'autobackup-resume': () => autoBackup.resume()
+    .then((ok) => toast(ok ? '自動バックアップを再開しました' : '書き込みが許可されませんでした', !ok)),
 };
+
+// 自動バックアップの状態を画面に出す
+function renderAutoBackupState(state) {
+  $('autobackup-resume').hidden = state !== 'need-permission';
+  const last = autoBackup.lastWrittenAt();
+  const lastText = last ? `（最後の保存 ${fmtTime(last)}）` : '';
+  const text = !autoBackup.supported
+    ? 'このブラウザでは使えません（Windows・Mac の Chrome / Edge で使えます）。iPad では自動バージョンと「すべてをバックアップ」を使ってください。'
+    : state === 'on' ? `✅ 「${autoBackup.folderName()}」に自動で保存しています${lastText}`
+      : state === 'need-permission' ? `⚠ 「${autoBackup.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください${lastText}`
+        : '止まっています。フォルダを選ぶと始まります。';
+  $('autobackup-status').textContent = text;
+  $('autobackup-buttons').hidden = !autoBackup.supported;
+  $('autobackup-now').disabled = state !== 'on';
+  $('autobackup-stop').disabled = state === 'off';
+  if (project) updateStatus();
+}
+
+// 元に戻す／やり直す：最後に入力していた欄に対して、ブラウザ標準の取り消し履歴を使う
+let lastEditable = null;
+function undoRedo(cmd) {
+  const t = lastEditable && document.contains(lastEditable) ? lastEditable : el.body;
+  t.focus();
+  const before = t.value;
+  document.execCommand(cmd);
+  if (t.value === before) toast(cmd === 'undo' ? 'これ以上戻せません' : 'やり直す操作がありません');
+}
 
 const inserts = { ruby: insertRuby, dots: insertDots, image: openImageDialog };
 
@@ -1080,6 +1350,11 @@ function bindEvents() {
   el.site.addEventListener('change', () => changeSite(el.site.value));
   el.body.addEventListener('paste', onBodyPaste);
   for (const t of [el.foreword, el.body, el.afterword]) t.addEventListener('focus', () => { editTarget = t; });
+  document.addEventListener('focusin', (e) => {
+    if (e.target.matches('textarea, input[type="text"], input[type="url"]') && !e.target.closest('dialog')) lastEditable = e.target;
+  });
+  // 戻す／やり直すボタンを押しても入力欄からフォーカスが外れないようにする
+  document.querySelectorAll('.history').forEach((b) => b.addEventListener('pointerdown', (e) => e.preventDefault()));
 
   $('symbol-list').append(...SYMBOLS.map((s) => {
     const b = Object.assign(document.createElement('button'), { type: 'button', textContent: s });
@@ -1125,7 +1400,6 @@ function bindEvents() {
   document.querySelectorAll('details.menu').forEach((d) => d.addEventListener('toggle', () => {
     if (!d.open) return;
     closeMenus(d);
-    if (d.id === 'cloud-menu') buildCloudMenu();
     if (d.id === 'links-menu') buildLinksMenu();
   }));
 
@@ -1134,6 +1408,24 @@ function bindEvents() {
   bindDialog('template-edit-dialog', saveEditedTemplate);
   bindDialog('replace-dialog', runReplace);
   bindDialog('restore-dialog');
+  bindDialog('version-save-dialog', async () => {
+    const form = $('version-save-form');
+    const v = await saveVersion(form.name.value.trim() || '名前なし', form.memo.value.trim());
+    toast(`作品全体を「${v.name}」として保存しました`);
+    renderProjectVersions().catch(() => {});
+  });
+  $('ep-version').addEventListener('change', (e) => {
+    const id = e.target.value;
+    e.target.value = '';
+    if (id) openVersion(id).catch(fail);
+  });
+  document.querySelectorAll('[data-stab]').forEach((b) => b.addEventListener('click', () => selectSettingsTab(b.dataset.stab)));
+  bindDialog('version-dialog');
+  $('version-form').addEventListener('submit', (e) => {
+    const v = currentVersion;
+    const act = { restore: restoreVersion, copy: copyVersion, delete: deleteVersion }[e.submitter?.value];
+    if (v && act) Promise.resolve().then(() => act(v)).catch(fail);
+  });
   $('add-link').addEventListener('click', () => {
     editingLinks.push({ name: '', url: '' });
     renderLinkEditor();
@@ -1155,8 +1447,23 @@ function bindEvents() {
     }
   });
 
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flush(); });
-  window.addEventListener('pagehide', () => { flush(); });
+  // 画面を閉じる・別のアプリに切り替えるとき：端末に保存し、自動バージョンと自動バックアップも残す
+  const onLeave = () => {
+    flush().then(() => autoVersion(60_000)).catch(() => {});
+    autoBackup.flushNow();
+  };
+  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onLeave(); });
+  window.addEventListener('pagehide', onLeave);
+  setInterval(() => autoVersion().catch(() => {}), 60_000);
+
+  $('autobackup-choose').addEventListener('click', () => autoBackup.chooseFolder()
+    .then((ok) => { if (ok) toast(`「${autoBackup.folderName()}」への自動バックアップを始めました`); }).catch(fail));
+  $('autobackup-now').addEventListener('click', () => autoBackup.runNow()
+    .then((ok) => toast(ok ? '自動バックアップのフォルダに保存しました' : '先にフォルダを選んでください')).catch(fail));
+  $('autobackup-stop').addEventListener('click', () => {
+    if (!confirm('自動バックアップを止めますか？（これまでのバックアップファイルは消えません）')) return;
+    autoBackup.stop().then(() => toast('自動バックアップを止めました')).catch(fail);
+  });
 }
 
 // 旧形式（1作品＝1原稿）のデータを作品＋エピソード形式へ移す
@@ -1184,6 +1491,8 @@ async function init() {
   showProject(p);
 
   requestPersistence();
+  autoBackup.onState(renderAutoBackupState);
+  await autoBackup.init().catch((e) => console.warn('自動バックアップの準備に失敗', e));
   const restored = prefs.get('restoredMessage', null);
   if (restored) {
     prefs.set('restoredMessage', null);
