@@ -42,44 +42,134 @@ export function rubyCaretOffset(site, base) {
   return site === 'alpha' ? 1 + base.length + 2 : 1 + base.length + 1;
 }
 
-const NAROU_RUBY = /[|｜]([^|｜《》\n]{1,30}?)《([^《》\n]{1,30}?)》/g;
-// 縦線なしのなろうルビ（漢字の直後の《》）
-const NAROU_RUBY_IMPLICIT = /([一-龠々〆ヵヶ]+)《([^《》\n]{1,30}?)》/g;
-const ALPHA_RUBY = /#([^#\n]{1,30}?)__([^_\n]{1,30}?)__#/g;
+// ---------- なろう ⇔ アルファポリスの変換（純粋関数。tests/tests.js でテスト） ----------
+//
+// なろう → アルファ
+//   ルビ       |漢字《かんじ》・｜漢字《かんじ》・漢字《かんじ》（縦線なし） → #漢字__かんじ__#
+//   傍点       |傍点《・・》 → #傍点__・・__#（ルビと同じ規則）
+//   画像       <i1149346|50921> → https://50921.mitemin.net/i1149346/（みてみんの画像ページ。アルファでその画像を入れ直す）
+//   変換しない  漢字（かんじ）の括弧ルビ（なろうの自動ルビかどうか判別できない）、|《 のエスケープ → 原文のまま警告
+// アルファ → なろう
+//   ルビ       #漢字__かんじ__# → |漢字《かんじ》（10文字を超えると、なろうではルビにならないので警告）
+//   傍点       《《傍点》》 → |傍点《・・》
+//   画像       #__i_dd9a42ad__# → 【ここに画像を挿入：i_dd9a42ad】
+//              みてみんの URL https://50921.mitemin.net/i1149346/ → <i1149346|50921>（なろうの挿絵タグに戻す）
+// 変換先の記法で書かれているものはそのまま（2回変換しても増えない）。
+
 const NAROU_IMAGE = /<i(\d+)\|(\d+)>/g;
-// アルファポリスの別記法の傍点 《《文字》》
+const ALPHA_IMAGE = /#__(i_[0-9A-Za-z]+)__#/g;
+const NAROU_RUBY = /[|｜]([^|｜《》\n]{1,30}?)《([^《》\n]{1,30}?)》/g;
+const NAROU_RUBY_IMPLICIT = /([一-龠々〆ヵヶ]+)《([^《》\n]{1,30}?)》/g;
+const NAROU_PAREN_RUBY = /[一-龠々〆ヵヶ]+[（(][ぁ-んァ-ヶー・]{1,20}[）)]/g;
+const NAROU_ESCAPE = /[|｜](?=《)/g;
+const ALPHA_RUBY = /#([^#_\n][^#\n]{0,29}?)__([^_#\n]{1,30}?)__#/g;
 const ALPHA_DOTS = /《《([^《》\n]+?)》》/g;
 
-export function toNarou(text) {
-  return text
-    .replace(ALPHA_DOTS, (_, t) => dots('narou', t))
-    .replace(ALPHA_RUBY, (_, b, r) => `|${b}《${r}》`);
+export const imageMark = (id) => `【ここに画像を挿入：${id}】`;
+
+function sampleOf(text, index, len = 24) {
+  return text.slice(Math.max(0, index - 4), index + len).replace(/\n/g, '⏎');
 }
 
-export function toAlpha(text) {
-  return text
-    .replace(NAROU_RUBY, (_, b, r) => `#${b}__${r}__#`)
-    .replace(NAROU_RUBY_IMPLICIT, (_, b, r) => `#${b}__${r}__#`);
+function addWarning(warnings, type, message, sample) {
+  const w = warnings.find((x) => x.type === type);
+  if (w) { w.count++; if (w.samples.length < 3 && sample) w.samples.push(sample); return; }
+  warnings.push({ type, message, count: 1, samples: sample ? [sample] : [] });
 }
 
-// ルビ・傍点の書き方だけを変換（原稿の書き換え用）
+function narouToAlpha(text, warnings) {
+  let t = text.replace(NAROU_IMAGE, (m, code, user) => {
+    addWarning(warnings, 'image', 'なろうの挿絵タグを、みてみんの画像ページの URL にしました。アルファポリスで、その画像を入れ直してください（エディターの「画像」一覧から開けます）', `<i${code}|${user}>`);
+    return miteminUrl(user, code);
+  });
+  for (const m of t.matchAll(NAROU_ESCAPE)) addWarning(warnings, 'escape', '「|《」（ルビにしない書き方）はアルファポリスに同じ書き方がないため、そのまま残しました', sampleOf(t, m.index));
+  t = t.replace(NAROU_RUBY, (m, base, reading, i, all) => {
+    if (/[#_]/.test(base + reading)) {
+      addWarning(warnings, 'ruby-unsafe', 'ルビに「#」「_」が含まれるため変換しませんでした', sampleOf(all, i));
+      return m;
+    }
+    return `#${base}__${reading}__#`;
+  });
+  t = t.replace(NAROU_RUBY_IMPLICIT, (m, base, reading, i, all) => {
+    // 直前が | ならルビにしない書き方（エスケープ）なので触らない
+    if (/[|｜]$/.test(all.slice(0, i))) return m;
+    return `#${base}__${reading}__#`;
+  });
+  for (const m of t.matchAll(NAROU_PAREN_RUBY)) {
+    addWarning(warnings, 'paren-ruby', '「漢字（かな）」はなろうでは自動でルビになりますが、ただの括弧か判別できないためそのまま残しました', m[0]);
+  }
+  return t;
+}
+
+function alphaToNarou(text, warnings) {
+  let t = text.replace(ALPHA_IMAGE, (m, id) => {
+    addWarning(warnings, 'image', 'アルファポリスの画像タグを「ここに画像を挿入」の目印にしました。なろうでは、みてみんの画像で入れ直してください', m);
+    return imageMark(id);
+  });
+  // みてみんの画像ページの URL は、なろうの挿絵タグに戻す
+  t = t.replace(MITEMIN_URL, (m, user, code) => `<i${code}|${user}>`);
+  t = t.replace(ALPHA_DOTS, (m, body) => dots('narou', body));
+  t = t.replace(ALPHA_RUBY, (m, base, reading, i, all) => {
+    if ([...base].length > RUBY_LIMIT || [...reading].length > RUBY_LIMIT) {
+      addWarning(warnings, 'ruby-long', `なろうのルビは対象・読みとも${RUBY_LIMIT}文字までです。長いルビはなろうでは表示されません`, sampleOf(all, i));
+    }
+    return `|${base}《${reading}》`;
+  });
+  return t;
+}
+
+/**
+ * from の記法で書かれた文章を to の記法へ変換する。変換できないものは原文のまま残し、warnings に入れる。
+ * @returns {{ text: string, warnings: { type, message, count, samples }[] }}
+ */
+export function convertText(from, to, text) {
+  const warnings = [];
+  if (!text || from === to) return { text: text || '', warnings };
+  const out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings);
+  return { text: out, warnings };
+}
+
+export function toNarou(text) { return convertText('alpha', 'narou', text).text; }
+export function toAlpha(text) { return convertText('narou', 'alpha', text).text; }
+
+// 旧版との互換：その投稿先の書き方にする
 export function convertRuby(site, text) {
   return site === 'alpha' ? toAlpha(text) : toNarou(text);
 }
-
-// 投稿用に変換（コピー・書き出し用）。アルファポリスでは挿絵タグを目印に置き換える
 export function convert(site, text) {
-  const t = convertRuby(site, text);
-  return site === 'alpha' ? t.replace(NAROU_IMAGE, (_, img) => `【挿絵 i${img}：アルファポリスで画像を挿入】`) : t;
+  return convertRuby(site, text);
 }
 
 export function countImages(text) {
-  return (text.match(NAROU_IMAGE) || []).length;
+  return findImages(text || '').length;
 }
 
 // みてみんの画像ページURL → なろうの挿絵タグ
 //   https://50921.mitemin.net/i1149234/  →  <i1149234|50921>
 const MITEMIN_URL = /https?:\/\/(\d+)\.mitemin\.net\/i(\d+)\/?/g;
+
+export function miteminUrl(user, code) {
+  return `https://${user}.mitemin.net/i${code}/`;
+}
+
+/**
+ * 文章の中の画像を探す（なろうの挿絵タグ・みてみんの URL・アルファポリスの画像タグ）。
+ * 戻り値: [{ kind: 'narou'|'mitemin'|'alpha', text（見つかった文字列）, index, line（1から）, user, code, url（開けるときだけ） }]
+ */
+export function findImages(text) {
+  const out = [];
+  const lineOf = (i) => text.slice(0, i).split('\n').length;
+  for (const m of text.matchAll(NAROU_IMAGE)) {
+    out.push({ kind: 'narou', text: m[0], index: m.index, line: lineOf(m.index), code: m[1], user: m[2], url: miteminUrl(m[2], m[1]) });
+  }
+  for (const m of text.matchAll(MITEMIN_URL)) {
+    out.push({ kind: 'mitemin', text: m[0], index: m.index, line: lineOf(m.index), user: m[1], code: m[2], url: miteminUrl(m[1], m[2]) });
+  }
+  for (const m of text.matchAll(ALPHA_IMAGE)) {
+    out.push({ kind: 'alpha', text: m[0], index: m.index, line: lineOf(m.index), code: m[1], url: '' });
+  }
+  return out.sort((a, b) => a.index - b.index);
+}
 
 export function miteminToTag(text) {
   return text.replace(MITEMIN_URL, (_, user, img) => `<i${img}|${user}>`);
@@ -114,7 +204,9 @@ export function episodeUrl(project, index, site) {
 }
 
 export function fillTemplate(text, project, index) {
-  const ep = project.episodes[index] || { title: '' };
+  const e = project.episodes[index];
+  // サイト別原稿のメイン側のタイトル（旧形式の title にも対応）
+  const ep = { title: e?.drafts?.[project.site]?.title ?? e?.title ?? '' };
   const narou = episodeUrl(project, index, 'narou');
   const alpha = episodeUrl(project, index, 'alpha');
   const values = {

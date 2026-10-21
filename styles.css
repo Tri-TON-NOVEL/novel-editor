@@ -372,6 +372,14 @@ body[data-site="narou"] .alpha-only { display: none !important; }
 .editor-tools .menu summary.tool { min-height: 30px; padding: 4px 10px; font-size: 13px; }
 .symbol-list { display: grid; grid-template-columns: repeat(4, 1fr); min-width: 200px; }
 .symbol-list button { text-align: center; border: 1px solid var(--border); font-family: var(--font-body); }
+.badge { display: inline-block; min-width: 1.6em; padding: 0 5px; border-radius: 999px; background: var(--hover); font-size: 11px; text-align: center; }
+.image-list { min-width: 300px; max-width: min(420px, 90vw); max-height: min(420px, 60dvh); overflow-y: auto; gap: 0; }
+.image-list .image-item { display: flex; flex-direction: column; gap: 4px; padding: 8px; border-bottom: 1px solid var(--border); }
+.image-list .image-item:last-child { border-bottom: 0; }
+.image-list .image-head { font-size: 13px; font-weight: 700; }
+.image-list .image-sub { font-size: 11px; color: var(--muted); word-break: break-all; }
+.image-list .image-actions { display: flex; flex-wrap: wrap; gap: 4px; }
+.image-list .image-actions button { border: 1px solid var(--border); font-size: 13px; text-align: center; }
 
 .extra { border: 1px solid var(--border); border-radius: 8px; background: var(--surface); }
 .extra > summary { border: 0; background: transparent; font-weight: 700; font-size: 13px; width: 100%; text-align: left; }
@@ -612,6 +620,22 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .imp-lines .ln-no { flex: none; width: 4.5em; text-align: right; color: var(--muted); font-size: 11px; font-family: var(--font-ui); padding-top: 6px; }
 .imp-lines .ln-text { flex: 1; min-width: 0; white-space: pre-wrap; word-break: break-all; padding-top: 3px; }
 .imp-lines .ln.flash { outline: 2px solid var(--accent); }
+/* 見出しの掃除：消える行・塊、前書き／後書きになる行 */
+.imp-lines .ln.cut-line .ln-text { text-decoration: line-through; color: var(--muted); }
+.imp-lines .ln.cut-block { background: repeating-linear-gradient(-45deg, transparent 0 6px, var(--hover) 6px 12px); }
+.imp-lines .ln.cut-block .ln-text { color: var(--muted); text-decoration: line-through; }
+.imp-lines .ln.to-foreword, .imp-lines .ln.to-afterword { border-left: 4px dashed var(--accent); }
+.imp-lines .ln-tag { flex: none; font-size: 10px; color: var(--muted); font-family: var(--font-ui); padding-top: 6px; min-width: 3.5em; }
+.imp-cleanup { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.imp-cleanup > summary { border: 0; background: transparent; font-weight: 700; font-size: 13px; padding: 4px 0; min-height: 0; }
+.imp-cleanup-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 14em); gap: 6px; align-items: center; font-size: 13px; }
+.imp-cleanup-rules { display: grid; gap: 4px; margin-top: 6px; }
+.imp-cleanup-rule { display: grid; grid-template-columns: minmax(0, 1fr) 7em minmax(0, 14em) auto; gap: 6px; align-items: center; }
+.imp-cleanup input[type="text"], .imp-cleanup select { padding: 6px 8px; font-size: 14px; }
+.imp-cleanup input.imp-pattern { font-family: Consolas, "Cascadia Mono", Menlo, "Courier New", monospace; }
+@media (max-width: 899px) {
+  .imp-cleanup-head, .imp-cleanup-rule { grid-template-columns: 1fr 1fr; }
+}
 .imp-side { display: flex; flex-direction: column; min-height: 0; border: 1px solid var(--border); border-radius: 8px; }
 .imp-side-head { padding: 8px 10px; font-size: 13px; font-weight: 700; border-bottom: 1px solid var(--border); }
 .imp-episodes { list-style: none; margin: 0; padding: 4px; overflow: auto; flex: 1; }
@@ -729,4 +753,15 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 .dialog > .dialog-foot { position: sticky; bottom: -18px; margin: 0 -18px -18px; padding: 10px 18px 18px; background: var(--surface); border-top: 1px solid var(--border); z-index: 2; }
 @media (max-width: 600px) {
   .dialog > .dialog-foot { bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px 14px; }
+}
+/* 狭い画面のインポート（区切り）：条件と全文を詰め込まず、画面ごとスクロールする */
+@media (max-width: 899px) {
+  .import-step[data-istep="2"] { overflow-y: auto; }
+  .import-step[data-istep="2"] .imp-split { flex: none; display: flex; flex-direction: column; }
+  .imp-lines { min-height: 60dvh; max-height: 75dvh; }
+  .imp-side { min-height: 30dvh; max-height: 45dvh; }
+}
+@media (min-width: 900px) {
+  /* 広い画面：条件の欄は高さを抑えてスクロールし、全文の一覧を広く取る */
+  .import-step[data-istep="2"] .imp-rules { max-height: 42dvh; overflow-y: auto; padding-right: 4px; }
 }

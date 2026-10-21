@@ -1,5 +1,5 @@
 // 分類つきの表（設定・登場人物）と、章ごとの全体プロット
-import { makeId, newChapter, countChars } from './format.js';
+import { makeId, countChars } from './format.js';
 
 export const CHARACTER_COLUMNS = [
   { key: 'name', label: '名前', width: '9em' },
@@ -206,16 +206,24 @@ export function categorizedTable(container, getData, opts) {
 }
 
 /**
- * 章ごとの全体プロット
+ * 全体プロット：章をプルダウンで1つずつ切り替えて、章タイトルと章プロットを編集する。
+ * 章そのものの追加・移動・削除は、目次（章とエピソードの階層）と同じ処理を使う（ops で受け取る）。
  * @param getChapters () => chapters 配列
+ * @param ops { onChange, toast, copy, addChapter(afterIndex) → 章, moveChapter(章, ±1) → 動いたか, removeChapter(章) → 削除したか, episodeCount(章) }
  */
-// 章はプルダウンで1つずつ切り替えて編集する
-export function chapterList(container, getChapters, { onChange, toast, copy }) {
+export function chapterList(container, getChapters, ops) {
+  const { onChange, toast, copy } = ops;
   let current = 0;
   const chapterName = (ch) => ch.title || '（無題の章）';
 
   function render(focusTitle = false) {
     const chapters = getChapters();
+    if (!chapters.length) {
+      container.replaceChildren(
+        h('p', { className: 'hint', textContent: 'まだ章がありません。' }),
+        btn('＋ 章を追加', () => { ops.addChapter(-1); current = 0; render(true); }));
+      return;
+    }
     current = Math.max(0, Math.min(current, chapters.length - 1));
     const ch = chapters[current];
 
@@ -226,28 +234,18 @@ export function chapterList(container, getChapters, { onChange, toast, copy }) {
     select.addEventListener('change', () => { current = Number(select.value); render(); });
 
     const move = (d) => {
-      const j = current + d;
-      if (j < 0 || j >= chapters.length) return;
-      [chapters[current], chapters[j]] = [chapters[j], chapters[current]];
-      current = j;
-      onChange();
+      if (!ops.moveChapter(ch, d)) return;
+      current = getChapters().indexOf(ch);
       render();
     };
     const add = () => {
-      chapters.splice(current + 1, 0, newChapter());
-      current += 1;
-      onChange();
+      const created = ops.addChapter(current);
+      current = getChapters().indexOf(created);
       render(true);
     };
     const remove = () => {
-      const name = chapterName(ch);
-      if (!confirm(`章「${name}」を削除しますか？`)) return;
-      if (ch.plot && !confirm(`【最終確認】「${name}」のプロット ${countChars(ch.plot).all.toLocaleString()}字が消え、元に戻せません。削除しますか？`)) return;
-      chapters.splice(current, 1);
-      if (!chapters.length) chapters.push(newChapter());
-      onChange();
+      if (!ops.removeChapter(ch)) return;
       render();
-      toast(`章「${name}」を削除しました`);
     };
 
     const title = h('input', { type: 'text', className: 'chapter-title', value: ch.title, placeholder: '章タイトル', autocomplete: 'off' });
@@ -255,7 +253,7 @@ export function chapterList(container, getChapters, { onChange, toast, copy }) {
     title.addEventListener('input', () => {
       ch.title = title.value;
       select.options[current].textContent = chapterName(ch);
-      onChange();
+      onChange({ chapterTitle: true });
     });
     const count = h('span', { className: 'count' });
     const plot = h('textarea', { className: 'chapter-plot', value: ch.plot, placeholder: 'この章のプロット', spellcheck: false });
@@ -267,7 +265,7 @@ export function chapterList(container, getChapters, { onChange, toast, copy }) {
     container.replaceChildren(
       h('div', { className: 'chapter-bar' },
         select,
-        h('span', { className: 'count', textContent: `${current + 1} / ${chapters.length}章` }),
+        h('span', { className: 'count', textContent: `${current + 1} / ${chapters.length}章 ・ ${ops.episodeCount(ch)}話` }),
         btn('＋ 章を追加', add),
         btn('↑', () => move(-1)),
         btn('↓', () => move(1)),
@@ -281,5 +279,12 @@ export function chapterList(container, getChapters, { onChange, toast, copy }) {
       plot);
     if (focusTitle) title.focus();
   }
-  return { render };
+
+  // 目次から「この章のプロット」を開くとき
+  function select(chapterId) {
+    const i = getChapters().findIndex((c) => c.id === chapterId);
+    if (i >= 0) current = i;
+  }
+
+  return { render, select };
 }

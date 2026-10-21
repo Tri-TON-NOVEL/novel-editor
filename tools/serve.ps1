@@ -12,7 +12,7 @@ Write-Host "Serving $root at http://localhost:$Port/"
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   $path = [Uri]::UnescapeDataString($ctx.Request.Url.AbsolutePath.TrimStart('/'))
-  if ($path -eq '') { $path = 'index.html' }
+  if ($path -eq '' -or $path.EndsWith('/')) { $path = $path + 'index.html' }
   $file = [IO.Path]::GetFullPath((Join-Path $root $path))
   if ($file.StartsWith($root) -and (Test-Path $file -PathType Leaf)) {
     $bytes = [IO.File]::ReadAllBytes($file)
