@@ -19,7 +19,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.21-3.7';
+const APP_VERSION = '2026.10.21-3.8';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1245,6 +1245,22 @@ function renderCloudActions() {
   }
 }
 
+// 画面の最前面に出ている確認・設定画面（showModal）より前に、外部の画面（Google Picker など）は出せない。
+// その間だけ閉じておき、終わったら同じ状態で開き直す（入力内容やスクロール位置はそのまま）。
+async function aboveDialogs(fn) {
+  const opened = [...document.querySelectorAll('dialog[open]')].filter((d) => d.matches(':modal'));
+  const scrolls = opened.map((d) => [d, ...d.querySelectorAll('*')].filter((n) => n.scrollTop > 0).map((n) => [n, n.scrollTop]));
+  opened.forEach((d) => d.close());
+  try {
+    return await fn();
+  } finally {
+    opened.forEach((d, i) => {
+      if (!d.open) d.showModal();
+      for (const [n, top] of scrolls[i]) n.scrollTop = top;
+    });
+  }
+}
+
 // 保存先フォルダ（端末ごとの設定）
 function renderCloudFolder(p) {
   const wrap = Object.assign(document.createElement('div'), { className: 'cloud-folder' });
@@ -1259,7 +1275,7 @@ function renderCloudFolder(p) {
     renderCloudActions();
     toast(`保存先を「${folder.name}」にしました。すでに保存したファイルは元のフォルダに残り、次に新しく保存するファイルからこのフォルダに入ります`);
   };
-  const pick = button('フォルダを選ぶ（Google Picker）…', async () => after(await p.pickFolder()));
+  const pick = button('フォルダを選ぶ（Google Picker）…', async () => after(await aboveDialogs(() => p.pickFolder())));
   pick.disabled = !p.canPickFolder();
   if (!p.canPickFolder()) pick.title = '下の設定に Google API キーを入れると使えます';
   row.append(pick, button('新しいフォルダを作って使う…', async () => {
