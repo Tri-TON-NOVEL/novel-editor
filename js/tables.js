@@ -1,5 +1,6 @@
 // 分類つきの表（設定・登場人物）と、章ごとの全体プロット
 import { makeId, countChars } from './format.js';
+import { ask } from './dialogs.js';
 
 export const CHARACTER_COLUMNS = [
   { key: 'name', label: '名前', width: '9em' },
@@ -72,16 +73,16 @@ export function categorizedTable(container, getData, opts) {
     last.select();
   }
 
-  function removeCategory(cat) {
+  async function removeCategory(cat) {
     const data = getData();
     const items = data.items.filter((i) => i.categoryId === cat.id);
     const name = cat.name || '（名前なし）';
     if (items.length) {
       if (data.categories.length === 1) { toast('最後の分類は削除できません。中の行を消すか、別の分類を作って移してください'); return; }
       const dest = data.categories.find((c) => c !== cat);
-      if (!confirm(`分類「${name}」を削除しますか？\n中の${items.length}件は「${dest.name}」に移ります。`)) return;
-      for (const i of items) i.categoryId = dest.id;
-    } else if (!confirm(`分類「${name}」を削除しますか？`)) {
+      if (!(await ask(`分類「${name}」を削除しますか？\n中の${items.length}件は「${dest.name}」に移ります。`))) return;
+      for (const i of data.items) if (i.categoryId === cat.id) i.categoryId = dest.id;
+    } else if (!(await ask(`分類「${name}」を削除しますか？`))) {
       return;
     }
     data.categories.splice(data.categories.indexOf(cat), 1);
@@ -108,9 +109,9 @@ export function categorizedTable(container, getData, opts) {
     container.querySelector(`tr[data-id="${item.id}"] textarea`)?.focus();
   }
 
-  function removeItem(item) {
+  async function removeItem(item) {
     const label = item[columns[0].key] || '（名前なし）';
-    if (!confirm(`「${label}」を削除しますか？`)) return;
+    if (!(await ask(`「${label}」を削除しますか？`))) return;
     const items = getData().items;
     items.splice(items.indexOf(item), 1);
     onChange();
@@ -243,8 +244,8 @@ export function chapterList(container, getChapters, ops) {
       current = getChapters().indexOf(created);
       render(true);
     };
-    const remove = () => {
-      if (!ops.removeChapter(ch)) return;
+    const remove = async () => {
+      if (!(await ops.removeChapter(ch))) return;
       render();
     };
 

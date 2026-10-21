@@ -1,7 +1,15 @@
-// ローカルファイルの読み書き。
-// Chrome / Edge（Windows・Mac）は File System Access API で同じファイルへ上書き保存できる。
-// Safari（Mac・iPad）は「書き出し（ダウンロード）」と「ファイル選択で読み込み」になる。
+// ローカルファイルの読み書き。保存のしかたは、ブラウザにある機能で決める（OS の名前では分けない）。
+//   Chrome / Edge（Windows・Mac）… File System Access API：保存先を選ぶ画面。同じファイルへ上書き保存もできる
+//   iPhone・iPad（Safari・ホーム画面のアプリ）… 共有メニュー：「"ファイル"に保存」で保存先（iCloud Drive など）を選ぶ
+//   それ以外（Mac の Safari、Android など）… ダウンロード（「ダウンロード」フォルダへ）
+// 読み込みは、どれも「ファイルを選ぶ画面」。
 const hasFsa = 'showOpenFilePicker' in window && 'showSaveFilePicker' in window;
+// iPadOS の Safari は Mac と名乗るので、タッチ対応かどうかでも見分ける
+const isAppleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+
+function canShareFile(file) {
+  try { return !!navigator.canShare && navigator.canShare({ files: [file] }); } catch { return false; }
+}
 
 export const WORK_TYPES = [{ description: '小説ファイル', accept: { 'application/json': ['.json'] } }];
 export const TEXT_TYPES = [{ description: 'テキスト', accept: { 'text/plain': ['.txt'] } }];
@@ -63,7 +71,14 @@ export const localFile = {
     await w.close();
   },
 
-  // 戻り値: 保存先のハンドル / 'downloaded'（書き出しの場合） / キャンセル時は null
+  // 保存のしかた（画面の案内に使う）：'picker' | 'share' | 'download'
+  get saveMethod() {
+    if (hasFsa) return 'picker';
+    if (isAppleTouch && navigator.share) return 'share';
+    return 'download';
+  },
+
+  // 戻り値: 保存先のハンドル / 'shared'（共有メニューで渡した） / 'downloaded'（ダウンロード） / キャンセル時は null
   async saveAs(text, suggestedName, types, mime) {
     if (hasFsa) {
       try {
@@ -73,6 +88,19 @@ export const localFile = {
       } catch (e) {
         if (isAbort(e)) return null;
         throw e;
+      }
+    }
+    if (isAppleTouch) {
+      // iPhone・iPad：共有メニューを出す（「"ファイル"に保存」で保存先を選べる）。使えなければダウンロード
+      const file = new File([text], suggestedName, { type: mime });
+      if (canShareFile(file)) {
+        try {
+          await navigator.share({ files: [file] });
+          return 'shared';
+        } catch (e) {
+          if (isAbort(e)) return null; // 共有メニューを閉じた
+          // 押してから時間がたって共有できないときなどは、ダウンロードにする
+        }
       }
     }
     download(text, suggestedName, mime);

@@ -8,6 +8,7 @@ import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from 
 import { makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence } from './backup.js';
 import * as autoBackup from './autobackup.js';
 import { initImport } from './importui.js';
+import { ask, askText } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
@@ -18,7 +19,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.21-3.4';
+const APP_VERSION = '2026.10.21-3.6';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -423,15 +424,15 @@ function addChapter(afterIndex = project.chapters.length - 1, title = '') {
   return ch;
 }
 
-function addChapterFromList() {
-  const title = prompt('新しい章の名前', `第${project.chapters.length + 1}章`);
+async function addChapterFromList() {
+  const title = await askText('新しい章の名前', `第${project.chapters.length + 1}章`);
   if (title === null) return;
   addChapter(project.chapters.length - 1, title.trim());
   toast(`章「${title.trim() || '（無題の章）'}」を追加しました`);
 }
 
-function renameChapter(ch) {
-  const title = prompt('章の名前', ch.title);
+async function renameChapter(ch) {
+  const title = await askText('章の名前', ch.title);
   if (title === null) return;
   ch.title = title.trim();
   changed();
@@ -450,11 +451,11 @@ function moveChapter(ch, delta) {
 }
 
 // 章を消しても、所属していたエピソードは消さずに未分類へ移す
-function removeChapter(ch) {
+async function removeChapter(ch) {
   const n = episodeCountIn(ch);
   const name = chapterName(ch);
-  if (!confirm(`章「${name}」を削除しますか？\n${n ? `所属している ${n}話は「未分類」に移ります（エピソードは消えません）。` : '所属しているエピソードはありません。'}`)) return false;
-  if (ch.plot && !confirm(`【最終確認】章「${name}」のプロット ${countChars(ch.plot).all.toLocaleString()}字は消えます。削除しますか？`)) return false;
+  if (!(await ask(`章「${name}」を削除しますか？\n${n ? `所属している ${n}話は「未分類」に移ります（エピソードは消えません）。` : '所属しているエピソードはありません。'}`))) return false;
+  if (ch.plot && !(await ask(`【最終確認】章「${name}」のプロット ${countChars(ch.plot).all.toLocaleString()}字は消えます。削除しますか？`))) return false;
   for (const e of project.episodes) if (e.chapterId === ch.id) e.chapterId = null;
   project.chapters.splice(project.chapters.indexOf(ch), 1);
   normalizeOrder();
@@ -636,13 +637,16 @@ function moveEpisode(delta) {
 }
 
 // 間違って消さないよう、2回確認する
-function deleteEpisode(index = epIndex) {
+async function deleteEpisode(index = epIndex) {
   const ep = project.episodes[index];
   const name = `「${episodeName(ep)}」`;
   const size = countChars(mainDraft(ep).body).all;
+  if (!(await ask(project.episodes.length === 1 ? `${name}の内容を消しますか？` : `${name}を削除しますか？`))) return;
+  if (!(await ask(`【最終確認】本当に${name}を削除しますか？\n本文 ${size.toLocaleString()}字が消え、元に戻せません。`))) return;
+  // 確認している間に並びが変わっていても、同じエピソードを消す
+  index = project.episodes.indexOf(ep);
+  if (index < 0) return;
   const last = project.episodes.length === 1;
-  if (!confirm(last ? `${name}の内容を消しますか？` : `${name}を削除しますか？`)) return;
-  if (!confirm(`【最終確認】本当に${name}を削除しますか？\n本文 ${size.toLocaleString()}字が消え、元に戻せません。`)) return;
   if (last) project.episodes[0] = newEpisode();
   else project.episodes.splice(index, 1);
   removeEpisodeVersions(ep.id).catch(() => {});
@@ -713,12 +717,12 @@ async function confirmProjectDelete(p) {
   const n = normalize(p);
   const name = n.title || '無題';
   const vcount = (await versions.list(p.id)).length;
-  if (!confirm(`作品「${name}」をこの端末から削除しますか？`)) return false;
-  if (!confirm(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
+  if (!(await ask(`作品「${name}」をこの端末から削除しますか？`))) return false;
+  if (!(await ask(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
     + `プロット・設定・登場人物、バージョン${vcount}件がすべて消えます。\n`
-    + '（「ファイルに保存」やバックアップ、クラウドに保存したものは残ります）\n本当に削除しますか？')) return false;
+    + '（「ファイルに保存」やバックアップ、クラウドに保存したものは残ります）\n本当に削除しますか？'))) return false;
   const word = n.title || '削除';
-  const typed = prompt(`【最終確認】削除するには、${n.title ? '作品名' : '「削除」'}を正確に入力してください。\n${word}`);
+  const typed = await askText(`【最終確認】削除するには、${n.title ? '作品名' : '「削除」'}を正確に入力してください。\n${word}`, '', { ok: '削除する', danger: true });
   if (typed === null) return false;
   if (typed.trim() !== word) { toast('入力が一致しなかったので、削除しませんでした'); return false; }
   return true;
@@ -740,7 +744,7 @@ async function importContent(content, links = {}) {
   if (same) {
     const localNewer = content.updatedAt && same.updatedAt > content.updatedAt;
     if (localNewer && serialize(same) !== serialize({ ...same, ...content })
-      && !confirm('この端末の内容の方が新しいようです。\n読み込んだ内容で上書きしますか？\n（「キャンセル」で端末の内容を開きます）')) {
+      && !(await ask('この端末の内容の方が新しいようです。\n読み込んだ内容で上書きしますか？\n（「キャンセル」で端末の内容を開きます）'))) {
       return { ...same, links: { ...same.links, ...links } };
     }
     return normalize({ ...same, ...content, id: same.id, links: { ...same.links, ...links } });
@@ -774,7 +778,9 @@ async function fileSaveAs() {
   const r = await localFile.saveAs(serialize(project), fileName(project.title, '.json'), WORK_TYPES, 'application/json');
   if (!r) return;
   if (r === 'downloaded') {
-    toast('ファイルを書き出しました（ダウンロード／「ファイル」アプリ）');
+    toast('ファイルを書き出しました（「ダウンロード」フォルダ）');
+  } else if (r === 'shared') {
+    toast('ファイルを渡しました（共有メニューで選んだ保存先）');
   } else {
     fileHandle = r;
     toast(`「${r.name}」に保存しました`);
@@ -880,7 +886,7 @@ async function runSiteCopy() {
   if (!plan.changes.length) return;
   const over = plan.changes.filter((c) => c.before);
   const toName = SITES[plan.to].short;
-  if (plan.all && !confirm(`【作品全体】${new Set(plan.changes.map((c) => c.ep)).size}話の ${toName}用の原稿を書き換えます。よろしいですか？`)) return;
+  if (plan.all && !(await ask(`【作品全体】${new Set(plan.changes.map((c) => c.ep)).size}話の ${toName}用の原稿を書き換えます。よろしいですか？`, { danger: true }))) return;
   // 上書きする前の状態を残す（元に戻せるように）
   if (over.length) {
     if (plan.all) await saveVersion(`${toName}用へのコピー前（自動）`, `${new Date().toLocaleString('ja-JP')} にメインから${toName}用へ全エピソードをコピーする前の状態`);
@@ -1065,7 +1071,7 @@ async function openVersion(id) {
 }
 
 async function restoreVersion(v) {
-  if (!confirm(`「${v.name}」の内容に戻しますか？\n今の内容は「${v.name}に戻す前」として自動で残ります。`)) return;
+  if (!(await ask(`「${v.name}」の内容に戻しますか？\n今の内容は「${v.name}に戻す前」として自動で残ります。`))) return;
   if (isEpisodeVersion(v)) {
     const index = project.episodes.findIndex((e) => e.id === v.episodeId);
     if (index < 0) { toast('このエピソードは削除されています', true); return; }
@@ -1096,8 +1102,8 @@ async function copyVersion(v) {
 }
 
 async function deleteVersion(v) {
-  if (!confirm(`版「${v.name}」を削除しますか？`)) return;
-  if (!confirm(`【最終確認】「${v.name}」は元に戻せません。削除しますか？`)) return;
+  if (!(await ask(`版「${v.name}」を削除しますか？`))) return;
+  if (!(await ask(`【最終確認】「${v.name}」は元に戻せません。削除しますか？`))) return;
   await versions.remove(v.id);
   toast(`版「${v.name}」を削除しました`);
   if (isEpisodeVersion(v)) renderEpisodeVersions();
@@ -1111,6 +1117,8 @@ const BACKUP_REMIND_DAYS = 7;
 async function backupAll() {
   await flush();
   const { text, count, versionCount } = await makeBackup();
+  // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
+  if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive など）を選べます');
   const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
   if (!r) return;
   prefs.set('lastBackupAt', new Date().toISOString());
@@ -1135,7 +1143,7 @@ async function restoreFromFile() {
 
 async function runRestore(mode) {
   if (!pendingBackup) return;
-  if (mode === 'replace' && !confirm('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？')) return;
+  if (mode === 'replace' && !(await ask('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？'))) return;
   await flush();
   const n = await restoreBackup(pendingBackup, mode);
   pendingBackup = null;
@@ -1255,13 +1263,13 @@ function renderCloudFolder(p) {
   pick.disabled = !p.canPickFolder();
   if (!p.canPickFolder()) pick.title = '下の設定に Google API キーを入れると使えます';
   row.append(pick, button('新しいフォルダを作って使う…', async () => {
-    const name = prompt('新しいフォルダの名前（Google ドライブのマイドライブに作ります）', '小説');
+    const name = await askText('新しいフォルダの名前（Google ドライブのマイドライブに作ります）', '小説');
     if (!name || !name.trim()) return;
     after(await p.createFolder(name.trim()));
   }));
   if (!f.isDefault) {
-    row.append(button('自動のフォルダに戻す', () => {
-      if (!confirm('保存先を、自動で作る「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）')) return;
+    row.append(button('自動のフォルダに戻す', async () => {
+      if (!(await ask('保存先を、自動で作る「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）'))) return;
       p.resetFolder();
       renderCloudActions();
     }));
@@ -1392,11 +1400,11 @@ function insertSymbol(sym) {
   if (pair && !sel) t.setSelectionRange(s + 1, s + 1);
 }
 
-function runAutoIndent() {
+async function runAutoIndent() {
   const t = el.body;
+  if (autoIndent(t.value) === t.value) { toast('字下げが必要な段落はありません'); return; }
+  if (!(await ask('段落の先頭を一字下げますか？\n（「 などで始まる行、すでに字下げしてある行は除きます）'))) return;
   const next = autoIndent(t.value);
-  if (next === t.value) { toast('字下げが必要な段落はありません'); return; }
-  if (!confirm('段落の先頭を一字下げますか？\n（「 などで始まる行、すでに字下げしてある行は除きます）')) return;
   const lines = next.split('\n').filter((l, i) => l !== t.value.split('\n')[i]).length;
   replaceSelection(t, next, 0, t.value.length);
   t.setSelectionRange(0, 0);
@@ -1597,11 +1605,11 @@ function renderReportView() {
   updateCounts();
 }
 
-function applyTemplate(kind) {
+async function applyTemplate(kind) {
   const t = templates().find((x) => x.id === $('tpl-' + kind).value);
   if (!t) { toast('ひな型を選んでください'); return; }
   if (kind === 'afterword') {
-    if (el.afterword.value && !confirm('今の後書きをひな型で置き換えますか？')) return;
+    if (el.afterword.value && !(await ask('今の後書きをひな型で置き換えますか？'))) return;
     $('afterword-box').open = true;
     replaceSelection(el.afterword, fillTemplate(t.body, project, epIndex), 0, el.afterword.value.length);
     toast(`ひな型「${t.name}」を差し込みました`);
@@ -1609,11 +1617,11 @@ function applyTemplate(kind) {
   }
   const index = Number(el.reportEpisode.value) || 0;
   if (kind === 'x') {
-    if (el.xText.value && !confirm('今の投稿文をひな型で置き換えますか？')) return;
+    if (el.xText.value && !(await ask('今の投稿文をひな型で置き換えますか？'))) return;
     el.xText.value = fillTemplate(t.body, project, index);
     el.xText.dispatchEvent(new Event('input', { bubbles: true }));
   } else {
-    if ((el.nrTitle.value || el.nrBody.value) && !confirm('今の活動報告をひな型で置き換えますか？')) return;
+    if ((el.nrTitle.value || el.nrBody.value) && !(await ask('今の活動報告をひな型で置き換えますか？'))) return;
     el.nrTitle.value = fillTemplate(t.title || '', project, index);
     el.nrBody.value = fillTemplate(t.body, project, index);
     el.nrTitle.dispatchEvent(new Event('input', { bubbles: true }));
@@ -1666,8 +1674,8 @@ function renderTemplateList() {
     list.append(head);
     for (const t of all.filter((x) => x.kind === kind)) {
       const edit = button('編集', () => editTemplate(t));
-      const del = button('削除', () => {
-        if (!confirm(`ひな型「${t.name}」を削除しますか？`)) return;
+      const del = button('削除', async () => {
+        if (!(await ask(`ひな型「${t.name}」を削除しますか？`))) return;
         saveTemplates(templates().filter((x) => x.id !== t.id));
         renderTemplateList();
       }, 'danger');
@@ -1744,8 +1752,8 @@ function renderLinkEditor() {
       button('開く', () => { if (l.url.trim()) openLink(l.url); else toast('URL を入れてください'); }, 'tool'),
       button('↑', () => move(-1), 'tool'),
       button('↓', () => move(1), 'tool'),
-      button('削除', () => {
-        if (!confirm(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`)) return;
+      button('削除', async () => {
+        if (!(await ask(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`, { danger: true }))) return;
         editingLinks.splice(i, 1);
         renderLinkEditor();
       }, 'tool danger'));
@@ -2058,6 +2066,47 @@ function bindSplitter() {
   splitter.addEventListener('pointerup', end);
   splitter.addEventListener('pointercancel', end);
   splitter.addEventListener('dblclick', () => { prefs.set('split', applySplit(SPLIT_DEFAULT)); });
+  bindSidebarSplitter();
+}
+
+// 目次（左）とエディターの境目をドラッグして、目次の幅を変える（端末に記憶）
+const SIDEBAR_DEFAULT = 280;
+function applySidebarWidth(px) {
+  // 狭すぎ・広すぎにならないように（エディターに 360px は残す）
+  const max = Math.max(200, Math.min(640, window.innerWidth - 360));
+  const w = Math.round(Math.min(max, Math.max(200, px)));
+  document.querySelector('.workspace').style.setProperty('--sidebar-w', `${w}px`);
+  return w;
+}
+
+function bindSidebarSplitter() {
+  const splitter = $('sidebar-splitter');
+  const workspace = document.querySelector('.workspace');
+  applySidebarWidth(prefs.get('sidebarWidth', SIDEBAR_DEFAULT));
+  let width = null;
+  splitter.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    splitter.setPointerCapture(e.pointerId);
+    splitter.classList.add('dragging');
+    document.body.classList.add('resizing');
+    width = prefs.get('sidebarWidth', SIDEBAR_DEFAULT);
+  });
+  splitter.addEventListener('pointermove', (e) => {
+    if (width === null) return;
+    width = applySidebarWidth(e.clientX - workspace.getBoundingClientRect().left);
+  });
+  const end = () => {
+    if (width === null) return;
+    prefs.set('sidebarWidth', width);
+    width = null;
+    splitter.classList.remove('dragging');
+    document.body.classList.remove('resizing');
+  };
+  splitter.addEventListener('pointerup', end);
+  splitter.addEventListener('pointercancel', end);
+  splitter.addEventListener('dblclick', () => { prefs.set('sidebarWidth', applySidebarWidth(SIDEBAR_DEFAULT)); });
+  // 画面の幅が変わったら、はみ出さないように合わせ直す
+  window.addEventListener('resize', () => applySidebarWidth(prefs.get('sidebarWidth', SIDEBAR_DEFAULT)));
 }
 
 function bindEvents() {
@@ -2106,7 +2155,7 @@ function bindEvents() {
     } else if (d.ep !== undefined) {
       selectEpisode(Number(d.ep));
     } else if (d.epDelete !== undefined) {
-      deleteEpisode(Number(d.epDelete));
+      deleteEpisode(Number(d.epDelete)).catch(fail);
     } else if (d.max) {
       maximizeField(d.max);
     } else if (d.toggleChapter) {
@@ -2117,7 +2166,7 @@ function bindEvents() {
       insertSymbol(d.symbol);
       closeMenus();
     } else if (d.tplApply) {
-      applyTemplate(d.tplApply);
+      applyTemplate(d.tplApply).catch(fail);
     } else if (d.tplSave) {
       templateFromCurrent(d.tplSave);
     }
@@ -2232,8 +2281,8 @@ function bindEvents() {
     .then((ok) => { if (ok) toast(`「${autoBackup.folderName()}」への自動バックアップを始めました`); }).catch(fail));
   $('autobackup-now').addEventListener('click', () => autoBackup.runNow()
     .then((ok) => toast(ok ? '自動バックアップのフォルダに保存しました' : '先にフォルダを選んでください')).catch(fail));
-  $('autobackup-stop').addEventListener('click', () => {
-    if (!confirm('自動バックアップを止めますか？（これまでのバックアップファイルは消えません）')) return;
+  $('autobackup-stop').addEventListener('click', async () => {
+    if (!(await ask('自動バックアップを止めますか？（これまでのバックアップファイルは消えません）'))) return;
     autoBackup.stop().then(() => toast('自動バックアップを止めました')).catch(fail);
   });
 }

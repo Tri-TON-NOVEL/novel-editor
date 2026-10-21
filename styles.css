@@ -148,9 +148,32 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: var(--sidebar-w, 280px) minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
+  position: relative;
 }
+/* 目次とエディターの境目（ドラッグで目次の幅を変える） */
+.sidebar-splitter {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc(var(--sidebar-w, 280px) - 5px);
+  width: 10px;
+  z-index: 5;
+  cursor: col-resize;
+  touch-action: none;
+}
+.sidebar-splitter::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 4px;
+  width: 2px;
+  background: transparent;
+  transition: background .15s;
+}
+.sidebar-splitter:hover::after, .sidebar-splitter.dragging::after { background: var(--accent); }
 .sidebar {
   display: flex;
   flex-direction: column;
@@ -493,6 +516,7 @@ body[data-site="narou"] .alpha-only { display: none !important; }
 
 @media (max-width: 899px) {
   .workspace { grid-template-columns: minmax(0, 1fr); }
+  .sidebar-splitter { display: none; }
   .drawer-toggle { display: inline-block; }
   .sidebar {
     position: fixed;
@@ -778,3 +802,7 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 .dialog fieldset.account-grid legend, .dialog fieldset.account-grid .hint { grid-column: 1 / -1; }
 .imp-lines .ln.to-title { font-weight: 700; border-left: 4px solid var(--accent); }
 .episode-list .ep-row.flat { padding-left: 0; }
+/* 確認・入力の画面（どの OS でも 左：キャンセル／右：OK） */
+.ask-dialog { width: min(440px, calc(100vw - 32px)); }
+.ask-dialog .ask-message { margin: 0; white-space: pre-line; line-height: 1.7; }
+.ask-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; }

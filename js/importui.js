@@ -4,6 +4,7 @@
 import * as I from './importer.js';
 import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS } from './format.js';
 import { SITES, countImages } from './notation.js';
+import { ask, askText } from './dialogs.js';
 
 const KINDS = [
   ['episode', '話の区切り'],
@@ -293,10 +294,10 @@ export function initImport(ctx) {
     try { return I.headingMask(state.lines, state.rules.cleanup, merged()); } catch { return []; }
   }
 
-  function detect({ ask = true } = {}) {
+  async function detect({ confirmFirst = true } = {}) {
     if (!validateRules()) return false;
     if (!$('imp-keep-manual').checked && state.manual.size) {
-      if (ask && !confirm(`手動で指定した区切り ${state.manual.size}件を消して、検出し直しますか？`)) return false;
+      if (confirmFirst && !(await ask(`手動で指定した区切り ${state.manual.size}件を消して、検出し直しますか？`))) return false;
       state.manual.clear();
     }
     try {
@@ -598,8 +599,8 @@ export function initImport(ctx) {
     const target = state.targetProject;
     const name = target ? (target.title || '（無題）') : (state.workTitle || '（無題）');
     // 登録と違う情報があれば、先に警告する（OK で続ける／キャンセルで中止）
-    if (state.mismatches.length && !confirm(`⚠ TXT の情報が、設定に登録した内容と違います。\n${mismatchText()}\n\n別のアカウント・別の作品の TXT かもしれません。このまま取り込みますか？`)) return;
-    if (!confirm(`「${name}」に、${SITES[state.site].label}用の原稿として\n追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話\nで取り込みます。よろしいですか？`)) return;
+    if (state.mismatches.length && !(await ask(`⚠ TXT の情報が、設定に登録した内容と違います。\n${mismatchText()}\n\n別のアカウント・別の作品の TXT かもしれません。このまま取り込みますか？`, { danger: true, ok: '取り込む' }))) return;
+    if (!(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
     const btn = $('imp-commit');
     btn.disabled = true;
     try {
@@ -688,7 +689,7 @@ export function initImport(ctx) {
     if (step === 2) {
       fillPresets();
       renderRuleForm();
-      if (doDetect || !state.auto.size) detect({ ask: false });
+      if (doDetect || !state.auto.size) detect({ confirmFirst: false });
       else renderMarks();
     }
     if (step === 3) {
@@ -748,7 +749,7 @@ export function initImport(ctx) {
   $('imp-to-2').addEventListener('click', () => go(2, { detect: true }).catch(ctx.fail));
   $('imp-resume-btn').addEventListener('click', () => resume().catch(ctx.fail));
   $('imp-resume-discard').addEventListener('click', async () => {
-    if (!confirm('前回のインポート作業を破棄しますか？（作品には影響しません）')) return;
+    if (!(await ask('前回のインポート作業を破棄しますか？（作品には影響しません）'))) return;
     await clearSession();
     $('imp-resume').hidden = true;
   });
@@ -761,13 +762,13 @@ export function initImport(ctx) {
     state.rules = completeRules(rules);
     $('imp-preset-delete').disabled = !state.presetId.startsWith('u:');
     renderRuleForm();
-    detect({ ask: false });
+    detect({ confirmFirst: false });
   });
 
   // 今の条件に名前を付けて保存する。戻り値：保存した条件の ID（やめたら null）
-  function saveAsPreset() {
+  async function saveAsPreset() {
     if (!validateRules()) return null;
-    const name = prompt('この条件（区切り・見出しの扱い）に名前を付けて保存します', '');
+    const name = await askText('この条件（区切り・見出しの扱い）に名前を付けて保存します', '', { ok: '保存' });
     if (!name || !name.trim()) return null;
     const list = userPresets();
     const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
@@ -779,24 +780,24 @@ export function initImport(ctx) {
     return state.presetId;
   }
 
-  $('imp-preset-save').addEventListener('click', () => saveAsPreset());
-  $('imp-preset-default').addEventListener('click', () => {
+  $('imp-preset-save').addEventListener('click', () => saveAsPreset().catch(ctx.fail));
+  $('imp-preset-default').addEventListener('click', async () => {
     let id = state.presetId;
     // 選んだ条件から変えているときは、先に名前を付けて保存してもらう
     const saved = presetRules(id);
     if (!saved || JSON.stringify(completeRules(saved)) !== JSON.stringify(state.rules)) {
-      if (!confirm('条件を変えています。名前を付けて保存してから、既定にしますか？')) return;
-      id = saveAsPreset();
+      if (!(await ask('条件を変えています。名前を付けて保存してから、既定にしますか？'))) return;
+      id = await saveAsPreset();
       if (!id) return;
     }
     ctx.prefs.set('importDefaultPreset', id);
     fillPresets();
     ctx.toast('次からは、この条件で始まります');
   });
-  $('imp-preset-delete').addEventListener('click', () => {
+  $('imp-preset-delete').addEventListener('click', async () => {
     const id = state.presetId;
     const p = userPresets().find((x) => 'u:' + x.id === id);
-    if (!p || !confirm(`保存した条件「${p.name}」を削除しますか？`)) return;
+    if (!p || !(await ask(`保存した条件「${p.name}」を削除しますか？`))) return;
     ctx.prefs.set('importPresets', userPresets().filter((x) => x.id !== p.id));
     if (ctx.prefs.get('importDefaultPreset', null) === id) ctx.prefs.set('importDefaultPreset', null);
     state.presetId = defaultPreset().id;
