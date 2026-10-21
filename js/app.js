@@ -19,7 +19,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.21-3.6';
+const APP_VERSION = '2026.10.21-3.7';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1997,7 +1997,10 @@ function renderAutoBackupState(state) {
       : state === 'need-permission' ? `⚠ 「${autoBackup.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください${lastText}`
         : '止まっています。フォルダを選ぶと始まります。';
   $('autobackup-status').textContent = text;
+  // 使えないブラウザ（iPhone・iPad など）では、ボタン・保存間隔・説明を出さない
   $('autobackup-buttons').hidden = !autoBackup.supported;
+  document.querySelector('#autobackup-settings .autobackup-options').hidden = !autoBackup.supported;
+  $('autobackup-hint').hidden = !autoBackup.supported;
   $('autobackup-now').disabled = state !== 'on';
   $('autobackup-stop').disabled = state === 'off';
   if (project) updateStatus();

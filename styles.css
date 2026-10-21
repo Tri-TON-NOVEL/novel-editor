@@ -1,3 +1,6 @@
+/* hidden を付けた要素は、display を指定したクラスがあっても必ず隠す */
+[hidden] { display: none !important; }
+
 :root {
   --bg: #f6f4ef;
   --surface: #ffffff;

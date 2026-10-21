@@ -43,6 +43,7 @@ export async function init() {
 
 // フォルダを選ぶ（ボタンを押したときに呼ぶ）
 export async function chooseFolder() {
+  if (!supported) throw new Error('このブラウザではフォルダを選べません（Windows・Mac の Chrome / Edge で使えます）');
   let picked;
   try {
     picked = await window.showDirectoryPicker({ id: 'novel-editor-backup', mode: 'readwrite' });
