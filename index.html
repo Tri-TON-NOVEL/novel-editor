@@ -25,14 +25,24 @@
     <details class="menu">
       <summary>ファイル</summary>
       <div class="menu-list">
-        <button type="button" data-action="file-open">ファイルを開く…</button>
-        <button type="button" data-action="file-save">ファイルに保存</button>
-        <button type="button" data-action="file-save-as">名前を付けて保存…</button>
-        <button type="button" data-action="file-open-choose" data-dest-choose hidden>保存先を選んで開く…</button>
-        <button type="button" data-action="file-save-choose" data-dest-choose hidden>保存先を選んで保存…</button>
-        <hr>
+        <div class="menu-head">全体（すべての作品）</div>
+        <button type="button" data-action="all-open">開く…</button>
+        <button type="button" data-action="all-save" title="Ctrl+S／⌘S">上書き保存</button>
+        <button type="button" data-action="all-save-as">名前を付けて保存…</button>
+        <div class="menu-head">エピソード（今開いているもの）</div>
+        <button type="button" data-action="ep-open">読み出す…</button>
+        <button type="button" data-action="ep-save-as">名前を付けて保存…</button>
+        <div class="menu-head">インポート</div>
+        <button type="button" data-action="import-text">プレーンテキスト（今のエピソードの本文へ）…</button>
+        <button type="button" data-action="import-work">作品ファイル（.json）…</button>
+        <div class="menu-head">エクスポート</div>
         <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
         <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
+        <button type="button" data-action="export-work">この作品を .json で書き出し…</button>
+        <button type="button" data-action="export-pre-v3" title="データ形式 v3 に移す前の作品を、そのままの形で書き出します">v3 移行前のデータを書き出し…</button>
+        <div class="menu-head" data-dest-choose hidden>保存先を選んで</div>
+        <button type="button" data-action="all-open-choose" data-dest-choose hidden>全体を開く…</button>
+        <button type="button" data-action="all-save-choose" data-dest-choose hidden>全体を保存…</button>
       </div>
     </details>
     <details class="menu" id="links-menu">
@@ -42,8 +52,7 @@
     <button type="button" data-action="settings">設定</button>
   </nav>
   <div class="status" id="status" aria-live="polite"></div>
-  <button type="button" class="warn" id="autobackup-resume" data-action="autobackup-resume" hidden>⚠ 自動バックアップを再開</button>
-  <button type="button" class="warn" id="cloud-attention" data-action="cloud-attention" hidden></button>
+  <button type="button" class="warn" id="sync-attention" data-action="sync-attention" hidden></button>
 </header>
 
 <div class="workspace">
@@ -92,6 +101,9 @@
         </select>
         <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
       </div>
+      <div class="ep-search">
+        <input type="search" id="ep-search" placeholder="検索（本文・タイトル・プロット・メモ）" aria-label="エピソードを検索" autocomplete="off" spellcheck="false" enterkeyhint="search">
+      </div>
       <ol class="episode-list" id="episode-list"></ol>
     </nav>
   </aside>
@@ -109,15 +121,10 @@
         </div>
         <button type="button" class="tool" data-action="copy-main-to-sub" id="copy-main-to-sub">メイン → サブにコピー…</button>
         <span class="spacer"></span>
-        <label class="ep-chapter">章
-          <select id="ep-chapter" aria-label="このエピソードの章"></select>
-        </label>
         <span class="ep-version">
           <select id="ep-version" aria-label="このエピソードの版"></select>
           <button type="button" class="tool" data-action="ep-version-up" title="今の内容を新しい版として残す">＋ 版を上げる</button>
         </span>
-        <button type="button" class="tool" data-action="move-up" title="章の中で前へ移動" aria-label="前へ移動">↑</button>
-        <button type="button" class="tool" data-action="move-down" title="章の中で後ろへ移動" aria-label="後ろへ移動">↓</button>
       </div>
 
       <section class="field mx" data-field="title">
@@ -339,6 +346,15 @@
   <form method="dialog" class="dialog">
     <h2 id="cloud-dialog-title">クラウドから開く</h2>
     <ul class="list" id="cloud-list"></ul>
+    <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="sync-restore-dialog">
+  <form method="dialog" class="dialog">
+    <h2>バックアップから戻す</h2>
+    <p class="hint">戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。</p>
+    <ul class="list" id="sync-restore-list"></ul>
     <div class="dialog-foot"><button value="close">閉じる</button></div>
   </form>
 </dialog>
@@ -587,9 +603,10 @@
       <button type="button" role="tab" data-stab="buttons">ボタン</button>
       <button type="button" role="tab" data-stab="sites">投稿サイト</button>
       <button type="button" role="tab" data-stab="links">リンク</button>
-      <button type="button" role="tab" data-stab="backup">バックアップ</button>
+      <button type="button" role="tab" data-stab="backup">自動バックアップ</button>
       <button type="button" role="tab" data-stab="cloud">クラウド</button>
-      <button type="button" role="tab" data-stab="import">インポート／エクスポート</button>
+      <button type="button" role="tab" data-stab="import">インポート（なろう・アルファ）</button>
+      <button type="button" role="tab" data-stab="about">このアプリについて</button>
     </div>
 
     <!-- 表示 -->
@@ -618,18 +635,6 @@
       <label><input type="checkbox" data-ui="show.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
-    </fieldset>
-    <p class="hint" id="app-version"></p>
-    <fieldset class="disclaimer">
-      <legend>免責事項</legend>
-      <ul>
-        <li>本アプリは、作者が個人で使うために作ったものを、そのままの状態で公開しています。動作・品質・安全性・特定の目的への適合性について、いかなる保証もしません。</li>
-        <li>本アプリの利用（利用できなかったことを含む）によって生じた、原稿・データの消失や破損、投稿サイト・クラウドサービス（Google ドライブ・iCloud・OneDrive など）での不具合、その他一切の損害について、作者は責任を負いません。</li>
-        <li>大切な原稿は、ご自身の責任でこまめにバックアップしてください。</li>
-        <li>不具合の修正、問い合わせへの対応、今後の更新や公開の継続は約束しません。</li>
-        <li>本アプリは「小説家になろう」「アルファポリス」、および Google・Apple・Microsoft などの各サービスとは関係がなく、それらの公式・公認のものではありません。各サービスの利用は、それぞれの規約に従ってください。</li>
-        <li>本アプリを使う場合は、上記に同意したものとします。</li>
-      </ul>
     </fieldset>
     </div>
 
@@ -705,23 +710,31 @@
       </div>
       <ul class="list" id="project-versions"></ul>
     </fieldset>
-    <fieldset>
-      <legend>全体バックアップ（全作品・ひな型・設定）</legend>
-      <div class="button-row">
-        <button type="button" data-action="backup">すべてをバックアップ…</button>
-        <button type="button" data-action="restore">バックアップから復元…</button>
-        <button type="button" data-action="export-pre-v3" title="データ形式 v3 に移す前の作品を、そのままの形で書き出します">v3 移行前のデータを書き出す…</button>
+    <fieldset id="sync-settings">
+      <legend>自動バックアップ（全作品・ひな型・設定／端末どうしの同期）</legend>
+      <p class="hint">書いた内容に変更があったときだけ、保存間隔ごとと、画面を閉じる・別のアプリに切り替えるときに、全作品をまとめて新しいファイルとして保存します。
+        起動したときは保存先を調べ、他の端末のほうが新しければ、読み込むかを聞きます（作品ごとに新しいほうを使います）。</p>
+      <label>保存先（この端末）
+        <select id="sync-mode">
+          <option value="off">使わない</option>
+          <option value="folder">フォルダ（PC の Chrome・Edge／Android の Chrome）</option>
+          <option value="gdrive">Google ドライブ</option>
+        </select>
+      </label>
+      <p class="hint" id="sync-mode-hint"></p>
+      <div class="button-row" id="sync-folder-row">
+        <button type="button" id="sync-choose">フォルダを選ぶ…</button>
       </div>
-    </fieldset>
-    <fieldset id="autobackup-settings">
-      <legend>自動バックアップ</legend>
-      <p id="autobackup-status"></p>
-      <div class="button-row" id="autobackup-buttons">
-        <button type="button" id="autobackup-choose">フォルダを選ぶ…</button>
-        <button type="button" id="autobackup-now">今すぐバックアップ</button>
-        <button type="button" id="autobackup-stop" class="danger">止める</button>
+      <p id="sync-status"></p>
+      <div class="button-row">
+        <button type="button" id="sync-now">今すぐバックアップ</button>
+        <button type="button" id="sync-check">他の端末の更新を確認</button>
+        <button type="button" id="sync-restore">バックアップから戻す…</button>
       </div>
       <div class="autobackup-options">
+        <label>ファイル名の先頭（プレフィックス）
+          <input type="text" id="sync-prefix" autocomplete="off" spellcheck="false">
+        </label>
         <label>保存間隔
           <select name="autoBackupInterval">
             <option value="5">5分ごと</option>
@@ -731,14 +744,15 @@
             <option value="60">60分ごと</option>
           </select>
         </label>
-        <label>残す件数
+        <label>残す件数（この端末の分）
           <input name="autoBackupKeep" type="number" min="10" max="2000" step="10" inputmode="numeric">
         </label>
       </div>
-      <p class="hint" id="autobackup-hint">フォルダを選んでおくと、書いた内容に変更があったときだけ、保存間隔ごとと画面を閉じるときに、
-        全作品のバックアップを新しいファイルとしてそのフォルダへ保存します。残す件数を超えると、古いものから消えます。
-        （例：10分ごと・200件なら、書いている時間で約33時間分）
-        OneDrive・iCloud Drive・Google ドライブの同期フォルダを選べば、クラウドにも自動で残ります。</p>
+      <p class="hint">ファイル名は「プレフィックス＋日時」です（例：iPad_20261022T001500Z.json）。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
+        プレフィックス・保存間隔・残す件数は「保存」で反映されます。</p>
+      <div class="button-row" id="sync-presync-row" hidden>
+        <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>
+      </div>
     </fieldset>
     </div>
 
@@ -752,21 +766,33 @@
         <button type="button" data-action="open-import" class="primary">TXT をインポート…</button>
       </div>
     </fieldset>
+    <p class="hint">プレーンテキストの読み込み・書き出しと、作品ファイル（.json）の取り込み・書き出しは「ファイル」メニューにあります。</p>
+    </div>
+
+    <!-- このアプリについて -->
+    <div class="settings-panel" data-spanel="about" role="tabpanel" hidden>
     <fieldset>
-      <legend>エクスポート</legend>
-      <div class="button-row">
-        <button type="button" data-action="file-save-as">この作品を .json で保存…</button>
-        <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
-        <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
-      </div>
-      <p class="hint">.txt の書き出しは、エピソード画面で開いている側（なろう用／アルファ用）の原稿です。</p>
+      <legend>小説エディター</legend>
+      <p class="hint">小説家になろう・アルファポリス向けの小説執筆エディターです。使い方は README を参照してください。</p>
+      <p id="app-version"></p>
+    </fieldset>
+    <fieldset class="disclaimer">
+      <legend>免責事項</legend>
+      <ul>
+        <li>本アプリは、作者が個人で使うために作ったものを、そのままの状態で公開しています。動作・品質・安全性・特定の目的への適合性について、いかなる保証もしません。</li>
+        <li>本アプリの利用（利用できなかったことを含む）によって生じた、原稿・データの消失や破損、投稿サイト・クラウドサービス（Google ドライブ・iCloud・OneDrive など）での不具合、その他一切の損害について、作者は責任を負いません。</li>
+        <li>大切な原稿は、ご自身の責任でこまめにバックアップしてください。</li>
+        <li>不具合の修正、問い合わせへの対応、今後の更新や公開の継続は約束しません。</li>
+        <li>本アプリは「小説家になろう」「アルファポリス」、および Google・Apple・Microsoft などの各サービスとは関係がなく、それらの公式・公認のものではありません。各サービスの利用は、それぞれの規約に従ってください。</li>
+        <li>本アプリを使う場合は、上記に同意したものとします。</li>
+      </ul>
     </fieldset>
     </div>
 
     <!-- クラウド -->
     <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
     <fieldset id="cloud-actions">
-      <legend>この作品をクラウドに保存・開く</legend>
+      <legend>Google ドライブ（ファイルの保存・開く／自動バックアップ）</legend>
       <div id="cloud-action-list"></div>
     </fieldset>
     <fieldset id="provider-settings">

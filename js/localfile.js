@@ -36,32 +36,36 @@ async function ensureWritable(handle) {
 export const localFile = {
   canOverwrite: hasFsa,
 
-  // 戻り値: { name, text, handle } / キャンセル時は null
-  async open() {
+  // kind: 'json'（小説エディターのファイル）／'txt'（テキスト）／'any'
+  // 戻り値: { name, text, handle, file } / キャンセル時は null（file は文字コードを判定し直したいとき用）
+  async open(kind = 'any') {
+    const accepts = {
+      json: { 'application/json': ['.json'] },
+      txt: { 'text/plain': ['.txt'] },
+      any: { 'application/json': ['.json'], 'text/plain': ['.txt'] },
+    }[kind];
     if (hasFsa) {
       let handle;
       try {
-        [handle] = await window.showOpenFilePicker({
-          types: [{ description: '小説・テキスト', accept: { 'application/json': ['.json'], 'text/plain': ['.txt'] } }],
-        });
+        [handle] = await window.showOpenFilePicker({ types: [{ description: kind === 'txt' ? 'テキスト' : '小説エディターのファイル', accept: accepts }] });
       } catch (e) {
         if (isAbort(e)) return null;
         throw e;
       }
       const file = await handle.getFile();
-      return { name: file.name, text: await file.text(), handle: /\.json$/i.test(file.name) ? handle : null };
+      return { name: file.name, text: await file.text(), handle: /\.json$/i.test(file.name) ? handle : null, file };
     }
     // Safari は、画面に置いていない input では選んだあとの知らせ（change）が来ないことがあるので、見えない形で置く
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = '.json,.txt,application/json,text/plain';
+      input.accept = Object.entries(accepts).flatMap(([mime, exts]) => [...exts, mime]).join(',');
       input.hidden = true;
       document.body.appendChild(input);
       const done = (v) => { input.remove(); resolve(v); };
       input.addEventListener('change', async () => {
         const file = input.files[0];
-        done(file ? { name: file.name, text: await file.text(), handle: null } : null);
+        done(file ? { name: file.name, text: await file.text(), handle: null, file } : null);
       });
       input.addEventListener('cancel', () => done(null));
       input.click();

@@ -107,9 +107,14 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); }
 .settings-tabs button { border: 0; border-bottom: 3px solid transparent; border-radius: 6px 6px 0 0; background: transparent; padding: 8px 14px; }
 .settings-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); font-weight: 700; }
+/* 狭い画面：タブは1段にして横にスクロールさせ、設定の中身を広く見せる */
+@media (max-width: 600px) {
+  .settings-tabs { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: thin; -webkit-overflow-scrolling: touch; }
+  .settings-tabs button { flex: none; white-space: nowrap; padding: 8px 10px; }
+}
 .settings-panel { display: flex; flex-direction: column; gap: 12px; min-height: 280px; }
 .settings-panel[hidden] { display: none; }
-.disclaimer ul { margin: 0; padding-left: 1.2em; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.disclaimer ul { margin: 0; padding-left: 1.2em; font-size: 13px; line-height: 1.8; }
 .disclaimer li + li { margin-top: 4px; }
 #settings-dialog .list { max-height: 300px; }
 .cloud-provider { display: flex; flex-direction: column; gap: 6px; }
@@ -147,6 +152,10 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .menu-list button { border: 0; text-align: left; }
 .menu-list hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .menu-list .menu-label { font-size: 12px; color: var(--muted); padding: 6px 12px 2px; }
+.menu-list .menu-head { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
+.menu-list .menu-head:first-child { border-top: 0; margin-top: 0; padding-top: 4px; }
+/* 項目の多いメニュー（ファイル）は、画面からはみ出さないようにスクロールさせる */
+.menu-list { max-height: calc(100dvh - 80px); overflow-y: auto; }
 
 /* 全体の配置：左に目次、右に編集画面 */
 .workspace {
@@ -239,6 +248,15 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .episode-list .chapter-menu summary { min-height: 32px; padding: 2px 8px; border-color: transparent; background: transparent; }
 .episode-list .chapter-menu summary::after { content: ""; }
 .episode-list .chapter-menu .menu-list { left: auto; right: 0; }
+.episode-list .ep-menu summary { min-height: 28px; color: var(--muted); }
+.menu-list .menu-indent { padding-left: 22px; }
+.menu-list.up { top: auto; bottom: calc(100% + 4px); } /* 下に入りきらないときは上向きに開く */
+.menu-list .menu-select { display: flex; flex-direction: column; gap: 4px; padding: 6px 12px; font-size: 12px; color: var(--muted); }
+.menu-list .menu-select select { width: 100%; max-width: 260px; padding: 6px 8px; font-size: 16px; color: var(--text); }
+/* 目次の検索（iPhone で拡大されないよう 16px） */
+.ep-search input { width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 16px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+.episode-list .search-head { font-size: 12px; color: var(--muted); padding: 6px 4px 2px; }
+.menu-list button:disabled { color: var(--muted); opacity: .6; cursor: default; }
 .episode-list .ep-row { padding-left: 14px; }
 .ep-sort { display: flex; gap: 4px; align-items: center; }
 .ep-sort select { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }
@@ -789,14 +807,20 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 .dialog > .dialog-foot { position: sticky; bottom: -18px; margin: 0 -18px -18px; padding: 10px 18px 18px; background: var(--surface); border-top: 1px solid var(--border); z-index: 2; }
 @media (max-width: 600px) {
   .dialog > .dialog-foot { bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px 14px; }
-  /* スマートフォンの設定画面：中身の少ないタブでも高さを変えず、「キャンセル」「保存」を一番下に置く */
-  /* iPhone の Safari は、スクロールする枠の中の「下に貼り付く段」（sticky）がずれて途中に出ることがあるため、
-     タブの中身だけをスクロールさせ、ボタンの段は普通に一番下へ並べる */
-  #settings-dialog { height: calc(100dvh - 48px); }
-  #settings-dialog > .dialog { height: 100%; max-height: none; box-sizing: border-box; overflow: hidden; }
-  #settings-dialog .settings-panel:not([hidden]) { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
-  #settings-dialog > .dialog > .dialog-foot { position: static; flex: none; }
 }
+/* ダイアログの中身は縮めない。
+   縦に並べた中身は、画面の高さに収めようとして縮み、はみ出した中身の上に決定ボタンの段が重なってしまう
+   （項目の多い画面で「キャンセル」「保存」が途中に出て、後ろの項目が隠れる）。縮めずにダイアログ全体をスクロールさせる。
+   全画面の TXT インポートは、中の一覧を縮めてスクロールさせる作りなので対象外 */
+dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
+
+/* 設定画面（どの OS・画面サイズでも同じ）：高さを固定し、タブの中身だけをスクロールさせる。
+   「キャンセル」「保存」は常に一番下（下に貼り付ける sticky は使わない。iPhone・iPad の Safari でずれることがあるため） */
+#settings-dialog { height: min(calc(100dvh - 48px), 900px); }
+#settings-dialog > .dialog { height: 100%; max-height: none; box-sizing: border-box; overflow: hidden; }
+#settings-dialog .settings-panel:not([hidden]) { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; }
+#settings-dialog > .dialog > .dialog-foot { position: static; flex: none; margin-top: auto; }
+#settings-dialog .settings-panel > * { flex-shrink: 0; } /* タブの中の項目も縮めない（縮むと項目どうしが重なる） */
 /* 狭い画面のインポート（区切り）：条件と全文を詰め込まず、画面ごとスクロールする */
 @media (max-width: 899px) {
   .import-step[data-istep="2"] { overflow-y: auto; }

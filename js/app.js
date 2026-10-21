@@ -5,9 +5,13 @@ import {
 } from './format.js';
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
-import { makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence } from './backup.js';
-import * as autoBackup from './autobackup.js';
+import {
+  makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence,
+  makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
+} from './backup.js';
+import * as sync from './sync.js';
 import { initImport } from './importui.js';
+import { decodeText } from './importer.js';
 import { ask, askText, choose } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
@@ -19,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-3.12';
+const APP_VERSION = '2026.10.22-4.4';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -31,7 +35,6 @@ const el = {
   afterword: $('afterword'),
   plot: $('plot'),
   freeMemo: $('free-memo'),
-  chapter: $('ep-chapter'),
   narouUrl: $('narou-url'),
   alphaUrl: $('alpha-url'),
   xText: $('x-text'),
@@ -132,22 +135,8 @@ function updateStatus() {
   else if (dirty) parts.push('保存中…');
   else if (lastSavedAt) parts.push('保存済み ' + fmtTime(lastSavedAt));
   parts.push('メイン: ' + SITES[project.site].short);
-  if (autoBackup.getState() === 'on') {
-    const last = autoBackup.lastWrittenAt();
-    parts.push('自動バックアップ' + (last ? ' ' + fmtTime(last) : ' 有効'));
-  }
-  if (fileHandle) parts.push('ファイル: ' + fileHandle.name);
-  const autoP = cloudAutoProvider();
-  for (const p of providers) {
-    if (!project.links?.[p.id]) continue;
-    if (p !== autoP) { parts.push(p.label + ' 連携'); continue; }
-    const s = cloudAuto.state;
-    parts.push(s === 'saved' ? `${p.label} 自動保存 ${fmtTime(cloudAuto.at)}`
-      : s === 'need-login' ? `⚠ ${p.label} ログイン切れ（自動保存停止中）`
-        : s === 'conflict' ? `⚠ ${p.label} ほかの端末で更新（自動保存停止中）`
-          : s === 'error' ? `⚠ ${p.label} 自動保存に失敗 ${fmtTime(cloudAuto.at)}`
-            : `${p.label} 連携・自動保存`);
-  }
+  const s = syncStatusShort();
+  if (s) parts.push(s);
   $('status').textContent = parts.join(' ・ ');
 }
 
@@ -202,8 +191,7 @@ function changed() {
   project.updatedAt = new Date().toISOString();
   dirty = true;
   autoDirty = true;
-  cloudDirty = true;
-  autoBackup.schedule();
+  sync.markDirty();
   updateStatus();
   clearTimeout(saveTimer);
   saveTimer = setTimeout(flush, AUTOSAVE_MS);
@@ -372,23 +360,120 @@ function episodeRow(i, sort, flat = false) {
   if (meta.length) b.append(Object.assign(document.createElement('small'), { className: 'ep-meta', textContent: meta.join('・') }));
   b.dataset.ep = i;
   if (view === 'episode' && i === epIndex) b.classList.add('active');
-  const del = Object.assign(document.createElement('button'), {
-    type: 'button', className: 'ep-delete', textContent: '削除', title: `「${episodeName(ep)}」を削除`,
-  });
-  del.dataset.epDelete = i;
   const item = Object.assign(document.createElement('li'), { className: 'ep-row' + (flat ? ' flat' : '') });
-  item.append(b, del);
+  item.append(b);
+  // 「⋯」（並べ替え・章の移動・削除）は、並び順が「ファイル順」で、検索していないときだけ出す
+  // （他の並びでは、見た目の上下とファイルの順が合わないため）
+  if (epSort.key === 'file' && !epSearch) item.append(episodeMenu(i));
   return item;
+}
+
+// エピソードの「⋯」メニュー：上へ・下へ・章を移動（プルダウン）・削除
+function episodeMenu(i) {
+  const ep = project.episodes[i];
+  const menu = Object.assign(document.createElement('details'), { className: 'menu chapter-menu ep-menu' });
+  const summary = Object.assign(document.createElement('summary'), { className: 'tool', textContent: '⋯' });
+  summary.setAttribute('aria-label', `「${episodeName(ep)}」の操作`);
+  const list = Object.assign(document.createElement('div'), { className: 'menu-list' });
+  const item = (text, act, className = '') => {
+    const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className });
+    Object.assign(btn.dataset, { epAct: act, epIndex: i });
+    list.append(btn);
+  };
+  item('↑ 上へ', 'up');
+  item('↓ 下へ', 'down');
+  // 章の移動：章の数が多くても場所を取らないよう、プルダウンで選ぶ（選んだらすぐ移す）
+  const sel = Object.assign(document.createElement('select'), { className: 'menu-select-input' });
+  sel.setAttribute('aria-label', `「${episodeName(ep)}」を移す章`);
+  const current = ep.chapterId ? chapterName(project.chapters.find((c) => c.id === ep.chapterId)) : '未分類';
+  sel.append(Object.assign(new Option(`今の章：${current}`, '__current__'), { disabled: true, selected: true }));
+  for (const ch of project.chapters) if (ch.id !== ep.chapterId) sel.append(new Option(chapterName(ch), ch.id));
+  if (ep.chapterId) sel.append(new Option('未分類', ''));
+  sel.disabled = sel.options.length < 2;
+  sel.addEventListener('change', () => episodeAction('chapter', i, sel.value));
+  const label = Object.assign(document.createElement('label'), { className: 'menu-select' });
+  label.append('章を移動', sel);
+  list.append(label, document.createElement('hr'));
+  item('削除…', 'delete', 'danger');
+  menu.append(summary, list);
+  return menu;
+}
+
+function episodeAction(act, index, to) {
+  closeMenus();
+  if (epSort.key !== 'file') { toast('並べ替え・章の移動・削除は、目次の並び順が「ファイル順」のときに使えます'); return; }
+  if (act === 'up') moveEpisode(-1, index);
+  else if (act === 'down') moveEpisode(1, index);
+  else if (act === 'chapter') moveEpisodeToChapter(to, index);
+  else if (act === 'delete') deleteEpisode(index).catch(fail);
+}
+
+// ---------- 目次の検索 ----------
+// 開いている側（なろう用／アルファ用）の原稿のタイトル・前書き・本文・後書きと、プロット・フリーメモから探す。
+// 一覧の話を押すと、その話の最初の場所を選択する。同じ話をもう一度押すと次の場所へ。
+let epSearch = '';
+let searchCursor = { id: null, n: -1 };
+const SEARCH_FIELDS = [['title', 'タイトル'], ['foreword', '前書き'], ['body', '本文'], ['afterword', '後書き'], ['plot', 'プロット'], ['freeMemo', 'メモ']];
+
+function searchText(ep, key) {
+  return (key === 'plot' || key === 'freeMemo' ? ep[key] : draftOf(ep, editSite)[key]) || '';
+}
+
+function findHits(ep, q = epSearch) {
+  const hits = [];
+  const lq = q.toLowerCase();
+  if (!lq) return hits;
+  for (const [key, label] of SEARCH_FIELDS) {
+    const t = searchText(ep, key).toLowerCase();
+    for (let i = t.indexOf(lq); i >= 0; i = t.indexOf(lq, i + lq.length)) hits.push({ key, label, index: i });
+  }
+  return hits;
+}
+
+function renderSearchResults(list) {
+  const found = project.episodes.map((ep, i) => ({ i, hits: findHits(ep) })).filter((r) => r.hits.length);
+  const total = found.reduce((n, r) => n + r.hits.length, 0);
+  list.append(Object.assign(document.createElement('li'), {
+    className: 'search-head',
+    textContent: found.length ? `「${epSearch}」${found.length}話・${total}件（${SITES[editSite].short}用の原稿）` : `「${epSearch}」は見つかりません（${SITES[editSite].short}用の原稿）`,
+  }));
+  for (const { i, hits } of found) {
+    const counts = new Map();
+    for (const h of hits) counts.set(h.label, (counts.get(h.label) || 0) + 1);
+    const meta = [...counts].map(([label, n]) => `${label} ${n}`).join('・');
+    list.append(episodeRow(i, { meta: () => meta }, true));
+  }
+}
+
+function setEpisodeSearch(q) {
+  epSearch = q;
+  searchCursor = { id: null, n: -1 };
+  renderEpisodeList();
+}
+
+// 検索で見つけた場所を選択する（押すたびに次の場所へ）
+function jumpToSearchHit(i) {
+  const ep = project.episodes[i];
+  const hits = findHits(ep);
+  if (!hits.length) return;
+  searchCursor = searchCursor.id === ep.id ? { id: ep.id, n: (searchCursor.n + 1) % hits.length } : { id: ep.id, n: 0 };
+  const h = hits[searchCursor.n];
+  const target = { title: el.epTitle, foreword: el.foreword, body: el.body, afterword: el.afterword, plot: el.plot, freeMemo: el.freeMemo }[h.key];
+  if (h.key === 'foreword') $('foreword-box').open = true;
+  if (h.key === 'afterword') $('afterword-box').open = true;
+  if (!target || !target.offsetParent) { toast(`${h.label}にあります（${h.label}を表示にすると選択できます）`); return; }
+  jumpToText(target, h.index, epSearch.length);
+  toast(`${h.label}（${searchCursor.n + 1}／${hits.length}件目）${hits.length > 1 ? '　もう一度押すと次へ' : ''}`);
 }
 
 function renderEpisodeList() {
   const list = $('episode-list');
   list.replaceChildren();
+  if (epSearch) { renderSearchResults(list); return; }
   const sort = EP_SORTS[epSort.key];
   // 「章なし」は章を抜きにして、全エピソードを選択した条件で並べる
   if (!epSort.grouped) {
     for (const i of sortedEpisodeIndexes()) list.append(episodeRow(i, sort, true));
-    renderChapterSelect();
     return;
   }
   const collapsed = collapsedSet();
@@ -415,14 +500,6 @@ function renderEpisodeList() {
 
     for (const i of sortedEpisodeIndexes(g.indexes)) list.append(episodeRow(i, sort));
   }
-  renderChapterSelect();
-}
-
-// エピソード画面の「章」プルダウン
-function renderChapterSelect() {
-  const sel = el.chapter;
-  sel.replaceChildren(...project.chapters.map((c) => new Option(chapterName(c), c.id)), new Option('未分類', ''));
-  sel.value = episode()?.chapterId || '';
 }
 
 // --- 章の操作（目次と全体プロットで共通） ---
@@ -489,15 +566,16 @@ function chapterAction(act, chapterId) {
   else if (act === 'delete') removeChapter(ch);
 }
 
-// エピソードを別の章（または未分類）へ移す。移した先の章の最後に並べる
-function moveEpisodeToChapter(chapterId) {
-  const ep = episode();
+// エピソードを別の章（または未分類）へ移す。移した先の章の最後に並べる。開いているエピソードはそのまま
+function moveEpisodeToChapter(chapterId, index = epIndex) {
+  const ep = project.episodes[index];
   const to = chapterId || null;
-  if (ep.chapterId === to) return;
+  if (!ep || ep.chapterId === to) return;
+  const current = episode();
   ep.chapterId = to;
-  project.episodes.splice(epIndex, 1);
+  project.episodes.splice(index, 1);
   project.episodes.push(ep);
-  epIndex = project.episodes.length - 1;
+  epIndex = project.episodes.indexOf(current);
   normalizeOrder();
   changed();
   // 移した先の章が折りたたまれていたら開く
@@ -578,12 +656,7 @@ function selectEpisode(i) {
 }
 
 function showProject(p, handle = null) {
-  if (project?.id !== p.id) {
-    cloudDirty = false;
-    lastCloudAutoAt = Date.now();
-    cloudAuto = { state: '', at: null };
-    saveTarget = null;
-  }
+  if (project?.id !== p.id && epSearch) { epSearch = ''; $('ep-search').value = ''; } // 作品を替えたら検索を消す
   project = normalize(p);
   fileHandle = handle;
   el.novelTitle.value = project.title;
@@ -615,7 +688,6 @@ function showProject(p, handle = null) {
 async function switchTo(p, handle = null) {
   await flush();
   await autoVersion(60_000);
-  await cloudAutoSave(60_000).catch(() => {});
   // 何も書いていない作品は一覧に残さない
   if (project && p.id !== project.id && isEmptyProject(project) && !Object.keys(project.links || {}).length) {
     await db.remove(project.id);
@@ -636,23 +708,25 @@ function addEpisode(chapterId = episode()?.chapterId ?? null) {
   el.epTitle.focus();
 }
 
-// ↑↓：同じ章の中で前後と入れ替える
-function moveEpisode(delta) {
+// 上へ・下へ：同じ章の中で前後と入れ替える。開いているエピソードはそのまま
+function moveEpisode(delta, index = epIndex) {
   if (epSort.key !== 'file') {
-    toast('↑↓での並べ替えは、目次の並び順が「ファイル順」のときに使えます');
+    toast('並べ替えは、目次の並び順が「ファイル順」のときに使えます');
     return;
   }
   if (epSort.dir === 'desc') delta = -delta; // 降順表示では見た目の上下に合わせる
-  const group = episodeGroups().find((g) => g.indexes.includes(epIndex)).indexes;
-  const to = group[group.indexOf(epIndex) + delta];
+  const group = episodeGroups().find((g) => g.indexes.includes(index)).indexes;
+  const to = group[group.indexOf(index) + delta];
   if (to === undefined) {
-    toast(delta < 0 ? 'この章の最初のエピソードです（別の章へは「章」で移せます）' : 'この章の最後のエピソードです（別の章へは「章」で移せます）');
+    toast(delta < 0 ? 'この章の最初のエピソードです（別の章へは「⋯」→「章を移動」で移せます）' : 'この章の最後のエピソードです（別の章へは「⋯」→「章を移動」で移せます）');
     return;
   }
+  const current = episode();
   const eps = project.episodes;
-  [eps[epIndex], eps[to]] = [eps[to], eps[epIndex]];
+  [eps[index], eps[to]] = [eps[to], eps[index]];
+  epIndex = eps.indexOf(current);
   changed();
-  selectEpisode(to);
+  renderEpisodeList();
 }
 
 // 間違って消さないよう、2回確認する
@@ -739,7 +813,7 @@ async function confirmProjectDelete(p) {
   if (!(await ask(`作品「${name}」をこの端末から削除しますか？`))) return false;
   if (!(await ask(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
     + `プロット・設定・登場人物、バージョン${vcount}件がすべて消えます。\n`
-    + '（「ファイルに保存」やバックアップ、クラウドに保存したものは残ります）\n本当に削除しますか？'))) return false;
+    + '（「ファイル」で保存したものや、自動バックアップのファイルは残ります）\n本当に削除しますか？'))) return false;
   const word = n.title || '削除';
   const typed = await askText(`【最終確認】削除するには、${n.title ? '作品名' : '「削除」'}を正確に入力してください。\n${word}`, '', { ok: '削除する', danger: true });
   if (typed === null) return false;
@@ -780,7 +854,6 @@ async function importContent(content, links = {}) {
 // 設定（端末ごと）：'ask' 毎回選ぶ（既定）／'gdrive' Google ドライブを優先／'local' この端末・その他を優先
 // Google ドライブを設定していない端末では、選ぶ画面を出さずに「この端末・その他」にする。
 const DEST_KEY = 'file.destination';
-let saveTarget = null; // 上書き保存の行き先（前回保存・開いた場所）：'local' | 'gdrive'
 
 function driveProvider() {
   return providers.find((p) => p.isConfigured() && p.save) || null;
@@ -806,16 +879,25 @@ function updateFileMenu() {
   document.querySelectorAll('[data-dest-choose]').forEach((b) => { b.hidden = !show; });
 }
 
-// Google ドライブに保存する画面。job: { p, title, name, text, workId, onSaved(id), onLocal() }
+// Google ドライブに保存する画面。戻り値: { type: 'gdrive', id, name }／'local'（この端末・その他を選び直した）／null（やめた）
 let driveSaveJob = null;
 
-function openDriveSave(job) {
-  driveSaveJob = job;
-  $('drive-save-title').textContent = job.title;
-  $('drive-save-name').value = job.name;
-  $('drive-save-folder').textContent = `保存先フォルダ：${job.p.folderInfo?.().name ?? job.p.label}`;
-  $('drive-save-dialog').showModal();
-  renderDriveSaveList();
+function openDriveSave({ p, title, name, text, workId = '' }) {
+  return new Promise((resolve) => {
+    driveSaveJob = { p, text, workId, name, resolve };
+    $('drive-save-title').textContent = title;
+    $('drive-save-name').value = name;
+    $('drive-save-folder').textContent = `保存先フォルダ：${p.folderInfo?.().name ?? p.label}`;
+    $('drive-save-dialog').showModal();
+    renderDriveSaveList();
+  });
+}
+
+function finishDriveSave(result) {
+  const job = driveSaveJob;
+  driveSaveJob = null;
+  if ($('drive-save-dialog').open) $('drive-save-dialog').close();
+  job?.resolve(result);
 }
 
 async function renderDriveSaveList() {
@@ -823,7 +905,7 @@ async function renderDriveSaveList() {
   const list = $('drive-save-list');
   if (!job) return;
   // ログイン画面は、押したとき以外は出せない（iPhone・iPad）。ログインしていなければボタンを出す
-  if (job.p.canSaveSilently && !job.p.canSaveSilently()) {
+  if (!job.p.canSaveSilently()) {
     list.replaceChildren(listItem('ファイルの一覧を見るには、ログインが必要です', '「保存」を押したときにもログインします', [
       button('ログインして一覧を見る', async () => { await job.p.signIn(); renderDriveSaveList(); }),
     ]));
@@ -856,79 +938,216 @@ async function runDriveSave(name, fileId = null) {
   let finalName = name.trim() || job.name;
   if (!/\.json$/i.test(finalName)) finalName += '.json';
   const id = await job.p.save(job.text, finalName, fileId, { workId: job.workId });
-  driveSaveJob = null;
-  $('drive-save-dialog').close();
   prefs.set('file.lastDestination', 'gdrive');
-  await job.onSaved(id, finalName);
+  finishDriveSave({ type: 'gdrive', id, name: finalName });
 }
 
-async function fileOpen({ force = false } = {}) {
-  const dest = await chooseDestination('open', { force });
-  if (dest === 'gdrive') return cloudOpen(driveProvider());
-  if (dest !== 'local') return;
-  const r = await localFile.open();
-  if (!r) return;
-  if (isBackup(r.text)) { openRestoreDialog(r.text, r.name); return; }
-  await switchTo(await importContent(parse(r.text, r.name)), r.handle);
-  saveTarget = 'local';
-  toast(`「${r.name}」を開きました`);
+// Google ドライブで保存したファイルから選ぶ画面。戻り値: { id, name }／null
+function pickDriveFile(p, title) {
+  return new Promise((resolve) => {
+    const dialog = $('cloud-dialog');
+    const list = $('cloud-list');
+    let done = false;
+    const finish = (v) => {
+      if (done) return;
+      done = true;
+      if (dialog.open) dialog.close();
+      resolve(v);
+    };
+    dialog.addEventListener('close', () => finish(null), { once: true });
+    $('cloud-dialog-title').textContent = title;
+    list.replaceChildren(li('empty', '読み込み中…'));
+    dialog.showModal();
+    p.list().then((files) => {
+      if (done) return;
+      list.replaceChildren();
+      if (!files.length) { list.append(li('empty', `${p.label}に保存したファイルはまだありません`)); return; }
+      for (const f of files) list.append(listItem(f.name.replace(/\.json$/i, ''), '更新 ' + fmtTime(f.modifiedTime), [button('開く', () => finish(f))]));
+    }).catch((e) => {
+      finish(null);
+      fail(e);
+    });
+  });
 }
 
-// 上書き保存：前回保存・開いた場所へ（画面は出さない）。行き先が分からなければ「名前を付けて保存」
-async function fileSave() {
-  const p = driveProvider();
-  const linked = p && project.links?.[p.id];
-  if (linked && (saveTarget === 'gdrive' || (!saveTarget && !fileHandle))) return cloudSave(p);
-  if (!fileHandle) return fileSaveAs();
-  await flush();
-  await localFile.write(fileHandle, serialize(project));
-  saveTarget = 'local';
-  toast(`「${fileHandle.name}」に保存しました`);
-  updateStatus();
-}
-
-async function fileSaveAs({ force = false } = {}) {
-  // 保存の画面は押した直後に出す（端末内への保存は並行して行う）
-  const text = serialize(project);
-  flush().catch(fail);
+/**
+ * 保存先を選んで保存する（Google ドライブ／この端末・その他）。
+ * 戻り値: { type: 'gdrive', id, name }／{ type: 'local', handle, how, name }／null（やめた）
+ */
+async function saveTextTo(text, name, { title, force = false, workId = '' } = {}) {
   const dest = await chooseDestination('save', { force });
+  let where = dest;
+  if (dest === 'gdrive') {
+    const r = await openDriveSave({ p: driveProvider(), title, name, text, workId });
+    if (r !== 'local') return r;
+    where = 'local';
+  }
+  if (where !== 'local') return null;
+  // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
+  if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive・OneDrive など）を選べます');
+  const r = await localFile.saveAs(text, name, WORK_TYPES, 'application/json');
+  if (!r) return null;
+  prefs.set('file.lastDestination', 'local');
+  return typeof r === 'string' ? { type: 'local', handle: null, how: r, name } : { type: 'local', handle: r, how: 'picker', name: r.name };
+}
+
+function savedMessage(r, what) {
+  if (r.type === 'gdrive') return `${what}を Google ドライブに「${r.name}」として保存しました`;
+  if (r.how === 'downloaded') return `${what}を書き出しました（「ダウンロード」フォルダ）`;
+  if (r.how === 'shared') return `${what}を渡しました（共有メニューで選んだ保存先）`;
+  return `${what}を「${r.name}」に保存しました`;
+}
+
+/**
+ * 保存先を選んで開く。kind: 'json'／'txt'
+ * 戻り値: { text, name, source: 'gdrive'|'local', id?, handle?, file? }／null
+ */
+async function openFrom(title, { force = false, kind = 'json', driveOk = true } = {}) {
+  const dest = driveOk ? await chooseDestination('open', { force }) : 'local';
   if (dest === 'gdrive') {
     const p = driveProvider();
-    openDriveSave({
-      p,
-      title: `${p.label}に保存（この作品）`,
-      name: fileName(project.title, '.json'),
-      text,
-      workId: project.workId,
-      onSaved: async (id, name) => {
-        project.links = { ...project.links, [p.id]: id };
-        await db.put(project);
-        saveTarget = 'gdrive';
-        lastCloudAutoAt = Date.now();
-        setCloudAuto('saved');
-        toast(`${p.label}に「${name}」として保存しました`);
-      },
-      onLocal: () => saveWorkLocal(text),
-    });
-    return;
+    const f = await pickDriveFile(p, title);
+    if (!f) return null;
+    return { text: await p.load(f.id), name: f.name, source: 'gdrive', id: f.id };
   }
-  if (dest === 'local') await saveWorkLocal(text);
+  if (dest !== 'local') return null;
+  const r = await localFile.open(kind);
+  return r ? { ...r, source: 'local' } : null;
 }
 
-async function saveWorkLocal(text) {
-  const r = await localFile.saveAs(text, fileName(project.title, '.json'), WORK_TYPES, 'application/json');
-  if (!r) return;
-  prefs.set('file.lastDestination', 'local');
-  saveTarget = 'local';
-  if (r === 'downloaded') {
-    toast('ファイルを書き出しました（「ダウンロード」フォルダ）');
-  } else if (r === 'shared') {
-    toast('ファイルを渡しました（共有メニューで選んだ保存先）');
-  } else {
-    fileHandle = r;
-    toast(`「${r.name}」に保存しました`);
+// ---------- 全体（すべての作品・ひな型・設定を1ファイルに） ----------
+// 上書き保存の行き先は、前回「全体」を保存・開いた場所（端末ごとに記録）
+//   file.allTarget = { type: 'gdrive', id, name }／{ type: 'local', name }（ファイルの場所は meta の allFileHandle）
+// iPhone・iPad などファイルを覚えておけない環境では、上書き保存は「名前を付けて保存」と同じ動きになる。
+let allHandle = null;
+
+function rememberAllTarget(r) {
+  if (r?.type === 'gdrive') {
+    prefs.set('file.allTarget', { type: 'gdrive', id: r.id, name: r.name });
+  } else if (r?.type === 'local' && r.handle) {
+    allHandle = r.handle;
+    meta.set('allFileHandle', r.handle).catch(() => {});
+    prefs.set('file.allTarget', { type: 'local', name: r.handle.name });
   }
-  updateStatus();
+}
+
+async function allSaveAs({ force = false } = {}) {
+  await flush();
+  const { text, count } = await makeBackup();
+  const r = await saveTextTo(text, backupFileName(), { title: 'Google ドライブに保存（全体：すべての作品）', force });
+  if (!r) return;
+  rememberAllTarget(r);
+  prefs.set('lastBackupAt', new Date().toISOString());
+  toast(savedMessage(r, `全体（${count}作品・ひな型・設定）`));
+}
+
+async function allSave() {
+  const t = prefs.get('file.allTarget', null);
+  const p = driveProvider();
+  if (t?.type === 'gdrive' && p) {
+    await flush();
+    const { text, count } = await makeBackup();
+    const id = await p.save(text, t.name, t.id);
+    prefs.set('file.allTarget', { ...t, id });
+    prefs.set('lastBackupAt', new Date().toISOString());
+    toast(`全体（${count}作品）を Google ドライブの「${t.name}」に上書き保存しました`);
+    return;
+  }
+  if (t?.type === 'local' && allHandle) {
+    await flush();
+    const { text, count } = await makeBackup();
+    await localFile.write(allHandle, text);
+    prefs.set('lastBackupAt', new Date().toISOString());
+    toast(`全体（${count}作品）を「${allHandle.name}」に上書き保存しました`);
+    return;
+  }
+  return allSaveAs();
+}
+
+async function allOpen({ force = false } = {}) {
+  const src = await openFrom('全体を開く（すべての作品）', { force });
+  if (!src) return;
+  if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「読み出す」で開いてください', true); return; }
+  if (isBackup(src.text)) {
+    // 開いたファイルを、次の上書き保存の行き先にする
+    if (src.source === 'gdrive') rememberAllTarget({ type: 'gdrive', id: src.id, name: src.name });
+    else if (src.handle) rememberAllTarget({ type: 'local', handle: src.handle });
+    openRestoreDialog(src.text, src.name);
+    return;
+  }
+  // 作品1つのファイルなら、作品として取り込む
+  await openWorkText(src);
+}
+
+// ---------- エピソード専用ファイル（今開いているエピソード） ----------
+
+async function epSaveAs({ force = false } = {}) {
+  await flush();
+  const ep = episode();
+  const label = mainDraft(ep).title || `第${epIndex + 1}話`;
+  const r = await saveTextTo(makeEpisodeFile(ep, project.title), fileName(`${project.title || '無題'}_${label}`, '.json'), { title: 'Google ドライブに保存（このエピソード）', force });
+  if (r) toast(savedMessage(r, `エピソード「${label}」`));
+}
+
+async function epOpen({ force = false } = {}) {
+  const src = await openFrom('エピソードを読み出す', { force });
+  if (!src) return;
+  if (!isEpisodeFile(src.text)) {
+    toast(isBackup(src.text) ? '全体のファイルです。「ファイル」→ 全体の「開く」で開いてください' : 'エピソードのファイルではありません', true);
+    return;
+  }
+  const data = parseEpisodeFile(src.text);
+  const ep = episode();
+  const name = mainDraft(ep).title || `第${epIndex + 1}話`;
+  if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
+  await saveEpisodeVersion('読み出す前（自動）', ep);
+  applyEpisodeSnapshot(ep, data.episode);
+  touchEpisode(ep);
+  changed();
+  showEpisode();
+  renderEpisodeList();
+  toast(`「${src.name}」を今のエピソードに読み出しました`);
+}
+
+// ---------- インポート ----------
+
+// プレーンテキスト → 今のエピソードの本文（開いている側の原稿）
+async function importText() {
+  const src = await openFrom('', { kind: 'txt', driveOk: false });
+  if (!src) return;
+  const text = src.file ? decodeText(await src.file.arrayBuffer()).text : src.text;
+  const body = text.replace(/\r\n?/g, '\n');
+  const d = cur();
+  if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
+  if (d.body) await saveEpisodeVersion('テキストを読み込む前（自動）');
+  d.body = body;
+  touchEpisode();
+  changed();
+  showEpisode();
+  renderEpisodeList();
+  toast(`「${src.name}」を本文（${SITES[editSite].short}用）に読み込みました（${countChars(body).all.toLocaleString()}字）`);
+}
+
+// 作品1つの .json → 作品として取り込む
+async function importWork({ force = false } = {}) {
+  const src = await openFrom('作品ファイルを取り込む', { force });
+  if (!src) return;
+  if (isBackup(src.text)) { toast('全体のファイルです。「ファイル」→ 全体の「開く」で開いてください', true); return; }
+  if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「読み出す」で開いてください', true); return; }
+  await openWorkText(src);
+}
+
+async function openWorkText(src) {
+  await switchTo(await importContent(parse(src.text, src.name)));
+  toast(`「${src.name}」を作品として開きました`);
+}
+
+// ---------- エクスポート ----------
+
+async function exportWork({ force = false } = {}) {
+  await flush();
+  const r = await saveTextTo(serialize(project), fileName(project.title, '.json'), { title: 'Google ドライブに保存（この作品）', force, workId: project.workId });
+  if (r) toast(savedMessage(r, `作品「${project.title || '無題'}」`));
 }
 
 // ---------- メイン → サブのコピー（明示的に押したときだけ。自動では同期しない） ----------
@@ -1257,30 +1476,6 @@ async function deleteVersion(v) {
 
 const BACKUP_REMIND_DAYS = 7;
 
-async function backupAll({ force = false } = {}) {
-  await flush();
-  const { text, count, versionCount } = await makeBackup();
-  const done = () => {
-    prefs.set('lastBackupAt', new Date().toISOString());
-    toast(`${count}作品（バージョン${versionCount}件）と、ひな型・設定をバックアップしました`);
-  };
-  const local = async () => {
-    // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
-    if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive など）を選べます');
-    const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
-    if (!r) return;
-    prefs.set('file.lastDestination', 'local');
-    done();
-  };
-  const dest = await chooseDestination('save', { force });
-  if (dest === 'gdrive') {
-    const p = driveProvider();
-    openDriveSave({ p, title: `${p.label}にバックアップ（すべての作品）`, name: backupFileName(), text, workId: '', onSaved: done, onLocal: local });
-    return;
-  }
-  if (dest === 'local') await local();
-}
-
 let pendingBackup = null;
 function openRestoreDialog(text, name = '') {
   pendingBackup = parseBackup(text);
@@ -1291,34 +1486,27 @@ function openRestoreDialog(text, name = '') {
   $('restore-dialog').showModal();
 }
 
-async function restoreFromFile() {
-  const dest = await chooseDestination('open');
-  if (dest === 'gdrive') return cloudOpen(driveProvider());
-  if (dest !== 'local') return;
-  const r = await localFile.open();
-  if (!r) return;
-  openRestoreDialog(r.text, r.name);
-}
-
 async function runRestore(mode) {
   if (!pendingBackup) return;
   if (mode === 'replace' && !(await ask('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？'))) return;
   await flush();
   const n = await restoreBackup(pendingBackup, mode);
   pendingBackup = null;
+  sync.markDirty(); // 戻した内容を、次の自動バックアップに入れる
   prefs.set('restoredMessage', `${n}作品をバックアップから復元しました`);
   location.reload();
 }
 
 async function remindBackup() {
+  if (sync.getState() === 'on') return;
   const projects = await db.all();
   if (!projects.some((p) => !isEmptyProject(normalize(p)))) return;
   const last = prefs.get('lastBackupAt', null);
   const days = last ? Math.floor((Date.now() - new Date(last)) / 86400000) : null;
   if (days === null || days >= BACKUP_REMIND_DAYS) {
     toast(days === null
-      ? 'まだ全体のバックアップがありません。「ファイル」→「すべてをバックアップ」で保存しておくと安心です'
-      : `最後のバックアップから${days}日たっています。「ファイル」→「すべてをバックアップ」をおすすめします`);
+      ? 'まだ全体のバックアップがありません。「設定」→「自動バックアップ」で保存先を選ぶか、「ファイル」→ 全体の「名前を付けて保存」で保存しておくと安心です'
+      : `最後のバックアップから${days}日たっています。「ファイル」→ 全体の「名前を付けて保存」か、「設定」→「自動バックアップ」をおすすめします`);
   }
 }
 
@@ -1341,138 +1529,184 @@ async function exportAll() {
   if (r) toast(`全${project.episodes.length}話を書き出しました（${SITES[editSite].short}用）`);
 }
 
-// ---------- クラウド ----------
+// ---------- 自動バックアップ（同期） ----------
+// 仕組みは sync.js。ここは画面（状態の表示・起動時の確認・設定）。
 
-async function cloudSave(p) {
-  await flush();
-  const wasDirty = cloudDirty;
-  cloudDirty = false;
-  let id;
-  try {
-    id = await p.save(serialize(project), fileName(project.title, '.json'), project.links?.[p.id], { workId: project.workId });
-  } catch (e) {
-    cloudDirty = cloudDirty || wasDirty;
-    throw e;
-  }
-  project.links = { ...project.links, [p.id]: id };
-  await db.put(project);
-  saveTarget = 'gdrive';
-  lastCloudAutoAt = Date.now();
-  setCloudAuto('saved');
-  toast(`${p.label}に保存しました${p.autoSave && prefs.get('cloud.autoSave', true) ? '（以後は自動でも保存します）' : ''}`);
+let syncPending = null; // 「あとで」と答えた、他の端末の新しいバックアップ
+
+function syncProvider() {
+  return providers.find((p) => p.backups) || null;
 }
 
-// ---------- クラウドへの自動保存 ----------
-// 連携している作品（一度クラウドに保存した、またはクラウドから開いた作品）だけ。
-// 変更があるときだけ、書いている間は10分ごと、画面を閉じる・別のアプリや作品に切り替えるときにも（前回から1分以上たっていれば）。
-// ログイン画面は出さない（iPhone・iPad ではボタンを押したとき以外は出せない）。ログインが切れたら、上に再ログインのボタンを出す。
-// ほかの端末でドライブ側が更新されていたら、上書きせずに知らせる。
-const CLOUD_AUTO_MS = 10 * 60_000;
-let cloudDirty = false;
-let lastCloudAutoAt = Date.now();
-let cloudAutoRunning = false;
-// state: '' | 'saved' | 'need-login'（ログイン切れ） | 'conflict'（ほかで更新） | 'unknown'（この端末で保存した記録なし） | 'error'
-let cloudAuto = { state: '', at: null };
-
-function cloudAutoProvider() {
-  if (!project || !prefs.get('cloud.autoSave', true)) return null;
-  return providers.find((p) => p.autoSave && project.links?.[p.id] && p.isConfigured()) || null;
+function syncStatusShort() {
+  const st = sync.getState();
+  if (st === 'off' || st === 'unsupported') return '';
+  if (st === 'need-permission') return '⚠ 自動バックアップ停止中（許可切れ）';
+  if (st === 'need-login') return '⚠ 自動バックアップ停止中（ログインが必要）';
+  if (syncPending) return '⚠ 他の端末で更新あり（自動バックアップ停止中）';
+  if (sync.getError()) return '⚠ 自動バックアップに失敗';
+  if (!sync.isChecked()) return '自動バックアップ：確認中';
+  const last = prefs.get('lastAutoBackupAt', null);
+  return '自動バックアップ' + (last ? ' ' + fmtTime(last) : ' 有効');
 }
 
-function setCloudAuto(state, message = '') {
-  cloudAuto = { state, at: Date.now(), message };
-  renderCloudAttention();
+function renderSyncState() {
+  const st = sync.getState();
+  const m = sync.mode();
+  const b = $('sync-attention');
+  const attention = syncPending ? '⚠ 他の端末の更新を確認'
+    : st === 'need-permission' ? '⚠ 自動バックアップを再開'
+      : st === 'need-login' ? '⚠ Google ドライブにログイン（自動バックアップ）'
+        : '';
+  b.textContent = attention;
+  b.hidden = !attention;
+
+  const sel = $('sync-mode');
+  sel.value = m;
+  sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
+  sel.querySelector('option[value="gdrive"]').disabled = !syncProvider()?.isConfigured() && m !== 'gdrive';
+  $('sync-mode-hint').textContent = m === 'gdrive'
+    ? `Google ドライブの「${syncProvider()?.backups.folderName || ''}」に保存します（どの端末でも同じフォルダ）。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。`
+    : m === 'folder'
+      ? 'OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad と同期するときは、すべての端末で「Google ドライブ」を選んでください。'
+      : sync.folderSupported
+        ? 'iPhone・iPad と同期するときは、すべての端末で「Google ドライブ」を選んでください（「クラウド」タブでクライアントIDを入れると選べます）。'
+        : 'この端末では「Google ドライブ」を選べます（「クラウド」タブでクライアントIDを入れると選べます）。';
+
+  $('sync-choose').textContent = m === 'folder' ? (sync.folderName() ? 'フォルダを選び直す…' : 'フォルダを選ぶ…') : 'Google ドライブにログイン';
+  $('sync-folder-row').hidden = !(m === 'folder' || (m === 'gdrive' && st === 'need-login'));
+
+  const last = sync.lastBackup();
+  const lastText = last ? `\n最後に同期したバックアップ：${last.name}（${fmtTime(last.at)}）` : '';
+  const err = sync.getError() ? `\n⚠ 前回の保存に失敗しました：${sync.getError()}` : '';
+  const text = st === 'off' ? '止まっています。保存先を選ぶと始まります。'
+    : st === 'unsupported' ? (m === 'folder' ? 'このブラウザではフォルダを使えません。「Google ドライブ」を選んでください。' : 'Google ドライブを使うには、「クラウド」タブでクライアントIDを入れて「保存」を押してください。')
+      : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
+        : st === 'need-login' ? '⚠ Google ドライブへのログインが必要です。上のボタン（または下の「Google ドライブにログイン」）を押してください。'
+          : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
+            : `✅ 「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
+  $('sync-status').textContent = text + lastText + err;
+  const on = st === 'on';
+  for (const id of ['sync-now', 'sync-check', 'sync-restore']) $(id).disabled = !on;
   if (project) updateStatus();
 }
 
-async function cloudAutoSave(minInterval = CLOUD_AUTO_MS) {
-  const p = cloudAutoProvider();
-  if (!p || !cloudDirty || cloudAutoRunning || Date.now() - lastCloudAutoAt < minInterval) return;
-  if (cloudAuto.state === 'conflict') return; // どちらを残すか決めるまで、自動では上書きしない
-  cloudAutoRunning = true;
-  cloudDirty = false; // 保存中に書いた分は、また true になる
-  try {
-    await flush();
-    const r = await p.autoSave(serialize(project), fileName(project.title, '.json'), project.links[p.id], { workId: project.workId });
-    if (r === 'saved') lastCloudAutoAt = Date.now();
-    else cloudDirty = true;
-    setCloudAuto(r);
-  } catch (e) {
-    cloudDirty = true;
-    lastCloudAutoAt = Date.now(); // 通信の失敗などは、次の間隔でもう一度
-    setCloudAuto('error', e.message);
-  } finally {
-    cloudAutoRunning = false;
-  }
-}
-
-// 上の「⚠」ボタン：自動保存を続けるために、押してもらう必要があるとき
-function renderCloudAttention() {
-  const b = $('cloud-attention');
-  const p = cloudAutoProvider();
-  const text = !p ? ''
-    : cloudAuto.state === 'need-login' ? `⚠ ${p.label}に再ログイン`
-      : cloudAuto.state === 'conflict' ? `⚠ ${p.label}：ほかの端末で更新`
-        : cloudAuto.state === 'unknown' ? `${p.label}に保存して自動保存を始める`
-          : '';
-  b.textContent = text;
-  b.hidden = !text;
-}
-
-async function resolveCloudAttention() {
-  const p = cloudAutoProvider();
-  if (!p) return;
-  if (cloudAuto.state === 'need-login') {
-    await p.signIn();
-    setCloudAuto('');
-    await cloudAutoSave(0);
-    if (cloudAuto.state === 'saved' || !cloudDirty) toast(`${p.label}にログインしました。自動保存を続けます`);
+// 起動したとき・保存先を変えたとき・「他の端末の更新を確認」：他の端末のほうが新しいバックアップを保存していないか調べる
+async function runSyncCheck({ manual = false } = {}) {
+  if (sync.getState() !== 'on') {
+    if (manual) toast('自動バックアップの保存先が使えません（設定 → 自動バックアップ）', true);
     return;
   }
-  if (cloudAuto.state === 'conflict') {
-    const ok = await ask(`${p.label}のファイルが、ほかの端末（または別のタブ）で更新されています。\n` +
-      'この端末の内容で上書き保存しますか？\n\n' +
-      `・上書きしても、前の内容は${p.label}の「版を管理」から戻せます。\n` +
-      `・${p.label}側の内容を使うときは「キャンセル」を押し、「ファイル」→「${p.label}から開く…」で開いてください（自動保存は止まったままです）。`,
-    { ok: '上書き保存', danger: true });
-    if (!ok) return;
+  let r;
+  try {
+    r = await sync.findNewer({ ignoreSeen: manual });
+  } catch (e) {
+    renderSyncState();
+    if (manual) fail(e);
+    return;
   }
-  await cloudSave(p);
+  if (!r) {
+    syncPending = null;
+    sync.markChecked();
+    if (manual) toast('他の端末の新しいバックアップはありません');
+    return;
+  }
+  const { entry, localChanged } = r;
+  const who = `「${entry.prefix || '（プレフィックスなし）'}」${fmtTime(new Date(entry.at).toISOString())}`;
+  if (!localChanged) {
+    const ok = await ask(`他の端末（${who}）で、新しいバックアップが保存されています。読み込みますか？\n\n` +
+      '作品ごとに新しいほうを使います（この端末にしかない作品は残ります）。読み込む前の状態は残しておきます。',
+    { ok: '読み込む', cancel: '読み込まない', danger: false });
+    if (!ok) {
+      syncPending = null;
+      sync.markChecked(entry);
+      toast('読み込みませんでした');
+      return;
+    }
+    await mergeFrom(entry);
+    return;
+  }
+  const c = await choose(`⚠ 他の端末（${who}）でも更新されています。この端末にも、まだバックアップしていない変更があります。どちらの記録を使いますか？\n\n` +
+    '・他の端末の記録：作品ごとに新しいほうを使います。両方で書き換えた作品は、どちらを使うか作品ごとに聞きます。\n' +
+    '・この端末の記録：今の内容をすぐバックアップして、最新にします（他の端末の変更は読み込みません）。',
+  [{ value: 'mine', label: 'この端末の記録を使う' }, { value: 'other', label: '他の端末の記録を使う', primary: true }], { cancel: 'あとで' });
+  if (c === 'other') { await mergeFrom(entry); return; }
+  if (c === 'mine') {
+    syncPending = null;
+    sync.markChecked(entry);
+    const ok = await sync.backupNow({ force: true });
+    toast(ok ? 'この端末の記録をバックアップしました（これが最新になります）' : '自動バックアップに失敗しました', !ok);
+    return;
+  }
+  // あとで：決めるまで自動バックアップは止めておく（先に保存すると、他の端末の更新が隠れてしまうため）
+  syncPending = entry;
+  renderSyncState();
 }
 
-async function cloudOpen(p) {
+async function mergeFrom(entry) {
   await flush();
-  const dialog = $('cloud-dialog');
-  const list = $('cloud-list');
-  $('cloud-dialog-title').textContent = p.label + 'から開く';
+  const res = await sync.loadAndMerge(entry, async (l, r) => {
+    const c = await choose(`「${l.title || '無題'}」は、この端末と他の端末の両方で書き換えられています。どちらを使いますか？\n\n` +
+      `この端末：${fmtTime(l.updatedAt)} 更新・${totalChars(l).toLocaleString()}字\n` +
+      `他の端末：${fmtTime(r.updatedAt)} 更新・${totalChars(r).toLocaleString()}字\n\n` +
+      '（使わなかったほうも、「設定」→「自動バックアップ」の「同期の前の状態を書き出す」から取り出せます）',
+    [{ value: 'local', label: 'この端末' }, { value: 'remote', label: '他の端末', primary: true }], { cancel: 'この端末のまま' });
+    return c === 'remote' ? 'remote' : 'local';
+  });
+  syncPending = null;
+  prefs.set('restoredMessage', `他の端末のバックアップを読み込みました（追加 ${res.added}・更新 ${res.updated}・この端末のまま ${res.kept}）`);
+  location.reload();
+}
+
+// 許可・ログインが戻っていれば、起動時の確認をする
+async function syncResumeIfReady() {
+  await sync.refresh();
+  if (sync.getState() === 'on' && !sync.isChecked() && !syncPending) await runSyncCheck();
+}
+
+async function resolveSyncAttention() {
+  if (syncPending) { await runSyncCheck({ manual: true }); return; }
+  const ok = await sync.resume(); // Google ドライブ（ホーム画面のアプリ）では、ここでページごと Google へ移動する
+  if (!ok) { toast(sync.mode() === 'folder' ? '書き込みが許可されませんでした' : 'ログインできませんでした', true); return; }
+  toast('自動バックアップを再開しました');
+  await runSyncCheck();
+}
+
+async function openSyncRestore() {
+  const list = $('sync-restore-list');
   list.replaceChildren(li('empty', '読み込み中…'));
-  dialog.showModal();
+  $('sync-restore-dialog').showModal();
   let files;
   try {
-    files = await p.list();
+    files = await sync.listAll();
   } catch (e) {
-    dialog.close();
+    $('sync-restore-dialog').close();
     throw e;
   }
   list.replaceChildren();
-  if (!files.length) { list.append(li('empty', `${p.label}に保存した作品はまだありません`)); return; }
-  for (const f of files) {
-    const open = button('開く', async () => {
-      dialog.close();
-      const text = await p.load(f.id);
-      // 全体バックアップのファイルなら、復元の画面へ
-      if (isBackup(text)) { openRestoreDialog(text, f.name); return; }
-      const content = parse(text, f.name);
-      await switchTo(await importContent(content, { [p.id]: f.id }));
-      saveTarget = 'gdrive';
-      prefs.set('file.lastDestination', 'gdrive');
-      toast(`${p.label}から「${content.title || '無題'}」を開きました`);
-    });
-    list.append(listItem(f.name.replace(/\.json$/i, ''), '更新 ' + fmtTime(f.modifiedTime), [open]));
+  if (!files.length) { list.append(li('empty', 'まだバックアップはありません')); return; }
+  for (const f of files.slice(0, 300)) {
+    list.append(listItem(f.name, `${fmtTime(new Date(f.at).toISOString())}${f.mine ? '・この端末' : ''}`, [
+      button('選ぶ', async () => {
+        const text = await sync.read(f);
+        $('sync-restore-dialog').close();
+        openRestoreDialog(text, f.name);
+      }),
+    ]));
   }
 }
 
-// 設定の「クラウド」タブ：保存・開く・ログインのボタン
+async function exportPreSync() {
+  const saved = await meta.get('preSyncBackup');
+  if (!saved) { toast('同期の前の状態はありません'); return; }
+  const d = new Date(saved.createdAt);
+  const p = (n) => String(n).padStart(2, '0');
+  const r = await localFile.saveAs(saved.text, `小説エディター_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
+  if (r) toast('同期の前の状態を書き出しました（「ファイル」→ 全体の「開く」で戻せます）');
+}
+
+// ---------- クラウド（設定の「クラウド」タブ） ----------
+
 function renderCloudActions() {
   const box = $('cloud-action-list');
   box.replaceChildren();
@@ -1480,53 +1714,36 @@ function renderCloudActions() {
   for (const p of providers) {
     const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
     section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
-    const row = Object.assign(document.createElement('div'), { className: 'button-row' });
     if (!p.isConfigured()) {
       section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '下の「クラウド接続の設定」にクライアントIDを入れて「保存」を押すと使えるようになります。' }));
-    } else {
-      row.append(
-        button(`${p.label}に保存`, () => cloudSave(p)),
-        button(`${p.label}から開く…`, () => { $('settings-dialog').close(); return cloudOpen(p); }),
-        p.isSignedIn()
-          ? button('ログアウト', () => { p.signOut(); renderCloudActions(); toast(p.label + 'からログアウトしました'); })
-          : button('ログイン', async () => { await p.signIn(); renderCloudActions(); toast(p.label + 'にログインしました'); }));
-      section.append(row);
-      if (project.links?.[p.id]) section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'この作品は保存先と連携しています（Ctrl+S／⌘S でも保存できます）。' }));
-      if (p.save) {
-        const sel = document.createElement('select');
-        sel.setAttribute('aria-label', '保存・開くときの保存先');
-        for (const [v, t] of [['ask', '毎回どちらか選ぶ'], ['gdrive', `${p.label}を優先`], ['local', 'この端末・その他（iCloud・OneDrive など）を優先']]) sel.append(new Option(t, v));
-        sel.value = prefs.get(DEST_KEY, 'ask');
-        sel.addEventListener('change', () => {
-          prefs.set(DEST_KEY, sel.value);
-          updateFileMenu();
-          toast('保存・開くときの保存先を「' + sel.selectedOptions[0].textContent + '」にしました');
-        });
-        const wrap = Object.assign(document.createElement('label'), { className: 'dest-select' });
-        wrap.append('保存・開くときの保存先（この端末）', sel);
-        section.append(wrap, Object.assign(document.createElement('p'), {
-          className: 'hint',
-          textContent: '「ファイル」の開く・保存・名前を付けて保存と「すべてをバックアップ」で使います。優先にしたときも、「ファイル」→「保存先を選んで…」でもう一方を使えます。上書き保存は、前回保存・開いた場所へそのまま保存します。',
-        }));
-      }
-      if (p.autoSave) {
-        const check =Object.assign(document.createElement('input'), { type: 'checkbox', checked: prefs.get('cloud.autoSave', true) });
-        check.addEventListener('change', () => {
-          prefs.set('cloud.autoSave', check.checked);
-          renderCloudAttention();
-          updateStatus();
-          toast(check.checked ? `${p.label}への自動保存をオンにしました` : `${p.label}への自動保存をオフにしました`);
-        });
-        const label = Object.assign(document.createElement('label'), { className: 'inline' });
-        label.append(check, ` 連携している作品を${p.label}にも自動で保存する（この端末）`);
-        section.append(label, Object.assign(document.createElement('p'), {
-          className: 'hint',
-          textContent: '変更があるときだけ、書いている間は10分ごと、ホーム画面に戻る・別のアプリや作品に切り替えるときにも保存します。' +
-            'ログインは約1時間で切れるので、切れたら上に出る「再ログイン」を押してください。ほかの端末で更新されていたら、上書きせずに知らせます。',
-        }));
-      }
-      if (p.folderInfo) section.append(renderCloudFolder(p));
+      box.append(section);
+      continue;
     }
+    const row = Object.assign(document.createElement('div'), { className: 'button-row' });
+    row.append(p.isSignedIn()
+      ? button('ログアウト', () => { p.signOut(); renderCloudActions(); sync.refresh(); toast(p.label + 'からログアウトしました'); })
+      : button('ログイン', async () => { await p.signIn(); renderCloudActions(); await syncResumeIfReady(); toast(p.label + 'にログインしました'); }));
+    section.append(row);
+    const sel = document.createElement('select');
+    sel.setAttribute('aria-label', '保存・開くときの保存先');
+    for (const [v, t] of [['ask', '毎回どちらか選ぶ'], ['gdrive', `${p.label}を優先`], ['local', 'この端末・その他（iCloud・OneDrive など）を優先']]) sel.append(new Option(t, v));
+    sel.value = prefs.get(DEST_KEY, 'ask');
+    sel.addEventListener('change', () => {
+      prefs.set(DEST_KEY, sel.value);
+      updateFileMenu();
+      toast('保存・開くときの保存先を「' + sel.selectedOptions[0].textContent + '」にしました');
+    });
+    const wrap = Object.assign(document.createElement('label'), { className: 'dest-select' });
+    wrap.append('「ファイル」で保存・開くときの保存先（この端末）', sel);
+    section.append(wrap, Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: '「ファイル」の全体・エピソードの保存と開く、作品ファイルの取り込み・書き出しで使います。優先にしたときも、「ファイル」→「保存先を選んで」でもう一方を使えます。上書き保存は、前回「全体」を保存・開いた場所へそのまま保存します。',
+    }));
+    if (p.folderInfo) section.append(renderCloudFolder(p));
+    section.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください（フォルダは「小説エディター／自動バックアップ」に決まっています）。',
+    }));
     box.append(section);
   }
 }
@@ -1882,6 +2099,7 @@ function templates() {
 
 function saveTemplates(list) {
   prefs.set('templates', list);
+  sync.markDirty(); // ひな型も自動バックアップに入れる
   renderTemplateSelects();
 }
 
@@ -2176,8 +2394,14 @@ function restoreMaximized(fromHistory = false) {
 function selectSettingsTab(name) {
   document.querySelectorAll('[data-stab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stab === name)));
   document.querySelectorAll('[data-spanel]').forEach((p) => { p.hidden = p.dataset.spanel !== name; });
+  // 狭い画面ではタブが横にスクロールするので、選んだタブを見える位置に
+  document.querySelector(`[data-stab="${name}"]`)?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   prefs.set('settingsTab', name);
-  if (name === 'backup') renderProjectVersions().catch(fail);
+  if (name === 'backup') {
+    renderProjectVersions().catch(fail);
+    renderSyncState();
+    meta.get('preSyncBackup').then((v) => { $('sync-presync-row').hidden = !v; }).catch(() => {});
+  }
   if (name === 'cloud') renderCloudActions();
 }
 
@@ -2185,8 +2409,10 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   const form = $('settings-form');
   form.font.value = prefs.get('font', 'serif');
   form.fontSize.value = prefs.get('fontSize', '18');
-  form.autoBackupInterval.value = String(autoBackup.intervalMin());
-  form.autoBackupKeep.value = String(autoBackup.keepCount());
+  form.autoBackupInterval.value = String(sync.intervalMin());
+  form.autoBackupKeep.value = String(sync.keepCount());
+  $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
+  $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
   // 投稿サイトのアカウント（端末ごと）と、この作品の Nコード・作品ID
   const acc = accounts();
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
@@ -2219,15 +2445,16 @@ function saveSettings() {
   const form = $('settings-form');
   prefs.set('font', form.font.value);
   prefs.set('fontSize', form.fontSize.value);
-  prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || autoBackup.DEFAULT_INTERVAL_MIN);
-  prefs.set('autoBackupKeep', Math.min(2000, Math.max(10, Number(form.autoBackupKeep.value) || autoBackup.DEFAULT_KEEP)));
+  prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || sync.DEFAULT_INTERVAL_MIN);
+  prefs.set('autoBackupKeep', Math.min(2000, Math.max(10, Number(form.autoBackupKeep.value) || sync.DEFAULT_KEEP)));
+  prefs.set('sync.prefix', sync.cleanPrefix($('sync-prefix').value.trim()));
   const acc = { narou: {}, alpha: {} };
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
     const [, site, key] = input.name.split('.');
     acc[site][key] = input.value.trim();
   });
   prefs.set('accounts', acc);
-  renderAutoBackupState(autoBackup.getState());
+  renderSyncState();
   prefs.set('links', editingLinks
     .map((l) => ({ name: l.name.trim(), url: normalizeUrl(l.url) }))
     .filter((l) => l.url)
@@ -2245,12 +2472,28 @@ function saveSettings() {
 
 // ---------- イベント ----------
 
+// メニューが、スクロールする枠（目次など）や画面の下からはみ出すなら、上向きに開く
+function placeMenu(d) {
+  const list = d.querySelector('.menu-list');
+  if (!list) return;
+  list.classList.remove('up');
+  let box = d.parentElement;
+  while (box && box !== document.body && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
+  const limit = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const bottom = Math.min(limit.bottom, window.innerHeight);
+  const top = Math.max(limit.top, 0);
+  const r = list.getBoundingClientRect();
+  const s = d.getBoundingClientRect();
+  if (r.bottom > bottom && s.top - top > bottom - s.bottom) list.classList.add('up');
+}
+
 function closeMenus(except) {
   document.querySelectorAll('details.menu[open]').forEach((d) => { if (d !== except) d.open = false; });
 }
 
+// Ctrl+S／⌘S：全体の上書き保存
 function quickSave() {
-  return fileSave();
+  return allSave();
 }
 
 const actions = {
@@ -2258,15 +2501,20 @@ const actions = {
   library: openLibrary,
   'new-project': createProject,
   settings: () => openSettings(),
-  'file-open': fileOpen,
-  'file-save': fileSave,
-  'file-save-as': fileSaveAs,
+  'all-open': () => allOpen(),
+  'all-save': allSave,
+  'all-save-as': () => allSaveAs(),
+  'all-open-choose': () => allOpen({ force: true }),
+  'all-save-choose': () => allSaveAs({ force: true }),
+  'ep-open': () => epOpen(),
+  'ep-save-as': () => epSaveAs(),
+  'import-text': importText,
+  'import-work': () => importWork(),
+  'export-work': () => exportWork(),
   'export-episode': exportEpisode,
   'export-all': exportAll,
   'add-episode': () => addEpisode(),
   'add-chapter': addChapterFromList,
-  'move-up': () => moveEpisode(-1),
-  'move-down': () => moveEpisode(1),
   'ep-version-up': episodeVersionUp,
   'export-pre-v3': exportPreV3Backup,
   'max-restore': () => restoreMaximized(),
@@ -2278,36 +2526,10 @@ const actions = {
   'open-x': openX,
   'auto-indent': runAutoIndent,
   replace: openReplace,
-  backup: backupAll,
-  restore: restoreFromFile,
   undo: () => undoRedo('undo'),
   redo: () => undoRedo('redo'),
-  'cloud-attention': () => resolveCloudAttention(),
-  'file-open-choose': () => fileOpen({ force: true }),
-  'file-save-choose': () => fileSaveAs({ force: true }),
-  'autobackup-resume': () => autoBackup.resume()
-    .then((ok) => toast(ok ? '自動バックアップを再開しました' : '書き込みが許可されませんでした', !ok)),
+  'sync-attention': resolveSyncAttention,
 };
-
-// 自動バックアップの状態を画面に出す
-function renderAutoBackupState(state) {
-  $('autobackup-resume').hidden = state !== 'need-permission';
-  const last = autoBackup.lastWrittenAt();
-  const lastText = last ? `（最後の保存 ${fmtTime(last)}）` : '';
-  const text = !autoBackup.supported
-    ? 'このブラウザでは使えません（Windows・Mac の Chrome / Edge で使えます）。iPad では自動バージョンと「すべてをバックアップ」を使ってください。'
-    : state === 'on' ? `✅ 「${autoBackup.folderName()}」に${autoBackup.intervalMin()}分ごと・最新${autoBackup.keepCount()}件で自動保存しています${lastText}`
-      : state === 'need-permission' ? `⚠ 「${autoBackup.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください${lastText}`
-        : '止まっています。フォルダを選ぶと始まります。';
-  $('autobackup-status').textContent = text;
-  // 使えないブラウザ（iPhone・iPad など）では、ボタン・保存間隔・説明を出さない
-  $('autobackup-buttons').hidden = !autoBackup.supported;
-  document.querySelector('#autobackup-settings .autobackup-options').hidden = !autoBackup.supported;
-  $('autobackup-hint').hidden = !autoBackup.supported;
-  $('autobackup-now').disabled = state !== 'on';
-  $('autobackup-stop').disabled = state === 'off';
-  if (project) updateStatus();
-}
 
 // 元に戻す／やり直す：最後に入力していた欄に対して、ブラウザ標準の取り消し履歴を使う
 let lastEditable = null;
@@ -2462,8 +2684,9 @@ function bindEvents() {
       setView(d.view);
     } else if (d.ep !== undefined) {
       selectEpisode(Number(d.ep));
-    } else if (d.epDelete !== undefined) {
-      deleteEpisode(Number(d.epDelete)).catch(fail);
+      if (epSearch) jumpToSearchHit(Number(d.ep));
+    } else if (d.epAct) {
+      episodeAction(d.epAct, Number(d.epIndex), d.epTo);
     } else if (d.max) {
       maximizeField(d.max);
     } else if (d.toggleChapter) {
@@ -2487,6 +2710,14 @@ function bindEvents() {
   const rf = $('replace-form');
   for (const name of ['from', 'scope']) rf.elements[name].addEventListener('input', updateReplacePreview);
 
+  // 目次の章・エピソードの「⋯」メニュー（あとから作る）：開いたら他のメニューを閉じ、下に入りきらなければ上向きに開く
+  document.addEventListener('toggle', (e) => {
+    const d = e.target;
+    if (!(d instanceof HTMLDetailsElement) || !d.open || !d.classList.contains('chapter-menu')) return;
+    closeMenus(d);
+    placeMenu(d);
+  }, true);
+
   document.querySelectorAll('details.menu').forEach((d) => d.addEventListener('toggle', () => {
     if (!d.open) return;
     closeMenus(d);
@@ -2501,13 +2732,11 @@ function bindEvents() {
     e.preventDefault();
     try { runDriveSave($('drive-save-name').value).catch(fail); } catch (err) { fail(err); }
   });
-  $('drive-save-local').addEventListener('click', () => {
-    const job = driveSaveJob;
-    driveSaveJob = null;
-    $('drive-save-dialog').close();
-    if (job) { try { Promise.resolve(job.onLocal()).catch(fail); } catch (err) { fail(err); } }
-  });
-  $('drive-save-dialog').addEventListener('close', () => { driveSaveJob = null; });
+  // 「この端末・その他に保存」：押したその場で共有メニュー・保存画面を出す
+  $('drive-save-local').addEventListener('click', () => finishDriveSave('local'));
+  $('drive-save-dialog').addEventListener('close', () => { if (driveSaveJob) finishDriveSave(null); });
+  bindDialog('sync-restore-dialog');
+  bindDialog('cloud-dialog');
   bindDialog('image-dialog', () => insertImage($('image-form').url.value));
   bindDialog('template-edit-dialog', saveEditedTemplate);
   bindDialog('replace-dialog', runReplace);
@@ -2521,8 +2750,17 @@ function bindEvents() {
     renderProjectVersions().catch(() => {});
   });
   $('ep-sort').addEventListener('change', (e) => setEpisodeSort({ key: e.target.value }));
+  // 目次の検索：入力が止まったら探す。Esc で消す
+  let searchTimer = null;
+  $('ep-search').addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => setEpisodeSearch(e.target.value.trim()), 250);
+  });
+  $('ep-search').addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && e.target.value) { e.stopPropagation(); e.target.value = ''; setEpisodeSearch(''); }
+    if (e.key === 'Enter') { clearTimeout(searchTimer); setEpisodeSearch(e.target.value.trim()); }
+  });
   $('ep-grouping').addEventListener('change', (e) => setEpisodeSort({ grouped: e.target.value === 'chapters' }));
-  el.chapter.addEventListener('change', (e) => moveEpisodeToChapter(e.target.value));
   $('work-ncode').addEventListener('input', (e) => setWorkCode('ncode', e.target.value));
   $('work-alpha-id').addEventListener('input', (e) => setWorkCode('alpha', e.target.value));
   // 表示・ボタンの設定はチェックした時点で反映・保存する
@@ -2592,22 +2830,50 @@ function bindEvents() {
   // 画面を閉じる・別のアプリに切り替えるとき：端末に保存し、自動バージョンと自動バックアップも残す
   const onLeave = () => {
     flush().then(() => autoVersion(60_000)).catch(() => {});
-    autoBackup.flushNow();
-    cloudAutoSave(60_000).catch(() => {});
+    sync.flushNow();
   };
-  document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onLeave(); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') onLeave();
+    else syncResumeIfReady().catch(() => {}); // 戻ってきたとき、許可・ログインが戻っていれば確認する
+  });
   window.addEventListener('pagehide', onLeave);
   setInterval(() => autoVersion().catch(() => {}), 60_000);
-  setInterval(() => cloudAutoSave().catch(() => {}), 60_000);
 
-  $('autobackup-choose').addEventListener('click', () => autoBackup.chooseFolder()
-    .then((ok) => { if (ok) toast(`「${autoBackup.folderName()}」への自動バックアップを始めました`); }).catch(fail));
-  $('autobackup-now').addEventListener('click', () => autoBackup.runNow()
-    .then((ok) => toast(ok ? '自動バックアップのフォルダに保存しました' : '先にフォルダを選んでください')).catch(fail));
-  $('autobackup-stop').addEventListener('click', async () => {
-    if (!(await ask('自動バックアップを止めますか？（これまでのバックアップファイルは消えません）'))) return;
-    autoBackup.stop().then(() => toast('自動バックアップを止めました')).catch(fail);
+  // 設定 → 自動バックアップ
+  $('sync-mode').addEventListener('change', async (e) => {
+    const m = e.target.value;
+    if (m === 'off' && sync.mode() !== 'off') {
+      if (!(await ask('自動バックアップを止めますか？（これまでのバックアップファイルは消えません）', { ok: '止める' }))) { renderSyncState(); return; }
+      await sync.stop();
+      syncPending = null;
+      toast('自動バックアップを止めました');
+      return;
+    }
+    await sync.setMode(m);
+    syncPending = null;
+    if (m === 'folder' && sync.getState() === 'off') toast('「フォルダを選ぶ…」を押して、保存先のフォルダを選んでください');
+    if (m === 'gdrive' && sync.getState() === 'need-login') toast('「Google ドライブにログイン」を押してください');
+    await runSyncCheck();
   });
+  $('sync-choose').addEventListener('click', () => {
+    const run = sync.mode() === 'folder' ? sync.chooseFolder() : sync.resume();
+    run.then(async (ok) => {
+      if (!ok) return;
+      toast(`「${sync.folderName()}」への自動バックアップを始めました`);
+      await runSyncCheck();
+    }).catch(fail);
+  });
+  $('sync-now').addEventListener('click', async () => {
+    try {
+      if (!sync.isChecked()) await runSyncCheck({ manual: true });
+      if (syncPending) return;
+      const ok = await sync.backupNow({ force: true });
+      toast(ok ? '自動バックアップの保存先に保存しました' : '保存できませんでした：' + (sync.getError() || '保存先を確認してください'), !ok);
+    } catch (err) { fail(err); }
+  });
+  $('sync-check').addEventListener('click', () => runSyncCheck({ manual: true }).catch(fail));
+  $('sync-restore').addEventListener('click', () => openSyncRestore().catch(fail));
+  $('sync-presync').addEventListener('click', () => exportPreSync().catch(fail));
 }
 
 // 旧形式（1作品＝1原稿）のデータを作品＋エピソード形式へ移す
@@ -2658,15 +2924,23 @@ async function init() {
   showProject(p);
 
   requestPersistence();
-  autoBackup.onState(renderAutoBackupState);
-  await autoBackup.init().catch((e) => console.warn('自動バックアップの準備に失敗', e));
+  allHandle = await meta.get('allFileHandle').catch(() => null);
+
+  // 自動バックアップ（同期）：準備して、他の端末の更新を確認する
+  const drive = syncProvider();
+  if (drive) drive.onBeforeRedirect = () => flush(); // Google のログインでページを離れる前に、書きかけを保存
+  sync.onChange(renderSyncState);
+  // 自動バックアップしようとしたら他の端末のほうが新しかった：画面が見えていれば、その場で確認する
+  sync.onNewer(() => { if (document.visibilityState === 'visible') runSyncCheck().catch(fail); });
+  await sync.init({ provider: drive }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
+  renderSyncState();
+  const login = drive?.takeRedirectResult();
   const restored = prefs.get('restoredMessage', null);
-  if (restored) {
-    prefs.set('restoredMessage', null);
-    toast(restored);
-  } else {
-    setTimeout(() => remindBackup().catch(() => {}), 1500);
-  }
+  if (login) toast(login.ok ? 'Google ドライブにログインしました' : login.message, !login.ok);
+  else if (restored) toast(restored);
+  if (restored) prefs.set('restoredMessage', null);
+  if (!login && !restored) setTimeout(() => remindBackup().catch(() => {}), 1500);
+  runSyncCheck().catch((e) => console.warn('他の端末の更新の確認に失敗', e));
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
     navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker 登録失敗', e));

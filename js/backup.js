@@ -4,7 +4,12 @@ import { normalize } from './format.js';
 
 export const BACKUP_FORMAT = 'novel-editor-backup';
 
-export async function makeBackup() {
+// 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
+// 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
+const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|currentId$|settingsTab$)/;
+const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
+
+export async function makeBackup({ device = null } = {}) {
   const projects = await db.all();
   const allVersions = await versions.all();
   return {
@@ -12,9 +17,10 @@ export async function makeBackup() {
       format: BACKUP_FORMAT,
       version: 1,
       createdAt: new Date().toISOString(),
+      ...(device ? { device } : {}),
       projects,
       versions: allVersions,
-      prefs: prefs.entries(),
+      prefs: sharedPrefs(prefs.entries()),
     }, null, 1),
     count: projects.length,
     versionCount: allVersions.length,
@@ -47,7 +53,7 @@ export async function restoreBackup(backup, mode) {
   for (const v of backup.versions || []) {
     if (v && v.id && v.projectId) await versions.put(v);
   }
-  const saved = backup.prefs || {};
+  const saved = sharedPrefs(backup.prefs);
   for (const [key, value] of Object.entries(saved)) {
     if (key === 'templates' && mode === 'merge') {
       // ひな型は、端末にあるものとまとめる（同じものはバックアップ側を使う）
@@ -64,7 +70,31 @@ export async function restoreBackup(backup, mode) {
 export function backupFileName() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `小説エディター_バックアップ_${ymd}.json`;
+  return `小説エディター_全体_${ymd}.json`;
+}
+
+// ---------- エピソード専用ファイル ----------
+// 1話分（なろう用・アルファ用の両方の原稿、プロット、フリーメモ）を1ファイルにする
+export const EPISODE_FORMAT = 'novel-editor-episode';
+
+export function makeEpisodeFile(ep, workTitle = '') {
+  return JSON.stringify({
+    format: EPISODE_FORMAT,
+    version: 1,
+    createdAt: new Date().toISOString(),
+    workTitle,
+    episode: { drafts: ep.drafts, plot: ep.plot ?? '', freeMemo: ep.freeMemo ?? '' },
+  }, null, 1);
+}
+
+export function isEpisodeFile(text) {
+  try { return JSON.parse(text)?.format === EPISODE_FORMAT; } catch { return false; }
+}
+
+export function parseEpisodeFile(text) {
+  const o = JSON.parse(text);
+  if (o?.format !== EPISODE_FORMAT || !o.episode?.drafts) throw new Error('エピソードのファイルではありません');
+  return o;
 }
 
 // ブラウザに「保存データを勝手に消さないで」と頼む（対応ブラウザのみ）
