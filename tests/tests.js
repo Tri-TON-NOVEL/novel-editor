@@ -302,6 +302,21 @@ group('見出しの掃除：なろうのダウンロード TXT', () => {
   eq(r.head.lines, ['転生したら筆だった件', '作者：テスト太郎'], '作品情報');
 });
 
+group('なろうダウンロード TXT：末尾の免責文と作成日時を取り込まない', () => {
+  const preset = I.PRESETS.find((p) => p.id === 'narou-download');
+  const lines = [
+    '------------------------- エピソード1開始 -------------------------',
+    '【エピソードタイトル】', '最終話', '【本文】', '本文の最後。',
+    '本テキストデータの利用によって発生する如何なる案件につきましても、株式会社ヒナプロジェクト及びその関連グループは一切の責任を負いません。',
+    'このファイルは「小説家になろう」の投稿済み作品テキストダウンロード機能を用いて作成されました。',
+    '作成日時: 2026-10-21 10:39:44',
+  ];
+  const marks = I.detectMarks(lines, preset.rules);
+  const mask = I.headingMask(lines, preset.rules.cleanup, marks);
+  const r = I.buildEpisodes(lines, marks, { episodeTitle: preset.rules.episode.title, mask });
+  eq(r.episodes[0].body, '本文の最後。');
+});
+
 const narouInfo = [
   '転生したら筆だった件',
   '【ユーザ情報】', 'ユーザID：50921', 'ユーザ名：テスト太郎',

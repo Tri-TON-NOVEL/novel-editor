@@ -18,7 +18,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.21-3.3';
+const APP_VERSION = '2026.10.21-3.4';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -245,14 +245,13 @@ const EP_SORTS = {
   title: {
     label: 'タイトル',
     value: (e) => episodeName(e),
-    flat: true,
-    meta: (e) => (e.chapterId ? chapterName(project.chapters.find((c) => c.id === e.chapterId)) : '未分類'),
   },
   chars: { label: '本文の文字数', value: (e) => countChars(mainDraft(e).body).all, meta: (e) => `${countChars(mainDraft(e).body).all.toLocaleString()}字` },
   plot: { label: 'プロットの有無', value: (e) => (e.plot.trim() ? 1 : 0), meta: (e) => (e.plot.trim() ? 'プロットあり' : 'プロットなし') },
 };
-let epSort = { key: 'file', dir: 'asc', ...prefs.get('epSort', {}) };
+let epSort = { key: 'file', dir: 'asc', grouped: true, ...prefs.get('epSort', {}) };
 if (!EP_SORTS[epSort.key]) epSort.key = 'file';
+if (typeof epSort.grouped !== 'boolean') epSort.grouped = true;
 // 「第2話」と「第10話」を数字の大きさで並べる
 const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
 
@@ -272,6 +271,7 @@ function sortedEpisodeIndexes(indexes = project.episodes.map((_, i) => i)) {
 }
 
 function renderSortControls() {
+  $('ep-grouping').value = epSort.grouped ? 'chapters' : 'flat';
   $('ep-sort').value = epSort.key;
   const dir = $('ep-sort-dir');
   dir.textContent = epSort.dir === 'asc' ? '↑ 昇順' : '↓ 降順';
@@ -353,7 +353,10 @@ function episodeRow(i, sort, flat = false) {
   const ep = project.episodes[i];
   const b = Object.assign(document.createElement('button'), { type: 'button', title: episodeName(ep) });
   b.append(Object.assign(document.createElement('span'), { className: 'ep-name', textContent: episodeName(ep) }));
-  if (sort.meta) b.append(Object.assign(document.createElement('small'), { className: 'ep-meta', textContent: sort.meta(ep) }));
+  const meta = [];
+  if (flat) meta.push(ep.chapterId ? chapterName(project.chapters.find((c) => c.id === ep.chapterId)) : '未分類');
+  if (sort.meta) meta.push(sort.meta(ep));
+  if (meta.length) b.append(Object.assign(document.createElement('small'), { className: 'ep-meta', textContent: meta.join('・') }));
   b.dataset.ep = i;
   if (view === 'episode' && i === epIndex) b.classList.add('active');
   const del = Object.assign(document.createElement('button'), {
@@ -369,8 +372,8 @@ function renderEpisodeList() {
   const list = $('episode-list');
   list.replaceChildren();
   const sort = EP_SORTS[epSort.key];
-  // 章をまたいで並べる並び順（タイトル順）は、章の見出しを出さずに全エピソードを1つの一覧にする
-  if (sort.flat) {
+  // 「章なし」は章を抜きにして、全エピソードを選択した条件で並べる
+  if (!epSort.grouped) {
     for (const i of sortedEpisodeIndexes()) list.append(episodeRow(i, sort, true));
     renderChapterSelect();
     return;
@@ -1494,12 +1497,22 @@ function buildImageMenu() {
   }
   images.forEach((img, n) => {
     const item = Object.assign(document.createElement('div'), { className: 'image-item' });
+    const source = Object.assign(document.createElement(img.url ? 'a' : 'div'), {
+      className: 'image-sub',
+      textContent: `${IMAGE_KIND[img.kind]}：${img.text}`,
+    });
+    if (img.url) {
+      source.href = img.url;
+      source.target = '_blank';
+      source.rel = 'noopener noreferrer';
+      source.title = img.url;
+    }
     item.append(
       Object.assign(document.createElement('div'), {
         className: 'image-head',
         textContent: `${n + 1}. ${img.kind === 'alpha' ? img.code : `i${img.code}`}${img.user ? `（みてみん ${img.user}）` : ''} ・ ${img.line}行目`,
       }),
-      Object.assign(document.createElement('div'), { className: 'image-sub', textContent: `${IMAGE_KIND[img.kind]}：${img.text}` }));
+      source);
     const actions = Object.assign(document.createElement('div'), { className: 'image-actions' });
     if (img.url) {
       const open = button('みてみんで開く', () => { closeMenus(); openLink(img.url); });
@@ -1786,6 +1799,7 @@ function applyUiPrefs() {
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
   for (const k of ['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'main-to-sub']) cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
+  cls.toggle('hide-max-tools', !uiPref('max.tools'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ
   if (cls.contains('hide-side') && document.querySelector('[data-tab="side"][aria-selected="true"]')) selectTab('body');
 }
@@ -1794,6 +1808,16 @@ function applyUiPrefs() {
 
 const MAX_LABELS = { title: 'エピソードタイトル', body: '本文', foreword: '前書き', afterword: '後書き', plot: 'プロット', memo: 'フリーメモ' };
 let maximized = null; // { box, input }
+
+function fitVisualViewport() {
+  const vv = window.visualViewport;
+  const height = vv?.height || window.innerHeight || document.documentElement.clientHeight;
+  const width = vv?.width || window.innerWidth || document.documentElement.clientWidth;
+  document.documentElement.style.setProperty('--vv-height', Math.round(height) + 'px');
+  document.documentElement.style.setProperty('--vv-width', Math.round(width) + 'px');
+  document.documentElement.style.setProperty('--vv-top', Math.round(vv?.offsetTop || 0) + 'px');
+  document.documentElement.style.setProperty('--vv-left', Math.round(vv?.offsetLeft || 0) + 'px');
+}
 
 function maximizeField(field) {
   if (maximized) restoreMaximized();
@@ -1819,6 +1843,11 @@ function maximizeField(field) {
   input.focus({ preventScroll: true });
   input.setSelectionRange(s, e);
   input.scrollTop = scrollTop;
+  // iPhone / Android はキーボードの表示途中にも表示領域が変わるため、段階的に再計測する
+  fitVisualViewport();
+  [50, 250, 600].forEach((ms) => setTimeout(() => {
+    if (maximized?.input === input) fitVisualViewport();
+  }, ms));
 }
 
 function restoreMaximized(fromHistory = false) {
@@ -2122,6 +2151,7 @@ function bindEvents() {
     renderProjectVersions().catch(() => {});
   });
   $('ep-sort').addEventListener('change', (e) => setEpisodeSort({ key: e.target.value }));
+  $('ep-grouping').addEventListener('change', (e) => setEpisodeSort({ grouped: e.target.value === 'chapters' }));
   el.chapter.addEventListener('change', (e) => moveEpisodeToChapter(e.target.value));
   $('work-ncode').addEventListener('input', (e) => setWorkCode('ncode', e.target.value));
   $('work-alpha-id').addEventListener('input', (e) => setWorkCode('alpha', e.target.value));
@@ -2140,14 +2170,15 @@ function bindEvents() {
   // スマートフォン・タブレットでキーボードが出ているとき、最大化した欄を見えている範囲に合わせる
   if (window.visualViewport) {
     const vv = window.visualViewport;
-    const fit = () => {
-      document.documentElement.style.setProperty('--vv-height', vv.height + 'px');
-      document.documentElement.style.setProperty('--vv-top', vv.offsetTop + 'px');
-    };
-    vv.addEventListener('resize', fit);
-    vv.addEventListener('scroll', fit);
-    fit();
+    vv.addEventListener('resize', fitVisualViewport);
+    vv.addEventListener('scroll', fitVisualViewport);
   }
+  window.addEventListener('resize', fitVisualViewport);
+  document.addEventListener('focusin', (e) => {
+    if (!maximized || e.target !== maximized.input) return;
+    [0, 100, 350, 700].forEach((ms) => setTimeout(fitVisualViewport, ms));
+  });
+  fitVisualViewport();
   // 最大化中の「戻る」（Android の戻る操作・ブラウザの戻る）は、最大化を解除するだけにする
   window.addEventListener('popstate', () => { if (maximized) restoreMaximized(true); });
   // 最大化ボタンを押しても、入力欄のカーソル位置が変わらないようにする

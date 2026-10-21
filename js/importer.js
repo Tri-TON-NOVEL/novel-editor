@@ -490,6 +490,8 @@ export const PRESETS = [
           { text: '【ジャンル】', method: 'exact', action: 'block' },
           { text: '【作品に含まれる要素】', method: 'exact', action: 'block' },
           { text: '【キーワード】', method: 'exact', action: 'block' },
+          // ダウンロードTXT末尾の免責文と作成日時は作品本文ではないため、ここから末尾まで取り込まない
+          { text: '本テキストデータの利用によって発生する如何なる案件につきましても、株式会社ヒナプロジェクト及びその関連グループは一切の責任を負いません。', method: 'prefix', action: 'block' },
           { text: '【前書き】', method: 'exact', action: 'foreword' },
           { text: '【後書き】', method: 'exact', action: 'afterword' },
         ],

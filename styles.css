@@ -214,6 +214,7 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .episode-list .ep-row { padding-left: 14px; }
 .ep-sort { display: flex; gap: 4px; align-items: center; }
 .ep-sort select { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }
+.ep-sort .ep-grouping { flex: 0 0 auto; width: 6.5em; }
 .ep-sort .tool { flex: none; white-space: nowrap; }
 .episode-list button[data-ep] { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 .episode-list .ep-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -324,11 +325,13 @@ body.hide-max-plot [data-max="plot"], body.hide-max-memo [data-max="memo"] { dis
 .max-btn { min-width: 34px; }
 .maximized {
   position: fixed;
-  inset: 0;
+  inset: auto;
   /* キーボード表示中は、見えている範囲（visualViewport）に合わせる */
   top: var(--vv-top, 0);
-  bottom: auto;
+  left: var(--vv-left, 0);
+  width: var(--vv-width, 100vw);
   height: var(--vv-height, 100dvh);
+  max-height: var(--vv-height, 100dvh);
   z-index: 40;
   display: flex !important;
   flex-direction: column;
@@ -344,11 +347,14 @@ body.hide-max-plot [data-max="plot"], body.hide-max-memo [data-max="memo"] { dis
 .maximized .max-btn { display: none !important; }
 .maximized[data-max-label]::before { content: attr(data-max-label); font-weight: 700; }
 .maximized .field-head { padding-right: 150px; } /* 「元に戻す」ボタンと重ならないように */
+body.maximizing.hide-max-tools .maximized .editor-tools { display: none !important; }
 .max-restore {
   position: fixed;
   z-index: 41;
   top: calc(10px + env(safe-area-inset-top) + var(--vv-top, 0px));
-  right: calc(16px + env(safe-area-inset-right));
+  left: calc(var(--vv-left, 0px) + var(--vv-width, 100vw) - 16px - env(safe-area-inset-right));
+  right: auto;
+  transform: translateX(-100%);
   background: var(--accent);
   color: var(--accent-text);
   border-color: var(--accent);
@@ -378,6 +384,7 @@ body[data-site="narou"] .alpha-only { display: none !important; }
 .image-list .image-item:last-child { border-bottom: 0; }
 .image-list .image-head { font-size: 13px; font-weight: 700; }
 .image-list .image-sub { font-size: 11px; color: var(--muted); word-break: break-all; }
+.image-list a.image-sub { color: var(--accent); text-decoration: underline; }
 .image-list .image-actions { display: flex; flex-wrap: wrap; gap: 4px; }
 .image-list .image-actions button { border: 1px solid var(--border); font-size: 13px; text-align: center; }
 

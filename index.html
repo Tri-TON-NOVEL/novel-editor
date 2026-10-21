@@ -75,6 +75,10 @@
         </span>
       </div>
       <div class="ep-sort">
+        <select id="ep-grouping" class="ep-grouping" aria-label="章の表示">
+          <option value="chapters">章あり</option>
+          <option value="flat">章なし</option>
+        </select>
         <select id="ep-sort" aria-label="エピソードの並び順">
           <option value="file">ファイル順</option>
           <option value="updated">更新日時</option>
@@ -618,6 +622,11 @@
       <label><input type="checkbox" data-ui="max.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="max.plot"> プロット</label>
       <label><input type="checkbox" data-ui="max.memo"> フリーメモ</label>
+    </fieldset>
+    <fieldset class="checks">
+      <legend>本文の最大化中</legend>
+      <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
+      <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
     </fieldset>
     </div>
 
