@@ -19,7 +19,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.21-3.8';
+const APP_VERSION = '2026.10.22-3.10';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -136,7 +136,17 @@ function updateStatus() {
     parts.push('自動バックアップ' + (last ? ' ' + fmtTime(last) : ' 有効'));
   }
   if (fileHandle) parts.push('ファイル: ' + fileHandle.name);
-  for (const p of providers) if (project.links?.[p.id]) parts.push(p.label + ' 連携');
+  const autoP = cloudAutoProvider();
+  for (const p of providers) {
+    if (!project.links?.[p.id]) continue;
+    if (p !== autoP) { parts.push(p.label + ' 連携'); continue; }
+    const s = cloudAuto.state;
+    parts.push(s === 'saved' ? `${p.label} 自動保存 ${fmtTime(cloudAuto.at)}`
+      : s === 'need-login' ? `⚠ ${p.label} ログイン切れ（自動保存停止中）`
+        : s === 'conflict' ? `⚠ ${p.label} ほかの端末で更新（自動保存停止中）`
+          : s === 'error' ? `⚠ ${p.label} 自動保存に失敗 ${fmtTime(cloudAuto.at)}`
+            : `${p.label} 連携・自動保存`);
+  }
   $('status').textContent = parts.join(' ・ ');
 }
 
@@ -191,6 +201,7 @@ function changed() {
   project.updatedAt = new Date().toISOString();
   dirty = true;
   autoDirty = true;
+  cloudDirty = true;
   autoBackup.schedule();
   updateStatus();
   clearTimeout(saveTimer);
@@ -566,6 +577,11 @@ function selectEpisode(i) {
 }
 
 function showProject(p, handle = null) {
+  if (project?.id !== p.id) {
+    cloudDirty = false;
+    lastCloudAutoAt = Date.now();
+    cloudAuto = { state: '', at: null };
+  }
   project = normalize(p);
   fileHandle = handle;
   el.novelTitle.value = project.title;
@@ -597,6 +613,7 @@ function showProject(p, handle = null) {
 async function switchTo(p, handle = null) {
   await flush();
   await autoVersion(60_000);
+  await cloudAutoSave(60_000).catch(() => {});
   // 何も書いていない作品は一覧に残さない
   if (project && p.id !== project.id && isEmptyProject(project) && !Object.keys(project.links || {}).length) {
     await db.remove(project.id);
@@ -774,8 +791,10 @@ async function fileSave() {
 }
 
 async function fileSaveAs() {
-  await flush();
-  const r = await localFile.saveAs(serialize(project), fileName(project.title, '.json'), WORK_TYPES, 'application/json');
+  // 保存の画面は押した直後に出す（端末内への保存は並行して行う）
+  const text = serialize(project);
+  flush().catch(fail);
+  const r = await localFile.saveAs(text, fileName(project.title, '.json'), WORK_TYPES, 'application/json');
   if (!r) return;
   if (r === 'downloaded') {
     toast('ファイルを書き出しました（「ダウンロード」フォルダ）');
@@ -1186,11 +1205,98 @@ async function exportAll() {
 
 async function cloudSave(p) {
   await flush();
-  const id = await p.save(serialize(project), fileName(project.title, '.json'), project.links?.[p.id], { workId: project.workId });
+  const wasDirty = cloudDirty;
+  cloudDirty = false;
+  let id;
+  try {
+    id = await p.save(serialize(project), fileName(project.title, '.json'), project.links?.[p.id], { workId: project.workId });
+  } catch (e) {
+    cloudDirty = cloudDirty || wasDirty;
+    throw e;
+  }
   project.links = { ...project.links, [p.id]: id };
   await db.put(project);
-  toast(`${p.label}に保存しました`);
-  updateStatus();
+  lastCloudAutoAt = Date.now();
+  setCloudAuto('saved');
+  toast(`${p.label}に保存しました${p.autoSave && prefs.get('cloud.autoSave', true) ? '（以後は自動でも保存します）' : ''}`);
+}
+
+// ---------- クラウドへの自動保存 ----------
+// 連携している作品（一度クラウドに保存した、またはクラウドから開いた作品）だけ。
+// 変更があるときだけ、書いている間は10分ごと、画面を閉じる・別のアプリや作品に切り替えるときにも（前回から1分以上たっていれば）。
+// ログイン画面は出さない（iPhone・iPad ではボタンを押したとき以外は出せない）。ログインが切れたら、上に再ログインのボタンを出す。
+// ほかの端末でドライブ側が更新されていたら、上書きせずに知らせる。
+const CLOUD_AUTO_MS = 10 * 60_000;
+let cloudDirty = false;
+let lastCloudAutoAt = Date.now();
+let cloudAutoRunning = false;
+// state: '' | 'saved' | 'need-login'（ログイン切れ） | 'conflict'（ほかで更新） | 'unknown'（この端末で保存した記録なし） | 'error'
+let cloudAuto = { state: '', at: null };
+
+function cloudAutoProvider() {
+  if (!project || !prefs.get('cloud.autoSave', true)) return null;
+  return providers.find((p) => p.autoSave && project.links?.[p.id] && p.isConfigured()) || null;
+}
+
+function setCloudAuto(state, message = '') {
+  cloudAuto = { state, at: Date.now(), message };
+  renderCloudAttention();
+  if (project) updateStatus();
+}
+
+async function cloudAutoSave(minInterval = CLOUD_AUTO_MS) {
+  const p = cloudAutoProvider();
+  if (!p || !cloudDirty || cloudAutoRunning || Date.now() - lastCloudAutoAt < minInterval) return;
+  if (cloudAuto.state === 'conflict') return; // どちらを残すか決めるまで、自動では上書きしない
+  cloudAutoRunning = true;
+  cloudDirty = false; // 保存中に書いた分は、また true になる
+  try {
+    await flush();
+    const r = await p.autoSave(serialize(project), fileName(project.title, '.json'), project.links[p.id], { workId: project.workId });
+    if (r === 'saved') lastCloudAutoAt = Date.now();
+    else cloudDirty = true;
+    setCloudAuto(r);
+  } catch (e) {
+    cloudDirty = true;
+    lastCloudAutoAt = Date.now(); // 通信の失敗などは、次の間隔でもう一度
+    setCloudAuto('error', e.message);
+  } finally {
+    cloudAutoRunning = false;
+  }
+}
+
+// 上の「⚠」ボタン：自動保存を続けるために、押してもらう必要があるとき
+function renderCloudAttention() {
+  const b = $('cloud-attention');
+  const p = cloudAutoProvider();
+  const text = !p ? ''
+    : cloudAuto.state === 'need-login' ? `⚠ ${p.label}に再ログイン`
+      : cloudAuto.state === 'conflict' ? `⚠ ${p.label}：ほかの端末で更新`
+        : cloudAuto.state === 'unknown' ? `${p.label}に保存して自動保存を始める`
+          : '';
+  b.textContent = text;
+  b.hidden = !text;
+}
+
+async function resolveCloudAttention() {
+  const p = cloudAutoProvider();
+  if (!p) return;
+  if (cloudAuto.state === 'need-login') {
+    await p.signIn();
+    setCloudAuto('');
+    await cloudAutoSave(0);
+    if (cloudAuto.state === 'saved' || !cloudDirty) toast(`${p.label}にログインしました。自動保存を続けます`);
+    return;
+  }
+  if (cloudAuto.state === 'conflict') {
+    const ok = await ask(`${p.label}のファイルが、ほかの端末（または別のタブ）で更新されています。\n` +
+      'この端末の内容で上書き保存しますか？\n\n' +
+      `・上書きしても、前の内容は${p.label}の「版を管理」から戻せます。\n` +
+      `・${p.label}側の内容を使うときは「キャンセル」を押し、「ファイル」→「${p.label}から開く…」で開いてください（自動保存は止まったままです）。`,
+    { ok: '上書き保存', danger: true });
+    if (!ok) return;
+  }
+  await cloudSave(p);
 }
 
 async function cloudOpen(p) {
@@ -1239,6 +1345,22 @@ function renderCloudActions() {
           : button('ログイン', async () => { await p.signIn(); renderCloudActions(); toast(p.label + 'にログインしました'); }));
       section.append(row);
       if (project.links?.[p.id]) section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'この作品は保存先と連携しています（Ctrl+S／⌘S でも保存できます）。' }));
+      if (p.autoSave) {
+        const check = Object.assign(document.createElement('input'), { type: 'checkbox', checked: prefs.get('cloud.autoSave', true) });
+        check.addEventListener('change', () => {
+          prefs.set('cloud.autoSave', check.checked);
+          renderCloudAttention();
+          updateStatus();
+          toast(check.checked ? `${p.label}への自動保存をオンにしました` : `${p.label}への自動保存をオフにしました`);
+        });
+        const label = Object.assign(document.createElement('label'), { className: 'inline' });
+        label.append(check, ` 連携している作品を${p.label}にも自動で保存する（この端末）`);
+        section.append(label, Object.assign(document.createElement('p'), {
+          className: 'hint',
+          textContent: '変更があるときだけ、書いている間は10分ごと、ホーム画面に戻る・別のアプリや作品に切り替えるときにも保存します。' +
+            'ログインは約1時間で切れるので、切れたら上に出る「再ログイン」を押してください。ほかの端末で更新されていたら、上書きせずに知らせます。',
+        }));
+      }
       if (p.folderInfo) section.append(renderCloudFolder(p));
     }
     box.append(section);
@@ -1998,6 +2120,7 @@ const actions = {
   restore: restoreFromFile,
   undo: () => undoRedo('undo'),
   redo: () => undoRedo('redo'),
+  'cloud-attention': () => resolveCloudAttention(),
   'autobackup-resume': () => autoBackup.resume()
     .then((ok) => toast(ok ? '自動バックアップを再開しました' : '書き込みが許可されませんでした', !ok)),
 };
@@ -2159,7 +2282,9 @@ function bindEvents() {
       if (!actions[d.action]) {
         toast(`このボタンの処理が見つかりません（${d.action}）。Ctrl+Shift+R で再読み込みしてください`, true);
       } else {
-        Promise.resolve().then(actions[d.action]).catch(fail);
+        // その場で呼ぶ：ファイルを選ぶ画面・保存・共有メニューは、Safari では押した直後でないと出せない
+        // （1拍おくと出ないか、次に押したときにずれて出る）
+        try { Promise.resolve(actions[d.action]()).catch(fail); } catch (err) { fail(err); }
       }
     } else if (d.copy) {
       copyField(d.copy).catch(fail);
@@ -2291,10 +2416,12 @@ function bindEvents() {
   const onLeave = () => {
     flush().then(() => autoVersion(60_000)).catch(() => {});
     autoBackup.flushNow();
+    cloudAutoSave(60_000).catch(() => {});
   };
   document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') onLeave(); });
   window.addEventListener('pagehide', onLeave);
   setInterval(() => autoVersion().catch(() => {}), 60_000);
+  setInterval(() => cloudAutoSave().catch(() => {}), 60_000);
 
   $('autobackup-choose').addEventListener('click', () => autoBackup.chooseFolder()
     .then((ok) => { if (ok) toast(`「${autoBackup.folderName()}」への自動バックアップを始めました`); }).catch(fail));

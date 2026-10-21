@@ -51,15 +51,19 @@ export const localFile = {
       const file = await handle.getFile();
       return { name: file.name, text: await file.text(), handle: /\.json$/i.test(file.name) ? handle : null };
     }
+    // Safari は、画面に置いていない input では選んだあとの知らせ（change）が来ないことがあるので、見えない形で置く
     return new Promise((resolve) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = '.json,.txt,application/json,text/plain';
+      input.hidden = true;
+      document.body.appendChild(input);
+      const done = (v) => { input.remove(); resolve(v); };
       input.addEventListener('change', async () => {
         const file = input.files[0];
-        resolve(file ? { name: file.name, text: await file.text(), handle: null } : null);
+        done(file ? { name: file.name, text: await file.text(), handle: null } : null);
       });
-      input.addEventListener('cancel', () => resolve(null));
+      input.addEventListener('cancel', () => done(null));
       input.click();
     });
   },

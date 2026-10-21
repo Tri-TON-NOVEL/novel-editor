@@ -19,8 +19,38 @@ const DEFAULT_CLIENT_ID = '';
 let gisPromise = null;
 let pickerPromise = null;
 let tokenClient = null;
-let token = null; // { value, expiresAt }
 let defaultFolderId = null;
+// 自動保存の間は、ログイン画面（ポップアップ）を出さない。iPhone・iPad ではボタンを押したとき以外は出せないため
+let silent = 0;
+
+// ログインの鍵（約1時間有効）。アプリを開き直しても有効な間は使えるよう、この端末に残す。
+// 全体バックアップ（novel-editor: で始まる設定）には入らない名前にしている。
+const TOKEN_KEY = 'novel-editor-session:gdrive.token';
+let token = (() => {
+  try {
+    const t = JSON.parse(localStorage.getItem(TOKEN_KEY));
+    return t && t.clientId === clientId() && Date.now() < t.expiresAt ? t : null;
+  } catch { return null; }
+})(); // { value, expiresAt, clientId }
+function setToken(t) {
+  token = t;
+  try {
+    if (t) localStorage.setItem(TOKEN_KEY, JSON.stringify(t));
+    else localStorage.removeItem(TOKEN_KEY);
+  } catch { /* 残せなくても続行 */ }
+}
+
+// ドライブ上のファイルの更新日時（この端末が最後に保存・読み込みしたときのもの）。
+// 自動保存の前にくらべて、ほかの端末で更新されていたら上書きしない。
+const KNOWN_KEY = 'gdrive.known';
+function rememberModified(fileId, modifiedTime) {
+  if (!fileId || !modifiedTime) return;
+  prefs.set(KNOWN_KEY, { ...prefs.get(KNOWN_KEY, {}), [fileId]: modifiedTime });
+}
+
+export class NeedLoginError extends Error {
+  constructor() { super('Google ドライブへのログインが切れています'); this.name = 'NeedLoginError'; }
+}
 
 function clientId() { return prefs.get('gdrive.clientId', '') || DEFAULT_CLIENT_ID; }
 function apiKey() { return prefs.get('gdrive.apiKey', '') || ''; }
@@ -54,6 +84,7 @@ function loadPicker() {
 async function getToken({ interactive = true } = {}) {
   if (token && Date.now() < token.expiresAt - 60_000) return token.value;
   if (!interactive) return null;
+  if (silent) throw new NeedLoginError();
   if (!clientId()) throw new Error('設定で Google の クライアントID を入力してください');
   await loadGis();
   if (!tokenClient || tokenClient._id !== clientId()) {
@@ -63,7 +94,7 @@ async function getToken({ interactive = true } = {}) {
   return new Promise((resolve, reject) => {
     tokenClient.callback = (resp) => {
       if (resp.error) { reject(new Error('Google ログインに失敗しました: ' + resp.error)); return; }
-      token = { value: resp.access_token, expiresAt: Date.now() + Number(resp.expires_in) * 1000 };
+      setToken({ value: resp.access_token, expiresAt: Date.now() + Number(resp.expires_in) * 1000, clientId: clientId() });
       resolve(token.value);
     };
     tokenClient.error_callback = (err) => reject(new Error('Google ログインが中断されました（' + (err.type || 'error') + '）。iPhone・iPad ではポップアップのブロックを確認してください'));
@@ -75,7 +106,7 @@ async function api(url, options = {}, retry = true) {
   const t = await getToken();
   const res = await fetch(url, { ...options, headers: { ...(options.headers || {}), Authorization: 'Bearer ' + t } });
   if (res.status === 401 && retry) {
-    token = null;
+    setToken(null);
     return api(url, options, false);
   }
   if (!res.ok) {
@@ -117,8 +148,10 @@ function multipart(metadata, text) {
 
 async function patchFile(fileId, text, name, workId) {
   const { body, headers } = multipart({ name, appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } }, text);
-  const res = await api(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`, { method: 'PATCH', headers, body });
-  return (await res.json()).id;
+  const res = await api(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id,modifiedTime`, { method: 'PATCH', headers, body });
+  const f = await res.json();
+  rememberModified(f.id, f.modifiedTime);
+  return f.id;
 }
 
 export const gdrive = {
@@ -127,6 +160,8 @@ export const gdrive = {
 
   isConfigured() { return !!clientId(); },
   isSignedIn() { return !!token && Date.now() < token.expiresAt; },
+  // 自動保存できる状態か（ログインの残り時間が1分以上）
+  canSaveSilently() { return !!token && Date.now() < token.expiresAt - 60_000; },
 
   // 設定画面に出す項目
   settings: [
@@ -150,7 +185,7 @@ export const gdrive = {
 
   signOut() {
     if (token && window.google) window.google.accounts.oauth2.revoke(token.value, () => {});
-    token = null;
+    setToken(null);
     defaultFolderId = null;
   },
 
@@ -222,7 +257,34 @@ export const gdrive = {
 
   async load(fileId) {
     const res = await api(`${API}/files/${encodeURIComponent(fileId)}?alt=media`);
-    return res.text();
+    const text = await res.text();
+    const meta = await (await api(`${API}/files/${encodeURIComponent(fileId)}?fields=modifiedTime`)).json();
+    rememberModified(fileId, meta.modifiedTime);
+    return text;
+  },
+
+  /**
+   * 自動保存：ログイン画面は出さず、ほかの端末で更新されていたら上書きしない。
+   * 戻り値: 'saved' / 'need-login' / 'conflict'（ドライブ側が新しい） / 'unknown'（この端末で保存・読み込みした記録がない）
+   */
+  async autoSave(text, name, fileId, { workId = '' } = {}) {
+    if (!this.canSaveSilently()) return 'need-login';
+    const known = prefs.get(KNOWN_KEY, {})[fileId];
+    if (!known) return 'unknown';
+    silent++;
+    try {
+      const res = await api(`${API}/files/${encodeURIComponent(fileId)}?fields=modifiedTime,trashed`);
+      const meta = await res.json();
+      if (meta.trashed || meta.modifiedTime !== known) return 'conflict';
+      await patchFile(fileId, text, name, workId);
+      return 'saved';
+    } catch (e) {
+      if (e instanceof NeedLoginError) return 'need-login';
+      if (/not found|404/i.test(e.message)) return 'conflict';
+      throw e;
+    } finally {
+      silent--;
+    }
   },
 
   /**
@@ -255,7 +317,9 @@ export const gdrive = {
     }
     const meta = { name: finalName, mimeType: 'application/json', parents: [parent], appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } };
     const { body, headers } = multipart(meta, text);
-    const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
-    return (await res.json()).id;
+    const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id,modifiedTime`, { method: 'POST', headers, body });
+    const f = await res.json();
+    rememberModified(f.id, f.modifiedTime);
+    return f.id;
   },
 };
