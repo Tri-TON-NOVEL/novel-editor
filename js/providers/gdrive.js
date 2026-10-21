@@ -196,17 +196,18 @@ async function saveFolderId() {
   return chosenFolder()?.id || ensureDefaultFolder();
 }
 
-function multipart(metadata, text) {
+// mime：中身の種類（小説エディターのファイルは application/json、テキストは text/plain）
+function multipart(metadata, text, mime = 'application/json') {
   const boundary = 'novel-editor-' + Math.random().toString(36).slice(2);
   const body =
     `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${text}\r\n` +
+    `--${boundary}\r\nContent-Type: ${mime}; charset=UTF-8\r\n\r\n${text}\r\n` +
     `--${boundary}--`;
   return { body, headers: { 'Content-Type': `multipart/related; boundary=${boundary}` } };
 }
 
-async function patchFile(fileId, text, name, workId) {
-  const { body, headers } = multipart({ name, appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } }, text);
+async function patchFile(fileId, text, name, workId, mime) {
+  const { body, headers } = multipart({ name, appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } }, text, mime);
   const res = await api(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`, { method: 'PATCH', headers, body });
   return (await res.json()).id;
 }
@@ -333,17 +334,18 @@ export const gdrive = {
    *   別の作品               → 上書きせず、名前の後ろに「 (2)」などを付けて別のファイルにする
    * 更新は Drive の1回の要求で中身を差し替えるので、通信に失敗しても元のファイルは残る。
    */
-  async save(text, name, fileId = null, { workId = '' } = {}) {
+  async save(text, name, fileId = null, { workId = '', mime = 'application/json' } = {}) {
     if (fileId) {
       try {
-        return await patchFile(fileId, text, name, workId);
+        return await patchFile(fileId, text, name, workId, mime);
       } catch (e) {
         // ゴミ箱で削除された等で見つからない場合は新しく作り直す
         if (!/not found|404/i.test(e.message)) throw e;
       }
     }
     const parent = await saveFolderId();
-    const base = name.replace(/\.json$/i, '');
+    const ext = (name.match(/\.[a-z0-9]+$/i) || [''])[0];
+    const base = ext ? name.slice(0, -ext.length) : name;
     let finalName = name;
     for (let n = 2; n < 100; n++) {
       const query = `name = ${q(finalName)} and ${q(parent)} in parents and trashed=false`;
@@ -351,11 +353,11 @@ export const gdrive = {
       const same = (await res.json()).files;
       if (!same.length) break;
       const mine = workId && same.find((f) => f.appProperties?.workId === workId);
-      if (mine) return patchFile(mine.id, text, finalName, workId);
-      finalName = `${base} (${n}).json`;
+      if (mine) return patchFile(mine.id, text, finalName, workId, mime);
+      finalName = `${base} (${n})${ext}`;
     }
-    const meta = { name: finalName, mimeType: 'application/json', parents: [parent], appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } };
-    const { body, headers } = multipart(meta, text);
+    const meta = { name: finalName, mimeType: mime, parents: [parent], appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } };
+    const { body, headers } = multipart(meta, text, mime);
     const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
     return (await res.json()).id;
   },

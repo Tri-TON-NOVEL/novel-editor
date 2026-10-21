@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.4';
+const APP_VERSION = '2026.10.22-4.6';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -859,11 +859,12 @@ function driveProvider() {
   return providers.find((p) => p.isConfigured() && p.save) || null;
 }
 
-async function chooseDestination(kind, { force = false } = {}) {
+// 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
+async function chooseDestination(kind) {
   const p = driveProvider();
   if (!p) return 'local';
   const pref = prefs.get(DEST_KEY, 'ask');
-  if (!force && pref !== 'ask') return pref;
+  if (pref !== 'ask') return pref;
   const last = prefs.get('file.lastDestination', 'local');
   const drive = { value: 'gdrive', label: p.label, primary: last === 'gdrive' };
   const local = { value: 'local', label: 'この端末・その他（iCloud・OneDrive など）', primary: last !== 'gdrive' };
@@ -873,18 +874,18 @@ async function chooseDestination(kind, { force = false } = {}) {
   return r;
 }
 
-// 保存先を優先にしているときでも、もう一方を選べるメニュー項目
-function updateFileMenu() {
-  const show = !!driveProvider() && prefs.get(DEST_KEY, 'ask') !== 'ask';
-  document.querySelectorAll('[data-dest-choose]').forEach((b) => { b.hidden = !show; });
-}
+// ファイルの種類：json（小説エディターのファイル）／txt（プレーンテキスト）
+const FILE_KINDS = {
+  json: { ext: '.json', mime: 'application/json', types: WORK_TYPES },
+  txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
+};
 
 // Google ドライブに保存する画面。戻り値: { type: 'gdrive', id, name }／'local'（この端末・その他を選び直した）／null（やめた）
 let driveSaveJob = null;
 
-function openDriveSave({ p, title, name, text, workId = '' }) {
+function openDriveSave({ p, title, name, text, workId = '', kind = 'json' }) {
   return new Promise((resolve) => {
-    driveSaveJob = { p, text, workId, name, resolve };
+    driveSaveJob = { p, text, workId, name, kind, resolve };
     $('drive-save-title').textContent = title;
     $('drive-save-name').value = name;
     $('drive-save-folder').textContent = `保存先フォルダ：${p.folderInfo?.().name ?? p.label}`;
@@ -900,6 +901,8 @@ function finishDriveSave(result) {
   job?.resolve(result);
 }
 
+const hasExt = (name, kind) => name.toLowerCase().endsWith(FILE_KINDS[kind].ext);
+
 async function renderDriveSaveList() {
   const job = driveSaveJob;
   const list = $('drive-save-list');
@@ -914,7 +917,7 @@ async function renderDriveSaveList() {
   list.replaceChildren(li('empty', '読み込み中…'));
   let files;
   try {
-    files = await job.p.list();
+    files = (await job.p.list()).filter((f) => hasExt(f.name, job.kind));
   } catch (e) {
     list.replaceChildren(li('empty', '一覧を読み込めませんでした：' + e.message));
     return;
@@ -936,14 +939,14 @@ async function runDriveSave(name, fileId = null) {
   const job = driveSaveJob;
   if (!job) return;
   let finalName = name.trim() || job.name;
-  if (!/\.json$/i.test(finalName)) finalName += '.json';
-  const id = await job.p.save(job.text, finalName, fileId, { workId: job.workId });
+  if (!hasExt(finalName, job.kind)) finalName += FILE_KINDS[job.kind].ext;
+  const id = await job.p.save(job.text, finalName, fileId, { workId: job.workId, mime: FILE_KINDS[job.kind].mime });
   prefs.set('file.lastDestination', 'gdrive');
   finishDriveSave({ type: 'gdrive', id, name: finalName });
 }
 
-// Google ドライブで保存したファイルから選ぶ画面。戻り値: { id, name }／null
-function pickDriveFile(p, title) {
+// Google ドライブで保存したファイルから選ぶ画面（kind の種類だけ出す）。戻り値: { id, name }／null
+function pickDriveFile(p, title, kind = 'json') {
   return new Promise((resolve) => {
     const dialog = $('cloud-dialog');
     const list = $('cloud-list');
@@ -958,11 +961,12 @@ function pickDriveFile(p, title) {
     $('cloud-dialog-title').textContent = title;
     list.replaceChildren(li('empty', '読み込み中…'));
     dialog.showModal();
-    p.list().then((files) => {
+    p.list().then((all) => {
       if (done) return;
+      const files = all.filter((f) => hasExt(f.name, kind));
       list.replaceChildren();
-      if (!files.length) { list.append(li('empty', `${p.label}に保存したファイルはまだありません`)); return; }
-      for (const f of files) list.append(listItem(f.name.replace(/\.json$/i, ''), '更新 ' + fmtTime(f.modifiedTime), [button('開く', () => finish(f))]));
+      if (!files.length) { list.append(li('empty', `${p.label}に保存した${kind === 'txt' ? 'テキスト' : 'ファイル'}はまだありません`)); return; }
+      for (const f of files) list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [button('開く', () => finish(f))]));
     }).catch((e) => {
       finish(null);
       fail(e);
@@ -971,21 +975,21 @@ function pickDriveFile(p, title) {
 }
 
 /**
- * 保存先を選んで保存する（Google ドライブ／この端末・その他）。
+ * 保存先を選んで保存する（Google ドライブ／この端末・その他）。設定の「ファイル」タブに従う。
  * 戻り値: { type: 'gdrive', id, name }／{ type: 'local', handle, how, name }／null（やめた）
  */
-async function saveTextTo(text, name, { title, force = false, workId = '' } = {}) {
+async function saveTextTo(text, name, { title, force = false, workId = '', kind = 'json' } = {}) {
   const dest = await chooseDestination('save', { force });
   let where = dest;
   if (dest === 'gdrive') {
-    const r = await openDriveSave({ p: driveProvider(), title, name, text, workId });
+    const r = await openDriveSave({ p: driveProvider(), title, name, text, workId, kind });
     if (r !== 'local') return r;
     where = 'local';
   }
   if (where !== 'local') return null;
   // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
   if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive・OneDrive など）を選べます');
-  const r = await localFile.saveAs(text, name, WORK_TYPES, 'application/json');
+  const r = await localFile.saveAs(text, name, FILE_KINDS[kind].types, FILE_KINDS[kind].mime);
   if (!r) return null;
   prefs.set('file.lastDestination', 'local');
   return typeof r === 'string' ? { type: 'local', handle: null, how: r, name } : { type: 'local', handle: r, how: 'picker', name: r.name };
@@ -999,14 +1003,14 @@ function savedMessage(r, what) {
 }
 
 /**
- * 保存先を選んで開く。kind: 'json'／'txt'
+ * 保存先を選んで開く（「どこから開きますか？」。設定の「ファイル」タブに従う）。kind: 'json'／'txt'
  * 戻り値: { text, name, source: 'gdrive'|'local', id?, handle?, file? }／null
  */
-async function openFrom(title, { force = false, kind = 'json', driveOk = true } = {}) {
-  const dest = driveOk ? await chooseDestination('open', { force }) : 'local';
+async function openFrom(title, { force = false, kind = 'json' } = {}) {
+  const dest = await chooseDestination('open', { force });
   if (dest === 'gdrive') {
     const p = driveProvider();
-    const f = await pickDriveFile(p, title);
+    const f = await pickDriveFile(p, title, kind);
     if (!f) return null;
     return { text: await p.load(f.id), name: f.name, source: 'gdrive', id: f.id };
   }
@@ -1064,10 +1068,11 @@ async function allSave() {
   return allSaveAs();
 }
 
+// 全体のファイルのほか、以前の版で保存した「作品1つ」の .json も開ける（作品として取り込む）
 async function allOpen({ force = false } = {}) {
   const src = await openFrom('全体を開く（すべての作品）', { force });
   if (!src) return;
-  if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「読み出す」で開いてください', true); return; }
+  if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「開く」で開いてください', true); return; }
   if (isBackup(src.text)) {
     // 開いたファイルを、次の上書き保存の行き先にする
     if (src.source === 'gdrive') rememberAllTarget({ type: 'gdrive', id: src.id, name: src.name });
@@ -1075,8 +1080,8 @@ async function allOpen({ force = false } = {}) {
     openRestoreDialog(src.text, src.name);
     return;
   }
-  // 作品1つのファイルなら、作品として取り込む
-  await openWorkText(src);
+  await switchTo(await importContent(parse(src.text, src.name)));
+  toast(`「${src.name}」を作品として開きました`);
 }
 
 // ---------- エピソード専用ファイル（今開いているエピソード） ----------
@@ -1090,7 +1095,7 @@ async function epSaveAs({ force = false } = {}) {
 }
 
 async function epOpen({ force = false } = {}) {
-  const src = await openFrom('エピソードを読み出す', { force });
+  const src = await openFrom('エピソードを開く', { force });
   if (!src) return;
   if (!isEpisodeFile(src.text)) {
     toast(isBackup(src.text) ? '全体のファイルです。「ファイル」→ 全体の「開く」で開いてください' : 'エピソードのファイルではありません', true);
@@ -1100,20 +1105,20 @@ async function epOpen({ force = false } = {}) {
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
-  await saveEpisodeVersion('読み出す前（自動）', ep);
+  await saveEpisodeVersion('開く前（自動）', ep);
   applyEpisodeSnapshot(ep, data.episode);
   touchEpisode(ep);
   changed();
   showEpisode();
   renderEpisodeList();
-  toast(`「${src.name}」を今のエピソードに読み出しました`);
+  toast(`「${src.name}」を今のエピソードに開きました`);
 }
 
-// ---------- インポート ----------
+// ---------- インポート・エクスポート（プレーンテキスト） ----------
 
 // プレーンテキスト → 今のエピソードの本文（開いている側の原稿）
 async function importText() {
-  const src = await openFrom('', { kind: 'txt', driveOk: false });
+  const src = await openFrom('プレーンテキストを開く', { kind: 'txt' });
   if (!src) return;
   const text = src.file ? decodeText(await src.file.arrayBuffer()).text : src.text;
   const body = text.replace(/\r\n?/g, '\n');
@@ -1128,26 +1133,23 @@ async function importText() {
   toast(`「${src.name}」を本文（${SITES[editSite].short}用）に読み込みました（${countChars(body).all.toLocaleString()}字）`);
 }
 
-// 作品1つの .json → 作品として取り込む
-async function importWork({ force = false } = {}) {
-  const src = await openFrom('作品ファイルを取り込む', { force });
-  if (!src) return;
-  if (isBackup(src.text)) { toast('全体のファイルです。「ファイル」→ 全体の「開く」で開いてください', true); return; }
-  if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「読み出す」で開いてください', true); return; }
-  await openWorkText(src);
+// 書き出しは、いま編集している側（なろう用／アルファ用）の原稿
+async function exportEpisode() {
+  const d = cur();
+  if (!d.body) { toast('本文は空です'); return; }
+  const name = fileName(`${project.title || '無題'}_${d.title || epIndex + 1}`, '.txt');
+  const r = await saveTextTo(convert(editSite, d.body), name, { title: 'Google ドライブに保存（このエピソードのテキスト）', kind: 'txt' });
+  if (r) toast(savedMessage(r, `「${d.title || '（無題）'}」のテキスト（${SITES[editSite].short}用）`));
 }
 
-async function openWorkText(src) {
-  await switchTo(await importContent(parse(src.text, src.name)));
-  toast(`「${src.name}」を作品として開きました`);
-}
-
-// ---------- エクスポート ----------
-
-async function exportWork({ force = false } = {}) {
-  await flush();
-  const r = await saveTextTo(serialize(project), fileName(project.title, '.json'), { title: 'Google ドライブに保存（この作品）', force, workId: project.workId });
-  if (r) toast(savedMessage(r, `作品「${project.title || '無題'}」`));
+async function exportAll() {
+  const text = project.episodes
+    .map((e) => draftOf(e, editSite))
+    .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
+    .join('\n\n――――――――――\n\n');
+  const head = project.title ? project.title + '\n\n' : '';
+  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: 'Google ドライブに保存（全エピソードのテキスト）', kind: 'txt' });
+  if (r) toast(savedMessage(r, `全${project.episodes.length}話のテキスト（${SITES[editSite].short}用）`));
 }
 
 // ---------- メイン → サブのコピー（明示的に押したときだけ。自動では同期しない） ----------
@@ -1510,25 +1512,6 @@ async function remindBackup() {
   }
 }
 
-// 書き出しは、いま編集している側（なろう用／アルファ用）の原稿
-async function exportEpisode() {
-  const d = cur();
-  if (!d.body) { toast('本文は空です'); return; }
-  const name = fileName(`${project.title || '無題'}_${d.title || epIndex + 1}`, '.txt');
-  const r = await localFile.saveAs(convert(editSite, d.body), name, TEXT_TYPES, 'text/plain');
-  if (r) toast(`「${d.title || '（無題）'}」を書き出しました（${SITES[editSite].short}用）`);
-}
-
-async function exportAll() {
-  const text = project.episodes
-    .map((e) => draftOf(e, editSite))
-    .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
-    .join('\n\n――――――――――\n\n');
-  const head = project.title ? project.title + '\n\n' : '';
-  const r = await localFile.saveAs(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), TEXT_TYPES, 'text/plain');
-  if (r) toast(`全${project.episodes.length}話を書き出しました（${SITES[editSite].short}用）`);
-}
-
 // ---------- 自動バックアップ（同期） ----------
 // 仕組みは sync.js。ここは画面（状態の表示・起動時の確認・設定）。
 
@@ -1710,7 +1693,6 @@ async function exportPreSync() {
 function renderCloudActions() {
   const box = $('cloud-action-list');
   box.replaceChildren();
-  updateFileMenu();
   for (const p of providers) {
     const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
     section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
@@ -1724,20 +1706,9 @@ function renderCloudActions() {
       ? button('ログアウト', () => { p.signOut(); renderCloudActions(); sync.refresh(); toast(p.label + 'からログアウトしました'); })
       : button('ログイン', async () => { await p.signIn(); renderCloudActions(); await syncResumeIfReady(); toast(p.label + 'にログインしました'); }));
     section.append(row);
-    const sel = document.createElement('select');
-    sel.setAttribute('aria-label', '保存・開くときの保存先');
-    for (const [v, t] of [['ask', '毎回どちらか選ぶ'], ['gdrive', `${p.label}を優先`], ['local', 'この端末・その他（iCloud・OneDrive など）を優先']]) sel.append(new Option(t, v));
-    sel.value = prefs.get(DEST_KEY, 'ask');
-    sel.addEventListener('change', () => {
-      prefs.set(DEST_KEY, sel.value);
-      updateFileMenu();
-      toast('保存・開くときの保存先を「' + sel.selectedOptions[0].textContent + '」にしました');
-    });
-    const wrap = Object.assign(document.createElement('label'), { className: 'dest-select' });
-    wrap.append('「ファイル」で保存・開くときの保存先（この端末）', sel);
-    section.append(wrap, Object.assign(document.createElement('p'), {
+    section.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: '「ファイル」の全体・エピソードの保存と開く、作品ファイルの取り込み・書き出しで使います。優先にしたときも、「ファイル」→「保存先を選んで」でもう一方を使えます。上書き保存は、前回「全体」を保存・開いた場所へそのまま保存します。',
+      textContent: '「ファイル」メニューで Google ドライブを使うか、この端末・その他を使うか（両方か）は、「ファイル」タブで選べます。',
     }));
     if (p.folderInfo) section.append(renderCloudFolder(p));
     section.append(Object.assign(document.createElement('p'), {
@@ -2392,6 +2363,7 @@ function restoreMaximized(fromHistory = false) {
 }
 
 function selectSettingsTab(name) {
+  if (!document.querySelector(`[data-spanel="${name}"]`)) name = 'display'; // なくなったタブ（「ボタン」は「表示」に統合）
   document.querySelectorAll('[data-stab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.stab === name)));
   document.querySelectorAll('[data-spanel]').forEach((p) => { p.hidden = p.dataset.spanel !== name; });
   // 狭い画面ではタブが横にスクロールするので、選んだタブを見える位置に
@@ -2411,6 +2383,14 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   form.fontSize.value = prefs.get('fontSize', '18');
   form.autoBackupInterval.value = String(sync.intervalMin());
   form.autoBackupKeep.value = String(sync.keepCount());
+  // 「ファイル」メニューの保存先：Google ドライブを設定していなければ「この端末・その他」だけ
+  const dest = $('file-destination');
+  const hasDrive = !!driveProvider();
+  dest.querySelector('option[value="ask"]').disabled = !hasDrive;
+  dest.querySelector('option[value="gdrive"]').disabled = !hasDrive;
+  dest.value = hasDrive ? prefs.get(DEST_KEY, 'ask') : 'local';
+  $('file-destination-hint').textContent = hasDrive ? ''
+    : 'Google ドライブはまだ使えません（「クラウド」タブでクライアントIDを入れて「保存」すると選べます）。今は「この端末・その他」を使います。';
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
   $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
   // 投稿サイトのアカウント（端末ごと）と、この作品の Nコード・作品ID
@@ -2448,6 +2428,7 @@ function saveSettings() {
   prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || sync.DEFAULT_INTERVAL_MIN);
   prefs.set('autoBackupKeep', Math.min(2000, Math.max(10, Number(form.autoBackupKeep.value) || sync.DEFAULT_KEEP)));
   prefs.set('sync.prefix', sync.cleanPrefix($('sync-prefix').value.trim()));
+  if (driveProvider()) prefs.set(DEST_KEY, $('file-destination').value);
   const acc = { narou: {}, alpha: {} };
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
     const [, site, key] = input.name.split('.');
@@ -2504,19 +2485,14 @@ const actions = {
   'all-open': () => allOpen(),
   'all-save': allSave,
   'all-save-as': () => allSaveAs(),
-  'all-open-choose': () => allOpen({ force: true }),
-  'all-save-choose': () => allSaveAs({ force: true }),
   'ep-open': () => epOpen(),
   'ep-save-as': () => epSaveAs(),
   'import-text': importText,
-  'import-work': () => importWork(),
-  'export-work': () => exportWork(),
   'export-episode': exportEpisode,
   'export-all': exportAll,
   'add-episode': () => addEpisode(),
   'add-chapter': addChapterFromList,
   'ep-version-up': episodeVersionUp,
-  'export-pre-v3': exportPreV3Backup,
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,
   'open-import': () => importScreen.open(),
@@ -2892,14 +2868,6 @@ async function migrate() {
   }
 }
 
-// 退避した v3 移行前のデータを、全体バックアップと同じ形式のファイルとして書き出す
-async function exportPreV3Backup() {
-  const saved = await meta.get('preV3Backup');
-  if (!saved) { toast('移行前のデータはありません'); return; }
-  const text = JSON.stringify({ format: 'novel-editor-backup', version: 1, createdAt: saved.createdAt, projects: saved.projects, prefs: {} }, null, 1);
-  const r = await localFile.saveAs(text, '小説エディター_v3移行前のデータ.json', WORK_TYPES, 'application/json');
-  if (r) toast('移行前のデータを書き出しました');
-}
 
 // 思わぬエラーは画面に出す（ボタンが「無反応」に見えないように）
 window.addEventListener('error', (e) => toast('エラー：' + (e.message || '不明なエラー'), true));
@@ -2907,7 +2875,6 @@ window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.r
 
 async function init() {
   $('app-version').textContent = `エディターの版：${APP_VERSION}`;
-  updateFileMenu();
   applyPrefs();
   bindEvents();
   selectTab('body');

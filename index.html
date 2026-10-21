@@ -30,19 +30,13 @@
         <button type="button" data-action="all-save" title="Ctrl+S／⌘S">上書き保存</button>
         <button type="button" data-action="all-save-as">名前を付けて保存…</button>
         <div class="menu-head">エピソード（今開いているもの）</div>
-        <button type="button" data-action="ep-open">読み出す…</button>
+        <button type="button" data-action="ep-open">開く…</button>
         <button type="button" data-action="ep-save-as">名前を付けて保存…</button>
-        <div class="menu-head">インポート</div>
-        <button type="button" data-action="import-text">プレーンテキスト（今のエピソードの本文へ）…</button>
-        <button type="button" data-action="import-work">作品ファイル（.json）…</button>
-        <div class="menu-head">エクスポート</div>
-        <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
-        <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
-        <button type="button" data-action="export-work">この作品を .json で書き出し…</button>
-        <button type="button" data-action="export-pre-v3" title="データ形式 v3 に移す前の作品を、そのままの形で書き出します">v3 移行前のデータを書き出し…</button>
-        <div class="menu-head" data-dest-choose hidden>保存先を選んで</div>
-        <button type="button" data-action="all-open-choose" data-dest-choose hidden>全体を開く…</button>
-        <button type="button" data-action="all-save-choose" data-dest-choose hidden>全体を保存…</button>
+        <div class="menu-head">インポート（プレーンテキスト）</div>
+        <button type="button" data-action="import-text">今のエピソードの本文へ…</button>
+        <div class="menu-head">エクスポート（プレーンテキスト）</div>
+        <button type="button" data-action="export-episode">このエピソード…</button>
+        <button type="button" data-action="export-all">全エピソード…</button>
       </div>
     </details>
     <details class="menu" id="links-menu">
@@ -600,7 +594,7 @@
     <h2>設定</h2>
     <div class="settings-tabs" role="tablist">
       <button type="button" role="tab" data-stab="display">表示</button>
-      <button type="button" role="tab" data-stab="buttons">ボタン</button>
+      <button type="button" role="tab" data-stab="file">ファイル</button>
       <button type="button" role="tab" data-stab="sites">投稿サイト</button>
       <button type="button" role="tab" data-stab="links">リンク</button>
       <button type="button" role="tab" data-stab="backup">自動バックアップ</button>
@@ -636,11 +630,7 @@
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
     </fieldset>
-    </div>
-
-    <!-- ボタン -->
-    <div class="settings-panel" data-spanel="buttons" role="tabpanel" hidden>
-    <p class="hint">ボタンを隠しても、機能や内容は消えません。チェックを変えるとすぐに反映されます（端末ごとの設定）。</p>
+    <p class="hint">下のボタンは、隠しても機能や内容は消えません。チェックを変えるとすぐに反映されます（端末ごとの設定）。</p>
     <fieldset class="checks">
       <legend>コピーボタン</legend>
       <label><input type="checkbox" data-ui="copy.ep-title"> エピソードタイトル</label>
@@ -664,6 +654,23 @@
       <legend>本文の最大化中</legend>
       <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
       <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
+    </fieldset>
+    </div>
+
+    <!-- ファイル -->
+    <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
+    <fieldset>
+      <legend>「ファイル」メニューで使う保存先（この端末）</legend>
+      <label>保存先
+        <select name="fileDestination" id="file-destination">
+          <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>
+          <option value="gdrive">Google ドライブだけを使う</option>
+          <option value="local">この端末・その他（iCloud・OneDrive など）だけを使う</option>
+        </select>
+      </label>
+      <p class="hint" id="file-destination-hint"></p>
+      <p class="hint">「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（Google ドライブの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
+        「保存」を押すと反映されます。</p>
     </fieldset>
     </div>
 
@@ -766,7 +773,7 @@
         <button type="button" data-action="open-import" class="primary">TXT をインポート…</button>
       </div>
     </fieldset>
-    <p class="hint">プレーンテキストの読み込み・書き出しと、作品ファイル（.json）の取り込み・書き出しは「ファイル」メニューにあります。</p>
+    <p class="hint">プレーンテキストの読み込み・書き出しは「ファイル」メニューにあります。</p>
     </div>
 
     <!-- このアプリについて -->
