@@ -8,7 +8,7 @@ import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from 
 import { makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence } from './backup.js';
 import * as autoBackup from './autobackup.js';
 import { initImport } from './importui.js';
-import { ask, askText } from './dialogs.js';
+import { ask, askText, choose } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
@@ -19,7 +19,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-3.10';
+const APP_VERSION = '2026.10.22-3.12';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -95,7 +95,8 @@ function li(className, text) {
 
 function button(text, onClick, className = '') {
   const b = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className });
-  b.addEventListener('click', () => Promise.resolve().then(onClick).catch(fail));
+  // その場で呼ぶ（Safari は、ファイル選択・共有メニューを押した直後でないと出せない）
+  b.addEventListener('click', () => { try { Promise.resolve(onClick()).catch(fail); } catch (e) { fail(e); } });
   return b;
 }
 
@@ -581,6 +582,7 @@ function showProject(p, handle = null) {
     cloudDirty = false;
     lastCloudAutoAt = Date.now();
     cloudAuto = { state: '', at: null };
+    saveTarget = null;
   }
   project = normalize(p);
   fileHandle = handle;
@@ -774,28 +776,150 @@ async function importContent(content, links = {}) {
 
 // ---------- ローカルファイル ----------
 
-async function fileOpen() {
+// ---------- 保存先の選択（Google ドライブ／この端末・その他） ----------
+// 設定（端末ごと）：'ask' 毎回選ぶ（既定）／'gdrive' Google ドライブを優先／'local' この端末・その他を優先
+// Google ドライブを設定していない端末では、選ぶ画面を出さずに「この端末・その他」にする。
+const DEST_KEY = 'file.destination';
+let saveTarget = null; // 上書き保存の行き先（前回保存・開いた場所）：'local' | 'gdrive'
+
+function driveProvider() {
+  return providers.find((p) => p.isConfigured() && p.save) || null;
+}
+
+async function chooseDestination(kind, { force = false } = {}) {
+  const p = driveProvider();
+  if (!p) return 'local';
+  const pref = prefs.get(DEST_KEY, 'ask');
+  if (!force && pref !== 'ask') return pref;
+  const last = prefs.get('file.lastDestination', 'local');
+  const drive = { value: 'gdrive', label: p.label, primary: last === 'gdrive' };
+  const local = { value: 'local', label: 'この端末・その他（iCloud・OneDrive など）', primary: last !== 'gdrive' };
+  // 前回使ったほうを右端（目立つボタン）に置く
+  const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'gdrive' ? [local, drive] : [drive, local]);
+  if (r) prefs.set('file.lastDestination', r);
+  return r;
+}
+
+// 保存先を優先にしているときでも、もう一方を選べるメニュー項目
+function updateFileMenu() {
+  const show = !!driveProvider() && prefs.get(DEST_KEY, 'ask') !== 'ask';
+  document.querySelectorAll('[data-dest-choose]').forEach((b) => { b.hidden = !show; });
+}
+
+// Google ドライブに保存する画面。job: { p, title, name, text, workId, onSaved(id), onLocal() }
+let driveSaveJob = null;
+
+function openDriveSave(job) {
+  driveSaveJob = job;
+  $('drive-save-title').textContent = job.title;
+  $('drive-save-name').value = job.name;
+  $('drive-save-folder').textContent = `保存先フォルダ：${job.p.folderInfo?.().name ?? job.p.label}`;
+  $('drive-save-dialog').showModal();
+  renderDriveSaveList();
+}
+
+async function renderDriveSaveList() {
+  const job = driveSaveJob;
+  const list = $('drive-save-list');
+  if (!job) return;
+  // ログイン画面は、押したとき以外は出せない（iPhone・iPad）。ログインしていなければボタンを出す
+  if (job.p.canSaveSilently && !job.p.canSaveSilently()) {
+    list.replaceChildren(listItem('ファイルの一覧を見るには、ログインが必要です', '「保存」を押したときにもログインします', [
+      button('ログインして一覧を見る', async () => { await job.p.signIn(); renderDriveSaveList(); }),
+    ]));
+    return;
+  }
+  list.replaceChildren(li('empty', '読み込み中…'));
+  let files;
+  try {
+    files = await job.p.list();
+  } catch (e) {
+    list.replaceChildren(li('empty', '一覧を読み込めませんでした：' + e.message));
+    return;
+  }
+  if (driveSaveJob !== job) return;
+  list.replaceChildren();
+  if (!files.length) { list.append(li('empty', 'まだ保存したファイルはありません')); return; }
+  for (const f of files) {
+    list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [
+      button('上書き', async () => {
+        if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${job.p.label} の「版を管理」から戻せます）`, { ok: '上書きする' }))) return;
+        await runDriveSave(f.name, f.id);
+      }, 'danger'),
+    ]));
+  }
+}
+
+async function runDriveSave(name, fileId = null) {
+  const job = driveSaveJob;
+  if (!job) return;
+  let finalName = name.trim() || job.name;
+  if (!/\.json$/i.test(finalName)) finalName += '.json';
+  const id = await job.p.save(job.text, finalName, fileId, { workId: job.workId });
+  driveSaveJob = null;
+  $('drive-save-dialog').close();
+  prefs.set('file.lastDestination', 'gdrive');
+  await job.onSaved(id, finalName);
+}
+
+async function fileOpen({ force = false } = {}) {
+  const dest = await chooseDestination('open', { force });
+  if (dest === 'gdrive') return cloudOpen(driveProvider());
+  if (dest !== 'local') return;
   const r = await localFile.open();
   if (!r) return;
   if (isBackup(r.text)) { openRestoreDialog(r.text, r.name); return; }
   await switchTo(await importContent(parse(r.text, r.name)), r.handle);
+  saveTarget = 'local';
   toast(`「${r.name}」を開きました`);
 }
 
+// 上書き保存：前回保存・開いた場所へ（画面は出さない）。行き先が分からなければ「名前を付けて保存」
 async function fileSave() {
+  const p = driveProvider();
+  const linked = p && project.links?.[p.id];
+  if (linked && (saveTarget === 'gdrive' || (!saveTarget && !fileHandle))) return cloudSave(p);
   if (!fileHandle) return fileSaveAs();
   await flush();
   await localFile.write(fileHandle, serialize(project));
+  saveTarget = 'local';
   toast(`「${fileHandle.name}」に保存しました`);
   updateStatus();
 }
 
-async function fileSaveAs() {
+async function fileSaveAs({ force = false } = {}) {
   // 保存の画面は押した直後に出す（端末内への保存は並行して行う）
   const text = serialize(project);
   flush().catch(fail);
+  const dest = await chooseDestination('save', { force });
+  if (dest === 'gdrive') {
+    const p = driveProvider();
+    openDriveSave({
+      p,
+      title: `${p.label}に保存（この作品）`,
+      name: fileName(project.title, '.json'),
+      text,
+      workId: project.workId,
+      onSaved: async (id, name) => {
+        project.links = { ...project.links, [p.id]: id };
+        await db.put(project);
+        saveTarget = 'gdrive';
+        lastCloudAutoAt = Date.now();
+        setCloudAuto('saved');
+        toast(`${p.label}に「${name}」として保存しました`);
+      },
+      onLocal: () => saveWorkLocal(text),
+    });
+    return;
+  }
+  if (dest === 'local') await saveWorkLocal(text);
+}
+
+async function saveWorkLocal(text) {
   const r = await localFile.saveAs(text, fileName(project.title, '.json'), WORK_TYPES, 'application/json');
   if (!r) return;
+  prefs.set('file.lastDestination', 'local');
+  saveTarget = 'local';
   if (r === 'downloaded') {
     toast('ファイルを書き出しました（「ダウンロード」フォルダ）');
   } else if (r === 'shared') {
@@ -1133,15 +1257,28 @@ async function deleteVersion(v) {
 
 const BACKUP_REMIND_DAYS = 7;
 
-async function backupAll() {
+async function backupAll({ force = false } = {}) {
   await flush();
   const { text, count, versionCount } = await makeBackup();
-  // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
-  if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive など）を選べます');
-  const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
-  if (!r) return;
-  prefs.set('lastBackupAt', new Date().toISOString());
-  toast(`${count}作品（バージョン${versionCount}件）と、ひな型・設定をバックアップしました`);
+  const done = () => {
+    prefs.set('lastBackupAt', new Date().toISOString());
+    toast(`${count}作品（バージョン${versionCount}件）と、ひな型・設定をバックアップしました`);
+  };
+  const local = async () => {
+    // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
+    if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive など）を選べます');
+    const r = await localFile.saveAs(text, backupFileName(), WORK_TYPES, 'application/json');
+    if (!r) return;
+    prefs.set('file.lastDestination', 'local');
+    done();
+  };
+  const dest = await chooseDestination('save', { force });
+  if (dest === 'gdrive') {
+    const p = driveProvider();
+    openDriveSave({ p, title: `${p.label}にバックアップ（すべての作品）`, name: backupFileName(), text, workId: '', onSaved: done, onLocal: local });
+    return;
+  }
+  if (dest === 'local') await local();
 }
 
 let pendingBackup = null;
@@ -1155,6 +1292,9 @@ function openRestoreDialog(text, name = '') {
 }
 
 async function restoreFromFile() {
+  const dest = await chooseDestination('open');
+  if (dest === 'gdrive') return cloudOpen(driveProvider());
+  if (dest !== 'local') return;
   const r = await localFile.open();
   if (!r) return;
   openRestoreDialog(r.text, r.name);
@@ -1216,6 +1356,7 @@ async function cloudSave(p) {
   }
   project.links = { ...project.links, [p.id]: id };
   await db.put(project);
+  saveTarget = 'gdrive';
   lastCloudAutoAt = Date.now();
   setCloudAuto('saved');
   toast(`${p.label}に保存しました${p.autoSave && prefs.get('cloud.autoSave', true) ? '（以後は自動でも保存します）' : ''}`);
@@ -1318,8 +1459,13 @@ async function cloudOpen(p) {
   for (const f of files) {
     const open = button('開く', async () => {
       dialog.close();
-      const content = parse(await p.load(f.id), f.name);
+      const text = await p.load(f.id);
+      // 全体バックアップのファイルなら、復元の画面へ
+      if (isBackup(text)) { openRestoreDialog(text, f.name); return; }
+      const content = parse(text, f.name);
       await switchTo(await importContent(content, { [p.id]: f.id }));
+      saveTarget = 'gdrive';
+      prefs.set('file.lastDestination', 'gdrive');
       toast(`${p.label}から「${content.title || '無題'}」を開きました`);
     });
     list.append(listItem(f.name.replace(/\.json$/i, ''), '更新 ' + fmtTime(f.modifiedTime), [open]));
@@ -1330,6 +1476,7 @@ async function cloudOpen(p) {
 function renderCloudActions() {
   const box = $('cloud-action-list');
   box.replaceChildren();
+  updateFileMenu();
   for (const p of providers) {
     const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
     section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
@@ -1345,8 +1492,25 @@ function renderCloudActions() {
           : button('ログイン', async () => { await p.signIn(); renderCloudActions(); toast(p.label + 'にログインしました'); }));
       section.append(row);
       if (project.links?.[p.id]) section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: 'この作品は保存先と連携しています（Ctrl+S／⌘S でも保存できます）。' }));
+      if (p.save) {
+        const sel = document.createElement('select');
+        sel.setAttribute('aria-label', '保存・開くときの保存先');
+        for (const [v, t] of [['ask', '毎回どちらか選ぶ'], ['gdrive', `${p.label}を優先`], ['local', 'この端末・その他（iCloud・OneDrive など）を優先']]) sel.append(new Option(t, v));
+        sel.value = prefs.get(DEST_KEY, 'ask');
+        sel.addEventListener('change', () => {
+          prefs.set(DEST_KEY, sel.value);
+          updateFileMenu();
+          toast('保存・開くときの保存先を「' + sel.selectedOptions[0].textContent + '」にしました');
+        });
+        const wrap = Object.assign(document.createElement('label'), { className: 'dest-select' });
+        wrap.append('保存・開くときの保存先（この端末）', sel);
+        section.append(wrap, Object.assign(document.createElement('p'), {
+          className: 'hint',
+          textContent: '「ファイル」の開く・保存・名前を付けて保存と「すべてをバックアップ」で使います。優先にしたときも、「ファイル」→「保存先を選んで…」でもう一方を使えます。上書き保存は、前回保存・開いた場所へそのまま保存します。',
+        }));
+      }
       if (p.autoSave) {
-        const check = Object.assign(document.createElement('input'), { type: 'checkbox', checked: prefs.get('cloud.autoSave', true) });
+        const check =Object.assign(document.createElement('input'), { type: 'checkbox', checked: prefs.get('cloud.autoSave', true) });
         check.addEventListener('change', () => {
           prefs.set('cloud.autoSave', check.checked);
           renderCloudAttention();
@@ -2086,8 +2250,6 @@ function closeMenus(except) {
 }
 
 function quickSave() {
-  const p = providers.find((x) => project.links?.[x.id] && x.isConfigured());
-  if (p) return cloudSave(p);
   return fileSave();
 }
 
@@ -2121,6 +2283,8 @@ const actions = {
   undo: () => undoRedo('undo'),
   redo: () => undoRedo('redo'),
   'cloud-attention': () => resolveCloudAttention(),
+  'file-open-choose': () => fileOpen({ force: true }),
+  'file-save-choose': () => fileSaveAs({ force: true }),
   'autobackup-resume': () => autoBackup.resume()
     .then((ok) => toast(ok ? '自動バックアップを再開しました' : '書き込みが許可されませんでした', !ok)),
 };
@@ -2331,6 +2495,19 @@ function bindEvents() {
   }));
 
   bindDialog('settings-dialog', saveSettings);
+  bindDialog('drive-save-dialog');
+  // Google ドライブに保存：押したその場で保存を始める（ログイン画面を出すことがあるため）
+  $('drive-save-form').addEventListener('submit', (e) => {
+    e.preventDefault();
+    try { runDriveSave($('drive-save-name').value).catch(fail); } catch (err) { fail(err); }
+  });
+  $('drive-save-local').addEventListener('click', () => {
+    const job = driveSaveJob;
+    driveSaveJob = null;
+    $('drive-save-dialog').close();
+    if (job) { try { Promise.resolve(job.onLocal()).catch(fail); } catch (err) { fail(err); } }
+  });
+  $('drive-save-dialog').addEventListener('close', () => { driveSaveJob = null; });
   bindDialog('image-dialog', () => insertImage($('image-form').url.value));
   bindDialog('template-edit-dialog', saveEditedTemplate);
   bindDialog('replace-dialog', runReplace);
@@ -2464,6 +2641,7 @@ window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.r
 
 async function init() {
   $('app-version').textContent = `エディターの版：${APP_VERSION}`;
+  updateFileMenu();
   applyPrefs();
   bindEvents();
   selectTab('body');

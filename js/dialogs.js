@@ -51,6 +51,48 @@ export function ask(message, opts = {}) {
   return open({ ...opts, message });
 }
 
+/**
+ * いくつかの中から選んでもらう。押したボタンの value、キャンセル・Esc で null
+ *   const where = await choose('保存先を選んでください', [{ value: 'gdrive', label: 'Google ドライブ', primary: true }, …]);
+ * ボタンを押したその場で答えを返すので、続けて共有メニューやファイル選択を出せる（Safari は押した直後でないと出せない）。
+ */
+export function choose(message, choices, { cancel = 'キャンセル' } = {}) {
+  return new Promise((resolve) => {
+    const dlg = document.createElement('dialog');
+    dlg.className = 'ask-dialog';
+    const form = Object.assign(document.createElement('form'), { method: 'dialog', className: 'dialog' });
+    const text = Object.assign(document.createElement('p'), { className: 'ask-message', textContent: message });
+    const foot = Object.assign(document.createElement('div'), { className: 'dialog-foot choose-foot' });
+    let answered = false;
+    const finish = (result) => {
+      if (answered) return;
+      answered = true;
+      if (dlg.open) dlg.close();
+      dlg.remove();
+      resolve(result);
+    };
+    const cancelBtn = Object.assign(document.createElement('button'), { type: 'button', textContent: cancel });
+    cancelBtn.addEventListener('click', () => finish(null));
+    foot.append(cancelBtn);
+    let focusBtn = null;
+    for (const c of choices) {
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: c.label, className: c.primary ? 'primary' : '' });
+      b.dataset.choice = c.value;
+      b.addEventListener('click', () => finish(c.value));
+      foot.append(b);
+      if (c.primary) focusBtn = b;
+    }
+    form.addEventListener('submit', (e) => e.preventDefault());
+    form.append(text, foot);
+    dlg.append(form);
+    document.body.append(dlg);
+    dlg.addEventListener('cancel', (e) => { e.preventDefault(); finish(null); });
+    dlg.addEventListener('close', () => finish(null));
+    dlg.showModal();
+    (focusBtn || cancelBtn).focus();
+  });
+}
+
 /** 文字を入れてもらう。OK で入力した文字、キャンセル・Esc で null */
 export function askText(message, value = '', opts = {}) {
   return open({ ...opts, message, value: String(value ?? ''), danger: opts.danger ?? false });

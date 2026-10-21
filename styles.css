@@ -109,6 +109,8 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .settings-tabs button[aria-selected="true"] { border-bottom-color: var(--accent); color: var(--accent); font-weight: 700; }
 .settings-panel { display: flex; flex-direction: column; gap: 12px; min-height: 280px; }
 .settings-panel[hidden] { display: none; }
+.disclaimer ul { margin: 0; padding-left: 1.2em; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.disclaimer li + li { margin-top: 4px; }
 #settings-dialog .list { max-height: 300px; }
 .cloud-provider { display: flex; flex-direction: column; gap: 6px; }
 .cloud-provider + .cloud-provider { border-top: 1px solid var(--border); padding-top: 8px; }
@@ -787,6 +789,13 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 .dialog > .dialog-foot { position: sticky; bottom: -18px; margin: 0 -18px -18px; padding: 10px 18px 18px; background: var(--surface); border-top: 1px solid var(--border); z-index: 2; }
 @media (max-width: 600px) {
   .dialog > .dialog-foot { bottom: -14px; margin: 0 -14px -14px; padding: 10px 14px 14px; }
+  /* スマートフォンの設定画面：中身の少ないタブでも高さを変えず、「キャンセル」「保存」を一番下に置く */
+  /* iPhone の Safari は、スクロールする枠の中の「下に貼り付く段」（sticky）がずれて途中に出ることがあるため、
+     タブの中身だけをスクロールさせ、ボタンの段は普通に一番下へ並べる */
+  #settings-dialog { height: calc(100dvh - 48px); }
+  #settings-dialog > .dialog { height: 100%; max-height: none; box-sizing: border-box; overflow: hidden; }
+  #settings-dialog .settings-panel:not([hidden]) { flex: 1 1 auto; min-height: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; }
+  #settings-dialog > .dialog > .dialog-foot { position: static; flex: none; }
 }
 /* 狭い画面のインポート（区切り）：条件と全文を詰め込まず、画面ごとスクロールする */
 @media (max-width: 899px) {
@@ -808,4 +817,11 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 /* 確認・入力の画面（どの OS でも 左：キャンセル／右：OK） */
 .ask-dialog { width: min(440px, calc(100vw - 32px)); }
 .ask-dialog .ask-message { margin: 0; white-space: pre-line; line-height: 1.7; }
+.choose-foot { flex-wrap: wrap; }
+.dest-select { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.dest-select select { font-weight: 400; }
+#drive-save-dialog { width: min(560px, calc(100vw - 32px)); }
+#drive-save-dialog .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+#drive-save-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; font-weight: 400; }
+#drive-save-list { max-height: 240px; }
 .ask-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; }

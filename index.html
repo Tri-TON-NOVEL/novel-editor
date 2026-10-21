@@ -28,6 +28,8 @@
         <button type="button" data-action="file-open">ファイルを開く…</button>
         <button type="button" data-action="file-save">ファイルに保存</button>
         <button type="button" data-action="file-save-as">名前を付けて保存…</button>
+        <button type="button" data-action="file-open-choose" data-dest-choose hidden>保存先を選んで開く…</button>
+        <button type="button" data-action="file-save-choose" data-dest-choose hidden>保存先を選んで保存…</button>
         <hr>
         <button type="button" data-action="export-episode">このエピソードを .txt で書き出し</button>
         <button type="button" data-action="export-all">全エピソードを .txt で書き出し</button>
@@ -341,6 +343,23 @@
   </form>
 </dialog>
 
+<dialog id="drive-save-dialog">
+  <form method="dialog" class="dialog" id="drive-save-form">
+    <h2 id="drive-save-title">Google ドライブに保存</h2>
+    <label class="field-label">ファイル名
+      <input type="text" id="drive-save-name" autocomplete="off" required>
+    </label>
+    <p class="hint" id="drive-save-folder"></p>
+    <p class="hint">下の一覧のファイルを押すと、そのファイルに上書きします（このエディターで保存したファイルだけが出ます）。</p>
+    <ul class="list" id="drive-save-list"></ul>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button type="button" id="drive-save-local">この端末・その他に保存…</button>
+      <button type="submit" value="ok" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="image-dialog">
   <form method="dialog" class="dialog" id="image-form">
     <h2>挿絵を入れる（なろう）</h2>
@@ -601,6 +620,17 @@
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
     </fieldset>
     <p class="hint" id="app-version"></p>
+    <fieldset class="disclaimer">
+      <legend>免責事項</legend>
+      <ul>
+        <li>本アプリは、作者が個人で使うために作ったものを、そのままの状態で公開しています。動作・品質・安全性・特定の目的への適合性について、いかなる保証もしません。</li>
+        <li>本アプリの利用（利用できなかったことを含む）によって生じた、原稿・データの消失や破損、投稿サイト・クラウドサービス（Google ドライブ・iCloud・OneDrive など）での不具合、その他一切の損害について、作者は責任を負いません。</li>
+        <li>大切な原稿は、ご自身の責任でこまめにバックアップしてください。</li>
+        <li>不具合の修正、問い合わせへの対応、今後の更新や公開の継続は約束しません。</li>
+        <li>本アプリは「小説家になろう」「アルファポリス」、および Google・Apple・Microsoft などの各サービスとは関係がなく、それらの公式・公認のものではありません。各サービスの利用は、それぞれの規約に従ってください。</li>
+        <li>本アプリを使う場合は、上記に同意したものとします。</li>
+      </ul>
+    </fieldset>
     </div>
 
     <!-- ボタン -->
