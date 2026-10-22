@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.0';
+const APP_VERSION = '2026.10.22-5.1';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -80,12 +80,21 @@ function fmtTime(iso) {
 let toastTimer = null;
 function toast(msg, isError = false) {
   const t = $('toast');
+  // 設定画面などの「最前面の画面（showModal）」が開いていると、その後ろに隠れて見えないので、いちばん上の画面の中に置く
+  const host = [...document.querySelectorAll('dialog[open]')].filter((d) => d.matches(':modal')).pop() || document.body;
+  if (t.parentNode !== host) host.append(t);
   t.textContent = msg;
   t.classList.toggle('error', isError);
   t.classList.add('show');
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => t.classList.remove('show'), isError ? 5000 : 2500);
 }
+
+// 画面を閉じたとき、その中に置いていたお知らせは元に戻す（閉じた画面と一緒に消えないように）
+document.addEventListener('close', (e) => {
+  const t = $('toast');
+  if (t && e.target instanceof HTMLDialogElement && e.target.contains(t)) document.body.append(t);
+}, true);
 
 function fail(e) {
   console.error(e);
@@ -1686,18 +1695,33 @@ async function askSyncConflict(l, r) {
   return c === 'remote' ? 'remote' : 'local';
 }
 
+// 人が選んだファイルを読み込むとき：この端末のほうが新しい作品を、ファイルの内容で置き換えるか（一度だけ聞く）
+async function askReplaceNewer(name, list) {
+  const lines = list.slice(0, 8).map(({ local, remote }) => `・「${local.title || '無題'}」　この端末 ${fmtTime(local.updatedAt)}／ファイル ${fmtTime(remote.updatedAt)}`);
+  if (list.length > 8) lines.push(`ほか ${list.length - 8}作品`);
+  return choose(`「${name}」より、この端末のほうが新しい作品があります。\n${lines.join('\n')}\n\n`
+    + 'ファイルの内容で置き換えますか？（置き換える前の状態は「同期の前の状態を書き出す」から取り出せます）',
+  [{ value: 'local', label: 'その作品はこの端末のまま' }, { value: 'file', label: 'ファイルの内容にする', primary: true }], { cancel: 'やめる' });
+}
+
 function afterMerge(res, name) {
+  if (!res) { toast('読み込みをやめました'); return; }
   syncPending = null;
   prefs.set('restoredMessage', `「${name}」を読み込みました（追加 ${res.added}・更新 ${res.updated}・この端末のまま ${res.kept}）`);
   location.reload();
 }
 
-async function mergeFrom(entry) {
+// explicit：一覧やファイルから人が選んだとき（選んだファイルの内容を使う）。起動時の自動の確認では false（作品ごとに新しいほう）
+// newest：そのときいちばん新しいバックアップの名前。古いものをあえて選んだときは、次の起動で最新を勧めないよう「確認済み」にする
+async function mergeFrom(entry, { explicit = false, newest = '' } = {}) {
   await flush();
-  afterMerge(await sync.loadAndMerge(entry, askSyncConflict), entry.name);
+  const opts = explicit ? { explicit: true, onOlder: (list) => askReplaceNewer(entry.name, list) } : {};
+  const res = await sync.loadAndMerge(entry, askSyncConflict, opts);
+  if (res && explicit && newest && newest !== entry.name) prefs.set('sync.seen', newest);
+  afterMerge(res, entry.name);
 }
 
-// 一覧に出ないバックアップ（パソコン版 Google ドライブの同期フォルダに書いたもの、他のアプリで置いたものなど）を、ファイルを選んで読み込む
+// 一覧に出ないバックアップ（ほかの場所に置いたものなど）を、ファイルを選んで読み込む
 async function syncFromFile(mode) {
   const src = await openFrom('バックアップのファイルを選ぶ');
   if (!src) return;
@@ -1705,7 +1729,10 @@ async function syncFromFile(mode) {
   $('sync-restore-dialog').close();
   if (mode === 'restore') { openRestoreDialog(src.text, src.name); return; }
   await flush();
-  afterMerge(await sync.mergeText(src.text, src.name, askSyncConflict), src.name);
+  const newest = (await sync.listAll().catch(() => []))[0]?.name;
+  const res = await sync.mergeText(src.text, src.name, askSyncConflict, { explicit: true, onOlder: (list) => askReplaceNewer(src.name, list) });
+  if (res && newest && newest !== src.name) prefs.set('sync.seen', newest);
+  afterMerge(res, src.name);
 }
 
 // 許可・ログインが戻っていれば、起動時の確認をする
@@ -1731,8 +1758,8 @@ async function openSyncRestore(mode = 'restore') {
   const isSync = mode === 'sync';
   $('sync-restore-title').textContent = isSync ? '他の端末の記録を読み込む' : 'バックアップから戻す';
   $('sync-restore-hint').textContent = isSync
-    ? '読み込むバックアップを選んでください（普通は先頭の「最新」）。作品ごとに新しいほうを使って、この端末の記録とまとめます。両方で書き換えた作品は、どちらを使うか聞きます。'
-    + '前の状態にそのまま戻したいときは「バックアップから戻す」を使ってください。'
+    ? '読み込むバックアップを選んでください（先頭の「最新」が候補ですが、どれでも選べます）。選んだファイルの内容を使います。'
+    + 'この端末のほうが新しい作品があるときは、置き換えるかを聞きます。この端末にしかない作品は消えません。'
     : '戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。';
   const list = $('sync-restore-list');
   const filter = $('sync-restore-filter');
@@ -1765,7 +1792,7 @@ async function openSyncRestore(mode = 'restore') {
         ? button('読み込む', async () => {
           $('sync-restore-dialog').close();
           syncPending = null;
-          await mergeFrom(f);
+          await mergeFrom(f, { explicit: true, newest: files[0].name });
         }, f === files[0] ? 'primary' : '')
         : button('選ぶ', async () => {
           const text = await sync.read(f);

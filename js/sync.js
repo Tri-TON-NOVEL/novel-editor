@@ -313,40 +313,70 @@ export function markChecked(seenEntry = null) {
  * onConflict(local, remote) … 両方で書き換えた作品について、'remote' か 'local' を返す
  * 戻り値: { added, updated, kept }
  */
-export async function loadAndMerge(entry, onConflict) {
-  return mergeText(await read(entry), entry.name, onConflict);
+export async function loadAndMerge(entry, onConflict, opts = {}) {
+  return mergeText(await read(entry), entry.name, onConflict, opts);
 }
 
 /**
- * バックアップの中身（文字列）を、作品ごとにまとめる。一覧にないファイル（「ファイルから選ぶ」）にも使う。
- * 作品ごとに更新日時の新しいほうを使う。ファイル側が新しく、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く。
+ * バックアップの中身（文字列）を、この端末の作品と合わせる。一覧にないファイル（「ファイルから選ぶ」）にも使う。
+ *
+ * 起動時の自動の確認（explicit: false）
+ *   作品ごとに更新日時の新しいほうを使う。ファイル側が新しく、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く（onConflict）。
+ *
+ * 一覧やファイルから、人が選んだとき（explicit: true）
+ *   選んだファイルの内容を使う。ただし、この端末のほうが新しい作品があれば、置き換えるかを一度だけ聞く（onOlder）。
+ *   onOlder(list) … list = [{ local, remote }]。'file'（ファイルの内容にする）／'local'（その作品はこの端末のまま）／null（やめる）
+ *
+ * どちらも、この端末にしかない作品は消さない。読み込む前の状態は「同期の前の状態」に残す。
  * name がバックアップの名前の形（プレフィックス＋日時）なら、それを「前回同期したもの」として記録する。
+ * 戻り値: { added, updated, kept }／null（やめた）
  */
-export async function mergeText(text, name, onConflict) {
+export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null } = {}) {
   const backup = parseBackup(text);
-  // 読み込む前の状態を残しておく（設定 → バックアップ「同期の前の状態を書き出す」）
-  const before = await makeBackup();
-  await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: name, text: before.text });
-
   const last = lastBackup();
   // この端末で書き換えたか：前回同期した時刻（この端末の時計）とくらべる（端末どうしの時計のずれに左右されないように）
   const localSince = last ? (last.syncedAt || parseName(last.name)?.at || Date.parse(last.at)) : null;
   const time = (p) => Date.parse(p?.updatedAt || 0) || 0;
+
+  // まず、作品ごとにどうするかを決める（書き込みは、全部決まってから）
+  const plan = []; // { r, take: true|false, isNew }
+  const older = []; // この端末のほうが新しい作品（explicit のとき）
+  for (const r of backup.projects || []) {
+    if (!r?.id) continue;
+    const l = await db.get(r.id);
+    if (!l) { plan.push({ r, take: true, isNew: true }); continue; }
+    const rT = time(r);
+    const lT = time(l);
+    if (rT === lT) continue;
+    if (explicit) {
+      if (rT > lT) plan.push({ r, take: true });
+      else { const item = { r, take: false, l }; plan.push(item); older.push(item); }
+      continue;
+    }
+    let useRemote = rT > lT; // 作品ごとに新しいほう
+    // ファイル側が新しくても、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く
+    if (useRemote && localSince !== null && lT > localSince) useRemote = (await onConflict(normalize(l), normalize(r))) === 'remote';
+    plan.push({ r, take: useRemote });
+  }
+  if (explicit && older.length && onOlder) {
+    const answer = await onOlder(older.map((o) => ({ local: normalize(o.l), remote: normalize(o.r) })));
+    if (answer === null) return null;
+    if (answer === 'file') for (const o of older) o.take = true;
+  }
+
+  // 読み込む前の状態を残しておく（設定 → 自動バックアップ「同期の前の状態を書き出す」）
+  const before = await makeBackup();
+  await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: name, text: before.text });
+
   const taken = new Set();
   let added = 0;
   let updated = 0;
   let kept = 0;
-  for (const r of backup.projects || []) {
-    if (!r?.id) continue;
-    const l = await db.get(r.id);
-    if (!l) { await db.put(normalize(r)); taken.add(r.id); added++; continue; }
-    const rT = time(r);
-    const lT = time(l);
-    if (rT === lT) continue;
-    let useRemote = rT > lT; // 作品ごとに新しいほう
-    // ファイル側が新しくても、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く
-    if (useRemote && localSince !== null && lT > localSince) useRemote = (await onConflict(normalize(l), normalize(r))) === 'remote';
-    if (useRemote) { await db.put(normalize(r)); taken.add(r.id); updated++; } else kept++;
+  for (const p of plan) {
+    if (!p.take) { kept++; continue; }
+    await db.put(normalize(p.r));
+    taken.add(p.r.id);
+    if (p.isNew) added++; else updated++;
   }
   // 取り込んだ作品の版も入れる（同じ版はそのまま）
   for (const v of backup.versions || []) {
