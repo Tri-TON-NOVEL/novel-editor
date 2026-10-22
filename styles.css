@@ -852,8 +852,15 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .choose-foot { flex-wrap: wrap; }
 .dest-select { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .dest-select select { font-weight: 400; }
-#drive-save-dialog { width: min(560px, calc(100vw - 32px)); }
-#drive-save-dialog .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
-#drive-save-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; font-weight: 400; }
-#drive-save-list { max-height: 240px; }
+#drive-dialog { width: min(600px, calc(100vw - 32px)); }
+#drive-dialog .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+#drive-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; font-weight: 400; }
+#drive-list { max-height: min(45dvh, 360px); overflow-y: auto; }
+.drive-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; }
+.drive-path button { border: 0; background: transparent; padding: 4px 6px; color: var(--accent); min-height: 32px; }
+.drive-path button:disabled { color: var(--text); font-weight: 700; opacity: 1; }
+.drive-path .sep { color: var(--muted); }
+.drive-list .drive-folder { display: flex; align-items: center; gap: 8px; width: 100%; text-align: left; border: 0; background: transparent; padding: 8px; font-size: 15px; }
+.drive-list .drive-folder:hover { background: var(--hover); }
+.drive-list .drive-folder .go { margin-left: auto; color: var(--muted); }
 .ask-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; }

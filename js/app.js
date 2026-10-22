@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.9';
+const APP_VERSION = '2026.10.22-4.12';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -880,98 +880,175 @@ const FILE_KINDS = {
   txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
 };
 
-// Google ドライブに保存する画面。戻り値: { type: 'gdrive', id, name }／'local'（この端末・その他を選び直した）／null（やめた）
-let driveSaveJob = null;
-
-function openDriveSave({ p, title, name, text, workId = '', kind = 'json' }) {
-  return new Promise((resolve) => {
-    driveSaveJob = { p, text, workId, name, kind, resolve };
-    $('drive-save-title').textContent = title;
-    $('drive-save-name').value = name;
-    $('drive-save-folder').textContent = `保存先フォルダ：${p.folderInfo?.().name ?? p.label}`;
-    $('drive-save-dialog').showModal();
-    renderDriveSaveList();
-  });
-}
-
-function finishDriveSave(result) {
-  const job = driveSaveJob;
-  driveSaveJob = null;
-  if ($('drive-save-dialog').open) $('drive-save-dialog').close();
-  job?.resolve(result);
-}
+// ---------- Google ドライブの画面（エディター内のフォルダ選択。Picker を使わない） ----------
+// iPhone・iPad でも、フォルダをたどって選び、その場で新しいフォルダを作れる。
+// 権限が drive.file なので、出てくるのは「このエディターが作ったフォルダ」と「Picker で選んだフォルダ」だけ。
+//
+// mode: 'save'   … ファイル名を入れて、このフォルダに保存（一覧のファイルを押すと上書き）
+//       'open'   … フォルダをたどって、ファイルを選ぶ
+//       'folder' … フォルダを選ぶ（「クラウド」タブの保存先フォルダ）
+// 戻り値: save → { type: 'gdrive', id, name }／'local'（この端末・その他を選び直した）／null
+//         open → { id, name }／'local'／null
+//         folder → { id, name }／null
+let driveUi = null; // { p, mode, kind, text, workId, resolve, folders, byId, cur }
 
 const hasExt = (name, kind) => name.toLowerCase().endsWith(FILE_KINDS[kind].ext);
 
-async function renderDriveSaveList() {
-  const job = driveSaveJob;
-  const list = $('drive-save-list');
-  if (!job) return;
+function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', workId = '' }) {
+  return new Promise((resolve) => {
+    driveUi = { p, mode, kind, text, workId, resolve, folders: null, byId: new Map(), cur: null };
+    $('drive-title').textContent = title;
+    $('drive-name').value = name;
+    $('drive-name-row').hidden = mode !== 'save';
+    $('drive-ok').hidden = mode === 'open';
+    $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : 'このフォルダに保存';
+    $('drive-local').hidden = mode === 'folder';
+    $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
+    $('drive-hint').textContent = 'このエディターで作ったフォルダと、Google Picker（PC）で選んだフォルダが出ます。Google ドライブの画面で自分で作ったフォルダは出ません（権限を最小限にしているため）。';
+    $('drive-dialog').showModal();
+    loadDriveFolders().catch((e) => { finishDrive(null); fail(e); });
+  });
+}
+
+function finishDrive(result) {
+  const ui = driveUi;
+  driveUi = null;
+  if ($('drive-dialog').open) $('drive-dialog').close();
+  ui?.resolve(result);
+}
+
+// フォルダの一覧を読み、最初に開くフォルダを決める（前回のフォルダ → 保存先フォルダ → 一番上）
+async function loadDriveFolders() {
+  const ui = driveUi;
+  const list = $('drive-list');
+  $('drive-path').replaceChildren();
   // ログイン画面は、押したとき以外は出せない（iPhone・iPad）。ログインしていなければボタンを出す
-  if (!job.p.canSaveSilently()) {
-    list.replaceChildren(listItem('ファイルの一覧を見るには、ログインが必要です', '「保存」を押したときにもログインします', [
-      button('ログインして一覧を見る', async () => { await job.p.signIn(); renderDriveSaveList(); }),
+  if (!ui.p.canSaveSilently()) {
+    list.replaceChildren(listItem('フォルダを見るには、ログインが必要です', '', [
+      button('ログインして続ける', async () => { await ui.p.signIn(); if (driveUi === ui) await loadDriveFolders(); }),
     ]));
+    $('drive-ok').disabled = true;
     return;
   }
   list.replaceChildren(li('empty', '読み込み中…'));
-  let files;
-  try {
-    files = (await job.p.list()).filter((f) => hasExt(f.name, job.kind));
-  } catch (e) {
-    list.replaceChildren(li('empty', '一覧を読み込めませんでした：' + e.message));
-    return;
+  const home = await ui.p.defaultFolderId().catch(() => null);
+  const folders = await ui.p.folders();
+  if (driveUi !== ui) return;
+  ui.folders = folders;
+  ui.byId = new Map(folders.map((f) => [f.id, f]));
+  const last = prefs.get('gdrive.lastFolder', null);
+  ui.cur = [last, home].find((id) => id && ui.byId.has(id)) || null;
+  await renderDrive();
+}
+
+// 見えるフォルダの中での親（親が見えないフォルダは一番上に並べる）
+function driveParent(f) {
+  return (f?.parents || []).find((id) => driveUi.byId.has(id)) || null;
+}
+
+function drivePath(id) {
+  const path = [];
+  for (let f = driveUi.byId.get(id); f; f = driveUi.byId.get(driveParent(f))) {
+    path.unshift(f);
+    if (path.length > 30) break;
   }
-  if (driveSaveJob !== job) return;
+  return path;
+}
+
+function goDriveFolder(id) {
+  driveUi.cur = id;
+  renderDrive().catch(fail);
+}
+
+async function renderDrive() {
+  const ui = driveUi;
+  if (!ui) return;
+  // 場所（パンくず）
+  const path = $('drive-path');
+  const crumbs = [{ id: null, name: 'マイドライブ' }, ...drivePath(ui.cur)];
+  path.replaceChildren();
+  crumbs.forEach((c, i) => {
+    if (i) path.append(Object.assign(document.createElement('span'), { className: 'sep', textContent: '▸' }));
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: c.name, disabled: i === crumbs.length - 1 });
+    b.addEventListener('click', () => goDriveFolder(c.id));
+    path.append(b);
+  });
+  $('drive-up').disabled = !ui.cur;
+  $('drive-ok').disabled = !ui.cur; // 一番上（マイドライブ直下の一覧）ではフォルダを選んでもらう
+
+  const list = $('drive-list');
   list.replaceChildren();
-  if (!files.length) { list.append(li('empty', 'まだ保存したファイルはありません')); return; }
-  for (const f of files) {
-    list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [
-      button('上書き', async () => {
-        if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${job.p.label} の「版を管理」から戻せます）`, { ok: '上書きする' }))) return;
-        await runDriveSave(f.name, f.id);
-      }, 'danger'),
-    ]));
+  const subs = ui.folders.filter((f) => driveParent(f) === ui.cur).sort((a, b) => collator.compare(a.name, b.name));
+  for (const f of subs) {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'drive-folder' });
+    b.append('📁 ', Object.assign(document.createElement('span'), { textContent: f.name }), Object.assign(document.createElement('span'), { className: 'go', textContent: '▸' }));
+    b.addEventListener('click', () => goDriveFolder(f.id));
+    const item = document.createElement('li');
+    item.append(b);
+    list.append(item);
   }
+  if (ui.mode !== 'folder' && ui.cur) {
+    let files = [];
+    try {
+      files = (await ui.p.filesIn(ui.cur)).filter((f) => hasExt(f.name, ui.kind));
+    } catch (e) {
+      list.append(li('empty', 'ファイルを読み込めませんでした：' + e.message));
+    }
+    if (driveUi !== ui) return;
+    for (const f of files) {
+      const act = ui.mode === 'open'
+        ? button('開く', () => finishDrive({ id: f.id, name: f.name }), 'primary')
+        : button('上書き', async () => {
+          if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は Google ドライブの「版を管理」から戻せます）`, { ok: '上書きする' }))) return;
+          await runDriveSave(f.name, f.id);
+        }, 'danger');
+      list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [act]));
+    }
+  }
+  if (!list.children.length) {
+    list.append(li('empty', ui.cur ? (ui.mode === 'open' ? 'このフォルダには開けるファイルがありません' : 'このフォルダは空です') : '見えるフォルダがありません。「＋ 新しいフォルダ」で作ってください'));
+  }
+}
+
+async function newDriveFolder() {
+  const ui = driveUi;
+  if (!ui) return;
+  const name = await askText(`新しいフォルダの名前（${ui.cur ? `「${ui.byId.get(ui.cur).name}」の中` : 'マイドライブの直下'}に作ります）`, '小説');
+  if (!name || !name.trim() || driveUi !== ui) return;
+  const f = await ui.p.makeFolder(name.trim(), ui.cur);
+  ui.folders.push(f);
+  ui.byId.set(f.id, f);
+  goDriveFolder(f.id);
+  toast(`フォルダ「${f.name}」を作りました`);
+}
+
+// 「このフォルダに保存」「このフォルダにする」
+async function driveOk() {
+  const ui = driveUi;
+  if (!ui?.cur) return;
+  prefs.set('gdrive.lastFolder', ui.cur);
+  if (ui.mode === 'folder') { const f = ui.byId.get(ui.cur); finishDrive({ id: f.id, name: f.name }); return; }
+  if (ui.mode === 'save') await runDriveSave($('drive-name').value);
 }
 
 async function runDriveSave(name, fileId = null) {
-  const job = driveSaveJob;
-  if (!job) return;
-  let finalName = name.trim() || job.name;
-  if (!hasExt(finalName, job.kind)) finalName += FILE_KINDS[job.kind].ext;
-  const id = await job.p.save(job.text, finalName, fileId, { workId: job.workId, mime: FILE_KINDS[job.kind].mime });
+  const ui = driveUi;
+  if (!ui || !ui.cur) return;
+  let finalName = name.trim() || 'untitled';
+  if (!hasExt(finalName, ui.kind)) finalName += FILE_KINDS[ui.kind].ext;
+  const id = await ui.p.save(ui.text, finalName, fileId, { workId: ui.workId, mime: FILE_KINDS[ui.kind].mime, folderId: ui.cur });
+  prefs.set('gdrive.lastFolder', ui.cur);
   prefs.set('file.lastDestination', 'gdrive');
-  finishDriveSave({ type: 'gdrive', id, name: finalName });
+  finishDrive({ type: 'gdrive', id, name: finalName });
 }
 
-// Google ドライブで保存したファイルから選ぶ画面（kind の種類だけ出す）。戻り値: { id, name }／null
+// 保存・開くで使う入口（前の版からの名前）
+function openDriveSave({ p, title, name, text, workId = '', kind = 'json' }) {
+  return driveBrowse({ p, mode: 'save', kind, title, name, text, workId });
+}
+
 function pickDriveFile(p, title, kind = 'json') {
-  return new Promise((resolve) => {
-    const dialog = $('cloud-dialog');
-    const list = $('cloud-list');
-    let done = false;
-    const finish = (v) => {
-      if (done) return;
-      done = true;
-      if (dialog.open) dialog.close();
-      resolve(v);
-    };
-    dialog.addEventListener('close', () => finish(null), { once: true });
-    $('cloud-dialog-title').textContent = title;
-    list.replaceChildren(li('empty', '読み込み中…'));
-    dialog.showModal();
-    p.list().then((all) => {
-      if (done) return;
-      const files = all.filter((f) => hasExt(f.name, kind));
-      list.replaceChildren();
-      if (!files.length) { list.append(li('empty', `${p.label}に保存した${kind === 'txt' ? 'テキスト' : 'ファイル'}はまだありません`)); return; }
-      for (const f of files) list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [button('開く', () => finish(f))]));
-    }).catch((e) => {
-      finish(null);
-      fail(e);
-    });
-  });
+  return driveBrowse({ p, mode: 'open', kind, title });
 }
 
 /**
@@ -1008,13 +1085,15 @@ function savedMessage(r, what) {
  */
 async function openFrom(title, { force = false, kind = 'json' } = {}) {
   const dest = await chooseDestination('open', { force });
+  let where = dest;
   if (dest === 'gdrive') {
     const p = driveProvider();
     const f = await pickDriveFile(p, title, kind);
-    if (!f) return null;
-    return { text: await p.load(f.id), name: f.name, source: 'gdrive', id: f.id };
+    if (f && f !== 'local') return { text: await p.load(f.id), name: f.name, source: 'gdrive', id: f.id };
+    if (f !== 'local') return null;
+    where = 'local'; // 「この端末・その他から開く」を選び直した
   }
-  if (dest !== 'local') return null;
+  if (where !== 'local') return null;
   const r = await localFile.open(kind);
   return r ? { ...r, source: 'local' } : null;
 }
@@ -1549,7 +1628,7 @@ function renderSyncState() {
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
   sel.querySelector('option[value="gdrive"]').disabled = !syncProvider()?.isConfigured() && m !== 'gdrive';
   $('sync-mode-hint').textContent = m === 'gdrive'
-    ? `Google ドライブの「${syncProvider()?.backups.folderName || ''}」に保存します（どの端末でも同じフォルダ）。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。`
+    ? `Google ドライブの「${syncProvider()?.backups.folderName || ''}」に保存します（「クラウド」タブの保存先フォルダの中。端末ごとにフォルダが違っても、全端末のバックアップを読み込めます）。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。`
     : m === 'folder'
       ? 'OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad と同期するときは、すべての端末で「Google ドライブ」を選んでください。'
       : sync.folderSupported
@@ -1713,7 +1792,7 @@ function renderCloudActions() {
     if (p.folderInfo) section.append(renderCloudFolder(p));
     section.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください（フォルダは「小説エディター／自動バックアップ」に決まっています）。',
+      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください（下の保存先フォルダの中の「自動バックアップ」フォルダに入ります）。',
     }));
     box.append(section);
   }
@@ -1747,16 +1826,20 @@ function renderCloudFolder(p) {
   const after = (folder) => {
     if (!folder) return;
     renderCloudActions();
-    toast(`保存先を「${folder.name}」にしました。すでに保存したファイルは元のフォルダに残り、次に新しく保存するファイルからこのフォルダに入ります`);
+    renderSyncState();
+    toast(`保存先を「${folder.name}」にしました。次に保存するファイルと自動バックアップから、このフォルダ（自動バックアップはその中の「自動バックアップ」）に入ります`);
   };
-  const pick = button('フォルダを選ぶ（Google Picker）…', async () => after(await aboveDialogs(() => p.pickFolder())));
+  const pick = button('既にあるフォルダを Picker で選ぶ…', async () => after(await aboveDialogs(() => p.pickFolder())));
   pick.disabled = !p.canPickFolder();
   if (!p.canPickFolder()) pick.title = '下の設定に Google API キーを入れると使えます';
-  row.append(pick, button('新しいフォルダを作って使う…', async () => {
-    const name = await askText('新しいフォルダの名前（Google ドライブのマイドライブに作ります）', '小説');
-    if (!name || !name.trim()) return;
-    after(await p.createFolder(name.trim()));
-  }));
+  // エディター内の画面でフォルダを選ぶ・作る（iPhone・iPad でも使える）
+  const choose = button('フォルダを選ぶ・作る…', async () => {
+    const folder = await driveBrowse({ p, mode: 'folder', title: '保存先のフォルダを選ぶ' });
+    if (!folder) return;
+    p.setFolder(folder);
+    after(folder);
+  });
+  row.append(choose, pick);
   if (!f.isDefault) {
     row.append(button('自動のフォルダに戻す', async () => {
       if (!(await ask('保存先を、自動で作る「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）'))) return;
@@ -1766,7 +1849,11 @@ function renderCloudFolder(p) {
   }
   wrap.append(row, Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '保存先を変えても、すでに保存したファイルは移動しません（この作品が連携済みなら、これまでどおり同じファイルを更新します）。同じフォルダに同じ名前の別の作品があるときは、上書きせずに名前の後ろに番号を付けます。',
+    textContent: '「ファイル」で保存するファイルはこのフォルダに、自動バックアップはこのフォルダの中の「自動バックアップ」フォルダに入ります（端末ごとの設定）。'
+      + '保存先を変えても、すでに保存したファイルは移動しません。同じフォルダに同じ名前のファイルがあるときは、上書きせずに名前の後ろに番号を付けます。',
+  }), Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: '※ Google ドライブの画面などで自分で作ったフォルダは、同じ名前でもこのエディターからは見えません（権限を最小限にしているため）。既にあるフォルダを使うときは、PC で「既にあるフォルダを Picker で選ぶ」を一度使ってください（以後は iPhone・iPad の「フォルダを選ぶ・作る」にも出ます）。',
   }));
   return wrap;
 }
@@ -2770,17 +2857,18 @@ function bindEvents() {
 
   bindDialog('settings-dialog');
   bindSettingsInputs();
-  bindDialog('drive-save-dialog');
-  // Google ドライブに保存：押したその場で保存を始める（ログイン画面を出すことがあるため）
-  $('drive-save-form').addEventListener('submit', (e) => {
+  // Google ドライブの画面：押したその場で保存を始める（ログイン画面を出すことがあるため）
+  bindDialog('drive-dialog');
+  $('drive-form').addEventListener('submit', (e) => {
     e.preventDefault();
-    try { runDriveSave($('drive-save-name').value).catch(fail); } catch (err) { fail(err); }
+    try { driveOk().catch(fail); } catch (err) { fail(err); }
   });
-  // 「この端末・その他に保存」：押したその場で共有メニュー・保存画面を出す
-  $('drive-save-local').addEventListener('click', () => finishDriveSave('local'));
-  $('drive-save-dialog').addEventListener('close', () => { if (driveSaveJob) finishDriveSave(null); });
+  $('drive-up').addEventListener('click', () => { if (driveUi?.cur) goDriveFolder(driveParent(driveUi.byId.get(driveUi.cur))); });
+  $('drive-new-folder').addEventListener('click', () => newDriveFolder().catch(fail));
+  // 「この端末・その他…」：押したその場で共有メニュー・保存画面・ファイル選択を出す
+  $('drive-local').addEventListener('click', () => finishDrive('local'));
+  $('drive-dialog').addEventListener('close', () => { if (driveUi) finishDrive(null); });
   bindDialog('sync-restore-dialog');
-  bindDialog('cloud-dialog');
   bindDialog('image-dialog', () => insertImage($('image-form').url.value));
   bindDialog('template-edit-dialog', saveEditedTemplate);
   bindDialog('replace-dialog', runReplace);

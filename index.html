@@ -336,14 +336,6 @@
   </form>
 </dialog>
 
-<dialog id="cloud-dialog">
-  <form method="dialog" class="dialog">
-    <h2 id="cloud-dialog-title">クラウドから開く</h2>
-    <ul class="list" id="cloud-list"></ul>
-    <div class="dialog-foot"><button value="close">閉じる</button></div>
-  </form>
-</dialog>
-
 <dialog id="sync-restore-dialog">
   <form method="dialog" class="dialog">
     <h2>バックアップから戻す</h2>
@@ -353,19 +345,24 @@
   </form>
 </dialog>
 
-<dialog id="drive-save-dialog">
-  <form method="dialog" class="dialog" id="drive-save-form">
-    <h2 id="drive-save-title">Google ドライブに保存</h2>
-    <label class="field-label">ファイル名
-      <input type="text" id="drive-save-name" autocomplete="off" required>
+<!-- Google ドライブの画面（エディター内のフォルダ選択。保存・開く・フォルダを選ぶの3通りに使う） -->
+<dialog id="drive-dialog">
+  <form method="dialog" class="dialog" id="drive-form">
+    <h2 id="drive-title">Google ドライブ</h2>
+    <div class="drive-path" id="drive-path"></div>
+    <div class="button-row drive-tools">
+      <button type="button" class="tool" id="drive-up">↑ 上のフォルダへ</button>
+      <button type="button" class="tool" id="drive-new-folder">＋ 新しいフォルダ</button>
+    </div>
+    <ul class="list drive-list" id="drive-list"></ul>
+    <label class="field-label" id="drive-name-row">ファイル名
+      <input type="text" id="drive-name" autocomplete="off">
     </label>
-    <p class="hint" id="drive-save-folder"></p>
-    <p class="hint">下の一覧のファイルを押すと、そのファイルに上書きします（このエディターで保存したファイルだけが出ます）。</p>
-    <ul class="list" id="drive-save-list"></ul>
+    <p class="hint" id="drive-hint"></p>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
-      <button type="button" id="drive-save-local">この端末・その他に保存…</button>
-      <button type="submit" value="ok" class="primary">保存</button>
+      <button type="button" id="drive-local">この端末・その他…</button>
+      <button type="submit" value="ok" class="primary" id="drive-ok">このフォルダに保存</button>
     </div>
   </form>
 </dialog>
