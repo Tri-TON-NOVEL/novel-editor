@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.14';
+const APP_VERSION = '2026.10.22-5.0';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -892,9 +892,8 @@ const FILE_KINDS = {
   txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
 };
 
-// ---------- Google ドライブの画面（エディター内のフォルダ選択。Picker を使わない） ----------
-// iPhone・iPad でも、フォルダをたどって選び、その場で新しいフォルダを作れる。
-// 権限が drive.file なので、出てくるのは「このエディターが作ったフォルダ」と「Picker で選んだフォルダ」だけ。
+// ---------- Google ドライブの画面（エディター内のフォルダ選択） ----------
+// iPhone・iPad でも、マイドライブのフォルダをたどって選び、その場で新しいフォルダを作れる。
 //
 // mode: 'save'   … ファイル名を入れて、このフォルダに保存（一覧のファイルを押すと上書き）
 //       'open'   … フォルダをたどって、ファイルを選ぶ
@@ -916,7 +915,7 @@ function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', work
     $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : 'このフォルダに保存';
     $('drive-local').hidden = mode === 'folder';
     $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
-    $('drive-hint').textContent = 'このエディターで作ったフォルダと、Google Picker（PC）で選んだフォルダが出ます。Google ドライブの画面で自分で作ったフォルダは出ません（権限を最小限にしているため）。';
+    $('drive-hint').textContent = 'マイドライブのフォルダが出ます（共有されたフォルダは出ません）。';
     $('drive-dialog').showModal();
     loadDriveFolders().catch((e) => { finishDrive(null); fail(e); });
   });
@@ -1602,9 +1601,9 @@ function renderSyncState() {
   $('sync-mode-hint').textContent = m === 'gdrive'
     ? `Google ドライブの「${syncProvider()?.backups.folderName || ''}」に保存します（「クラウド」タブの保存先フォルダの中。端末ごとにフォルダが違っても、全端末のバックアップを読み込めます）。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。`
     : m === 'folder'
-      ? 'OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad と同期するときは、すべての端末で「Google ドライブ」を選んでください。'
+      ? 'OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（Google ドライブ方式）とも同期したいときは、パソコン版 Google ドライブの中の「自動バックアップ」フォルダを選ぶか、この端末も「Google ドライブ」にしてください。'
       : sync.folderSupported
-        ? 'iPhone・iPad と同期するときは、すべての端末で「Google ドライブ」を選んでください（「クラウド」タブでクライアントIDを入れると選べます）。'
+        ? 'iPhone・iPad と同期するときは「Google ドライブ」がおすすめです（「クラウド」タブでクライアントIDを入れると選べます）。'
         : 'この端末では「Google ドライブ」を選べます（「クラウド」タブでクライアントIDを入れると選べます）。';
 
   $('sync-choose').textContent = m === 'folder' ? (sync.folderName() ? 'フォルダを選び直す…' : 'フォルダを選ぶ…') : 'Google ドライブにログイン';
@@ -1677,19 +1676,36 @@ async function runSyncCheck({ manual = false } = {}) {
   renderSyncState();
 }
 
+// 両方で書き換えた作品について、どちらを使うか聞く
+async function askSyncConflict(l, r) {
+  const c = await choose(`「${l.title || '無題'}」は、この端末と他の端末の両方で書き換えられています。どちらを使いますか？\n\n` +
+    `この端末：${fmtTime(l.updatedAt)} 更新・${totalChars(l).toLocaleString()}字\n` +
+    `他の端末：${fmtTime(r.updatedAt)} 更新・${totalChars(r).toLocaleString()}字\n\n` +
+    '（使わなかったほうも、「設定」→「自動バックアップ」の「同期の前の状態を書き出す」から取り出せます）',
+  [{ value: 'local', label: 'この端末' }, { value: 'remote', label: '他の端末', primary: true }], { cancel: 'この端末のまま' });
+  return c === 'remote' ? 'remote' : 'local';
+}
+
+function afterMerge(res, name) {
+  syncPending = null;
+  prefs.set('restoredMessage', `「${name}」を読み込みました（追加 ${res.added}・更新 ${res.updated}・この端末のまま ${res.kept}）`);
+  location.reload();
+}
+
 async function mergeFrom(entry) {
   await flush();
-  const res = await sync.loadAndMerge(entry, async (l, r) => {
-    const c = await choose(`「${l.title || '無題'}」は、この端末と他の端末の両方で書き換えられています。どちらを使いますか？\n\n` +
-      `この端末：${fmtTime(l.updatedAt)} 更新・${totalChars(l).toLocaleString()}字\n` +
-      `他の端末：${fmtTime(r.updatedAt)} 更新・${totalChars(r).toLocaleString()}字\n\n` +
-      '（使わなかったほうも、「設定」→「自動バックアップ」の「同期の前の状態を書き出す」から取り出せます）',
-    [{ value: 'local', label: 'この端末' }, { value: 'remote', label: '他の端末', primary: true }], { cancel: 'この端末のまま' });
-    return c === 'remote' ? 'remote' : 'local';
-  });
-  syncPending = null;
-  prefs.set('restoredMessage', `他の端末のバックアップを読み込みました（追加 ${res.added}・更新 ${res.updated}・この端末のまま ${res.kept}）`);
-  location.reload();
+  afterMerge(await sync.loadAndMerge(entry, askSyncConflict), entry.name);
+}
+
+// 一覧に出ないバックアップ（パソコン版 Google ドライブの同期フォルダに書いたもの、他のアプリで置いたものなど）を、ファイルを選んで読み込む
+async function syncFromFile(mode) {
+  const src = await openFrom('バックアップのファイルを選ぶ');
+  if (!src) return;
+  if (!isBackup(src.text)) { toast('全体（バックアップ）のファイルではありません', true); return; }
+  $('sync-restore-dialog').close();
+  if (mode === 'restore') { openRestoreDialog(src.text, src.name); return; }
+  await flush();
+  afterMerge(await sync.mergeText(src.text, src.name, askSyncConflict), src.name);
 }
 
 // 許可・ログインが戻っていれば、起動時の確認をする
@@ -1724,11 +1740,13 @@ async function openSyncRestore(mode = 'restore') {
   filter.replaceChildren(new Option('すべての端末', ''));
   $('sync-restore-dialog').showModal();
   let files;
+  // 一覧に出ないファイルも選べるように（押したその場でファイル選択を出す）
+  $('sync-from-file').onclick = () => { try { syncFromFile(mode).catch(fail); } catch (err) { fail(err); } };
   try {
     files = await sync.listAll();
   } catch (e) {
-    $('sync-restore-dialog').close();
-    throw e;
+    list.replaceChildren(li('empty', '一覧を読み込めませんでした：' + e.message + '（「ファイルから選ぶ」は使えます）'));
+    return;
   }
   const keyOf = (f) => f.prefix || '__none__';
   const prefixes = [...new Set(files.map(keyOf))].sort((a, b) => collator.compare(a, b));
@@ -1801,22 +1819,6 @@ function renderCloudActions() {
   }
 }
 
-// 画面の最前面に出ている確認・設定画面（showModal）より前に、外部の画面（Google Picker など）は出せない。
-// その間だけ閉じておき、終わったら同じ状態で開き直す（入力内容やスクロール位置はそのまま）。
-async function aboveDialogs(fn) {
-  const opened = [...document.querySelectorAll('dialog[open]')].filter((d) => d.matches(':modal'));
-  const scrolls = opened.map((d) => [d, ...d.querySelectorAll('*')].filter((n) => n.scrollTop > 0).map((n) => [n, n.scrollTop]));
-  opened.forEach((d) => d.close());
-  try {
-    return await fn();
-  } finally {
-    opened.forEach((d, i) => {
-      if (!d.open) d.showModal();
-      for (const [n, top] of scrolls[i]) n.scrollTop = top;
-    });
-  }
-}
-
 // 保存先フォルダ（端末ごとの設定）
 function renderCloudFolder(p) {
   const wrap = Object.assign(document.createElement('div'), { className: 'cloud-folder' });
@@ -1832,31 +1834,26 @@ function renderCloudFolder(p) {
     renderSyncState();
     toast(`保存先を「${folder.name}」にしました。次に保存するファイルと自動バックアップから、このフォルダ（自動バックアップはその中の「自動バックアップ」）に入ります`);
   };
-  const pick = button('既にあるフォルダを Picker で選ぶ…', async () => after(await aboveDialogs(() => p.pickFolder())));
-  pick.disabled = !p.canPickFolder();
-  if (!p.canPickFolder()) pick.title = '下の設定に Google API キーを入れると使えます';
-  // エディター内の画面でフォルダを選ぶ・作る（iPhone・iPad でも使える）
+  // エディター内の画面で、マイドライブのフォルダを選ぶ・作る（iPhone・iPad でも使える）
   const choose = button('フォルダを選ぶ・作る…', async () => {
     const folder = await driveBrowse({ p, mode: 'folder', title: '保存先のフォルダを選ぶ' });
     if (!folder) return;
     p.setFolder(folder);
     after(folder);
   });
-  row.append(choose, pick);
+  row.append(choose);
   if (!f.isDefault) {
-    row.append(button('自動のフォルダに戻す', async () => {
-      if (!(await ask('保存先を、自動で作る「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）'))) return;
+    row.append(button('「小説エディター」に戻す', async () => {
+      if (!(await ask('保存先を、マイドライブの「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）'))) return;
       p.resetFolder();
       renderCloudActions();
+      renderSyncState();
     }));
   }
   wrap.append(row, Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '「ファイル」で保存するファイルはこのフォルダに、自動バックアップはこのフォルダの中の「自動バックアップ」フォルダに入ります（端末ごとの設定）。'
+    textContent: '「ファイル」で保存するファイルはこのフォルダに、自動バックアップはこのフォルダの中の「自動バックアップ」フォルダに入ります（端末ごとの設定。既にあればそれを使います）。'
       + '保存先を変えても、すでに保存したファイルは移動しません。同じフォルダに同じ名前のファイルがあるときは、上書きせずに名前の後ろに番号を付けます。',
-  }), Object.assign(document.createElement('p'), {
-    className: 'hint',
-    textContent: '※ Google ドライブの画面などで自分で作ったフォルダは、同じ名前でもこのエディターからは見えません（権限を最小限にしているため）。既にあるフォルダを使うときは、PC で「既にあるフォルダを Picker で選ぶ」を一度使ってください（以後は iPhone・iPad の「フォルダを選ぶ・作る」にも出ます）。',
   }));
   return wrap;
 }

@@ -1,14 +1,14 @@
 // Google Drive 接続（Google Identity Services + Drive API v3）
-// 権限は drive.file：このアプリで作成したファイルと、Google Picker で選んだフォルダ・ファイルだけを扱う。
-// 同じ Google アカウント・同じクライアントID なら、どの端末（OS）で保存したファイルも、ほかの端末から読める。
+// 権限は drive（ログインした人のマイドライブ全体）。このソフトは使う人専用なので、各自が自分のクライアントID で自分のドライブに使う。
+// どの方法で置いたファイル・フォルダ（パソコン版 Google ドライブの同期フォルダなど）も見える。
 //
 // 手動で保存するフォルダ（端末ごと。localStorage `novel-editor:gdrive.folder` = { id, name }）
-//   未指定      … 自動で作る「小説エディター」フォルダ（appProperties で識別）
-//   指定あり    … Google Picker で選んだフォルダ、または名前を付けて新しく作ったフォルダ
+//   未指定      … マイドライブ直下の「小説エディター」フォルダ（なければ作る）
+//   指定あり    … エディター内のフォルダ選択画面で選んだ・作ったフォルダ
 // 保存先を変えても、すでに保存したファイルは移動しない（次に新しく保存するファイルから新しいフォルダへ）。
 //
-// 自動バックアップ（同期）のフォルダは、保存先フォルダの中の「自動バックアップ」（appProperties で識別）。
-// 権限が drive.file なので、自分で作ったフォルダ（同じ名前でも）はこのアプリからは見えない。既にあるフォルダを使うときは Google Picker で選ぶ。
+// 自動バックアップ（同期）のフォルダは、保存先フォルダの中の「自動バックアップ」（なければ作る）。
+// 一覧は、「自動バックアップ」という名前のフォルダの中の「プレフィックス＋日時.json」すべて（Win_ など、どの方法で置いたものも）。
 //
 // ログイン
 //   ブラウザ               … ポップアップ。開けなければ、ページごと Google に移動して戻ってくる（リダイレクト）
@@ -16,7 +16,9 @@
 //   リダイレクトには、Google Cloud Console の「承認済みのリダイレクト URI」に公開 URL の登録が必要。
 import { prefs } from '../db.js';
 
-const SCOPE = 'https://www.googleapis.com/auth/drive.file';
+const SCOPE = 'https://www.googleapis.com/auth/drive';
+// 自動バックアップのファイル名（プレフィックス＋日時）
+const BACKUP_NAME_RE = /\d{8}T\d{6}Z\.json$/;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -27,7 +29,6 @@ const APP_KEY = 'novelEditor';
 const DEFAULT_CLIENT_ID = '';
 
 let gisPromise = null;
-let pickerPromise = null;
 let tokenClient = null;
 let defaultFolderId = null;
 const backupFolderIds = new Map(); // 保存先フォルダの id → その中の「自動バックアップ」フォルダの id
@@ -37,7 +38,6 @@ let silent = 0;
 let beforeRedirect = async () => {};
 
 function clientId() { return prefs.get('gdrive.clientId', '') || DEFAULT_CLIENT_ID; }
-function apiKey() { return prefs.get('gdrive.apiKey', '') || ''; }
 function chosenFolder() { return prefs.get('gdrive.folder', null); }
 
 // ホーム画面に追加したアプリとして開いているか
@@ -50,9 +50,10 @@ const STATE_KEY = 'novel-editor-session:gdrive.state';
 let token = (() => {
   try {
     const t = JSON.parse(localStorage.getItem(TOKEN_KEY));
-    return t && t.clientId === clientId() && Date.now() < t.expiresAt ? t : null;
+    // 権限（scope）が変わった前の版の鍵は使わない（ログインし直してもらう）
+    return t && t.clientId === clientId() && t.scope === SCOPE && Date.now() < t.expiresAt ? t : null;
   } catch { return null; }
-})(); // { value, expiresAt, clientId }
+})(); // { value, expiresAt, clientId, scope }
 function setToken(t) {
   token = t;
   try {
@@ -97,7 +98,7 @@ let redirectResult = null; // { ok: true } / { ok: false, message }
   } else if (!(p.get('scope') || '').split(' ').includes(SCOPE)) {
     redirectResult = { ok: false, message: 'Google ドライブを使う許可がありません。もう一度ログインして、ドライブへのアクセスを許可してください' };
   } else {
-    setToken({ value: p.get('access_token'), expiresAt: Date.now() + (Number(p.get('expires_in')) || 3600) * 1000, clientId: clientId() });
+    setToken({ value: p.get('access_token'), expiresAt: Date.now() + (Number(p.get('expires_in')) || 3600) * 1000, clientId: clientId(), scope: SCOPE });
     redirectResult = { ok: true };
   }
 })();
@@ -120,15 +121,6 @@ function loadGis() {
   return gisPromise;
 }
 
-function loadPicker() {
-  if (!pickerPromise) {
-    pickerPromise = loadScript('https://apis.google.com/js/api.js')
-      .then(() => new Promise((resolve) => window.gapi.load('picker', resolve)))
-      .catch((e) => { pickerPromise = null; throw e; });
-  }
-  return pickerPromise;
-}
-
 // 有効な鍵を返す。なければログイン画面を出すので、ボタンを押した直後に呼ぶ
 async function getToken() {
   if (token && Date.now() < token.expiresAt - 60_000) return token.value;
@@ -143,7 +135,11 @@ async function getToken() {
   return new Promise((resolve, reject) => {
     tokenClient.callback = (resp) => {
       if (resp.error) { reject(new Error('Google ログインに失敗しました: ' + resp.error)); return; }
-      setToken({ value: resp.access_token, expiresAt: Date.now() + Number(resp.expires_in) * 1000, clientId: clientId() });
+      if (window.google.accounts.oauth2.hasGrantedAllScopes && !window.google.accounts.oauth2.hasGrantedAllScopes(resp, SCOPE)) {
+        reject(new Error('Google ドライブを使う許可がありません。もう一度ログインして、ドライブへのアクセスを許可してください'));
+        return;
+      }
+      setToken({ value: resp.access_token, expiresAt: Date.now() + Number(resp.expires_in) * 1000, clientId: clientId(), scope: SCOPE });
       resolve(token.value);
     };
     tokenClient.error_callback = (err) => {
@@ -172,43 +168,47 @@ async function api(url, options = {}, retry = true) {
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 
-async function findOrCreateFolder(marker, name, parent = null) {
-  const query = `appProperties has { key='${APP_KEY}' and value='${marker}' } and trashed=false`;
+// 親フォルダの中の、その名前のフォルダ（なければ作る）。同じ名前が既にあれば、自分で作ったものでもそれを使う
+async function findOrCreateFolderIn(parent, name, marker) {
+  const query = `name = ${q(name)} and mimeType='${FOLDER_MIME}' and ${q(parent)} in parents and trashed=false`;
   const res = await api(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1`);
   const found = (await res.json()).files[0];
   if (found) return found.id;
   const created = await api(`${API}/files?fields=id`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: FOLDER_MIME, appProperties: { [APP_KEY]: marker }, ...(parent ? { parents: [parent] } : {}) }),
+    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parent], appProperties: { [APP_KEY]: marker } }),
   });
   return (await created.json()).id;
 }
 
+// 保存先フォルダを決めていないとき：マイドライブ直下の「小説エディター」
 async function ensureDefaultFolder() {
-  if (!defaultFolderId) defaultFolderId = await findOrCreateFolder('folder', FOLDER_NAME);
+  if (!defaultFolderId) defaultFolderId = await findOrCreateFolderIn('root', FOLDER_NAME, 'folder');
   return defaultFolderId;
 }
 
-// 自動バックアップのフォルダ：保存先フォルダ（「クラウド」タブで選んだ・作ったフォルダ。なければ自動で作る「小説エディター」）の中の「自動バックアップ」。
+// 自動バックアップのフォルダ：保存先フォルダ（「クラウド」タブで選んだ・作ったフォルダ。なければ「小説エディター」）の中の「自動バックアップ」。
 // 保存先フォルダを変えたら、次のバックアップから新しいフォルダの中の「自動バックアップ」に入る。
-// 読み込み（一覧）はフォルダに関係なく、このアプリが保存した自動バックアップすべてが対象なので、端末ごとにフォルダが違っても同期できる。
 async function ensureBackupFolder() {
   const parent = await saveFolderId();
   if (backupFolderIds.has(parent)) return backupFolderIds.get(parent);
-  const query = `appProperties has { key='${APP_KEY}' and value='backup-folder' } and ${q(parent)} in parents and trashed=false`;
-  const res = await api(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1`);
-  let id = (await res.json()).files[0]?.id;
-  if (!id) {
-    const created = await api(`${API}/files?fields=id`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: BACKUP_FOLDER_NAME, mimeType: FOLDER_MIME, parents: [parent], appProperties: { [APP_KEY]: 'backup-folder' } }),
-    });
-    id = (await created.json()).id;
-  }
+  const id = await findOrCreateFolderIn(parent, BACKUP_FOLDER_NAME, 'backup-folder');
   backupFolderIds.set(parent, id);
   return id;
+}
+
+// 条件に合うファイルを全部（ページをまたいで）
+async function listAll(query, fields = 'id,name') {
+  const out = [];
+  let pageToken = '';
+  do {
+    const res = await api(`${API}/files?q=${encodeURIComponent(query)}&pageSize=1000&fields=nextPageToken,files(${fields})${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`);
+    const j = await res.json();
+    out.push(...j.files);
+    pageToken = j.nextPageToken || '';
+  } while (pageToken);
+  return out;
 }
 
 async function saveFolderId() {
@@ -254,13 +254,7 @@ export const gdrive = {
       key: 'gdrive.clientId',
       label: 'Google OAuth クライアントID',
       placeholder: 'xxxxxxxx.apps.googleusercontent.com',
-      hint: 'Google Cloud Console で作成した「ウェブ アプリケーション」のクライアントID。「承認済みの JavaScript 生成元」と「承認済みのリダイレクト URI」に公開 URL を登録してください（手順は README）。',
-    },
-    {
-      key: 'gdrive.apiKey',
-      label: 'Google API キー（任意・フォルダを選ぶときに使用）',
-      placeholder: 'AIza…',
-      hint: '「既にあるフォルダを Picker で選ぶ」を使う場合だけ必要です。なくても、エディター内の「フォルダを選ぶ・作る」は使えます。',
+      hint: 'Google Cloud Console で作成した「ウェブ アプリケーション」のクライアントID。「承認済みの JavaScript 生成元」と「承認済みのリダイレクト URI」に公開 URL を登録し、スコープに …/auth/drive を追加してください（手順は README）。',
     },
   ],
 
@@ -283,70 +277,13 @@ export const gdrive = {
     return f ? { ...f, isDefault: false } : { id: defaultFolderId || '', name: `${FOLDER_NAME}（自動で作るフォルダ）`, isDefault: true };
   },
 
-  canPickFolder() { return !!apiKey(); },
-
-  // Google Picker でフォルダを選ぶ（drive.file でも、選んだフォルダには保存できる）
-  async pickFolder() {
-    if (!apiKey()) throw new Error('フォルダを選ぶには、設定に Google API キーを入れてください');
-    const t = await getToken();
-    await loadPicker();
-    const { google } = window;
-    return new Promise((resolve) => {
-      const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-        .setIncludeFolders(true)
-        .setSelectFolderEnabled(true)
-        .setMimeTypes(FOLDER_MIME);
-      const appId = (clientId().match(/^(\d+)-/) || [])[1];
-      const builder = new google.picker.PickerBuilder()
-        .addView(view)
-        .setOAuthToken(t)
-        .setDeveloperKey(apiKey())
-        .setTitle('保存先のフォルダを選ぶ')
-        .setCallback((data) => {
-          if (data.action === google.picker.Action.PICKED) {
-            const doc = data.docs[0];
-            const folder = { id: doc.id, name: doc.name };
-            prefs.set('gdrive.folder', folder);
-            resolve(folder);
-          } else if (data.action === google.picker.Action.CANCEL) {
-            resolve(null);
-          }
-        });
-      if (appId) builder.setAppId(appId);
-      builder.build().setVisible(true);
-    });
-  },
-
-  // 名前を付けて新しいフォルダを作り、保存先にする
-  async createFolder(name) {
-    const res = await api(`${API}/files?fields=id,name`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, mimeType: FOLDER_MIME, appProperties: { [APP_KEY]: 'folder-chosen' } }),
-    });
-    const f = await res.json();
-    const folder = { id: f.id, name: f.name };
-    prefs.set('gdrive.folder', folder);
-    return folder;
-  },
-
   resetFolder() { prefs.set('gdrive.folder', null); },
 
-  // ---------- エディター内のフォルダ選択画面（Picker を使わない）用 ----------
-  // drive.file なので、見えるのは「このエディターが作ったフォルダ」と「Picker で選んだフォルダ」だけ。
+  // ---------- エディター内のフォルダ選択画面用 ----------
 
-  // 見えるフォルダすべて。戻り値: [{ id, name, parents }]
+  // マイドライブのフォルダすべて（自分のもの）。戻り値: [{ id, name, parents }]
   async folders() {
-    const query = `mimeType='${FOLDER_MIME}' and trashed=false`;
-    const out = [];
-    let pageToken = '';
-    do {
-      const res = await api(`${API}/files?q=${encodeURIComponent(query)}&pageSize=1000&fields=nextPageToken,files(id,name,parents)${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`);
-      const j = await res.json();
-      out.push(...j.files);
-      pageToken = j.nextPageToken || '';
-    } while (pageToken);
-    return out;
+    return listAll(`mimeType='${FOLDER_MIME}' and trashed=false and 'me' in owners`, 'id,name,parents');
   },
 
   // フォルダの中のファイル（フォルダは除く。新しい順）。戻り値: [{ id, name, modifiedTime }]
@@ -427,17 +364,16 @@ export const gdrive = {
     // 保存するフォルダの表示名（保存先フォルダ／自動バックアップ）
     get folderName() { return `${chosenFolder()?.name || FOLDER_NAME}／${BACKUP_FOLDER_NAME}`; },
     // 戻り値: [{ id, name }]（全端末のもの）
+    // 「自動バックアップ」という名前のフォルダ（どこにあっても）の中の「プレフィックス＋日時.json」と、
+    // このエディターが印を付けて保存した自動バックアップを合わせる。パソコン版 Google ドライブの同期フォルダに
+    // 「フォルダ」方式で書いた Win_ なども、「自動バックアップ」フォルダの中にあれば出る。
     async list() {
-      const query = `appProperties has { key='${APP_KEY}' and value='autobackup' } and trashed=false`;
-      const files = [];
-      let pageToken = '';
-      do {
-        const res = await api(`${API}/files?q=${encodeURIComponent(query)}&pageSize=1000&fields=nextPageToken,files(id,name)${pageToken ? '&pageToken=' + encodeURIComponent(pageToken) : ''}`);
-        const j = await res.json();
-        files.push(...j.files);
-        pageToken = j.nextPageToken || '';
-      } while (pageToken);
-      return files;
+      const byId = new Map();
+      const add = (files) => { for (const f of files) if (BACKUP_NAME_RE.test(f.name)) byId.set(f.id, { id: f.id, name: f.name }); };
+      add(await listAll(`appProperties has { key='${APP_KEY}' and value='autobackup' } and trashed=false`));
+      const dirs = await listAll(`name = ${q(BACKUP_FOLDER_NAME)} and mimeType='${FOLDER_MIME}' and trashed=false and 'me' in owners`);
+      for (const d of dirs) add(await listAll(`${q(d.id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`));
+      return [...byId.values()];
     },
     async read(id) {
       const res = await api(`${API}/files/${encodeURIComponent(id)}?alt=media`);

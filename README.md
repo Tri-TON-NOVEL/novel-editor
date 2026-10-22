@@ -3,7 +3,7 @@
 「小説家になろう」「アルファポリス」に投稿する小説を書くための、ブラウザで動く執筆エディターです。
 Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画面に追加するとアプリ（PWA）として使えます。
 
-- **バージョン**：4.14（`2026.10.22-4.14`）
+- **バージョン**：5.0（`2026.10.22-5.0`）
 - **使い方の詳細**：[docs/使い方.md](docs/使い方.md)
 - **アプリ**：GitHub Pages で公開した URL（例：`https://<ユーザー名>.github.io/<リポジトリ名>/`）を開くだけで使えます。
 
@@ -34,7 +34,9 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 ## データの保存先とプライバシー
 
 - 作品は**使っている端末のブラウザの中（IndexedDB）**に保存されます。サーバーには送りません。
-- 外部に送るのは、自分で Google ドライブを使うと決めたときだけです。権限は `drive.file`（このアプリで作ったファイルと、自分で選んだフォルダ・ファイルだけ）です。
+- 外部に送るのは、自分で Google ドライブを使うと決めたときだけです。
+  - Google ドライブの権限は `drive`（ログインした人のマイドライブ全体）です。このソフトは使う人専用で、各自が自分のクライアントID で自分のドライブに使う前提です。
+  - エディターが消すのは、自分の端末のプレフィックスの古い自動バックアップだけです。
 - iPhone・iPad では、Safari で開いたときとホーム画面のアプリで開いたときで、データが別々になります。
 - ブラウザのデータを消すと、作品も消えます。**自動バックアップ**か、「ファイル」→ 全体の「名前を付けて保存」で、こまめに残してください。
 
@@ -42,7 +44,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 
 1. 公開した URL をブラウザで開きます。
 2. （iPhone・iPad）Safari の共有 →「ホーム画面に追加」。（Android）Chrome のメニュー →「アプリをインストール」。
-3. 「設定」→「自動バックアップ」で保存先を選んでおくと安心です。複数の端末で使う場合は、すべての端末で「Google ドライブ」を選びます。
+3. 「設定」→「自動バックアップ」で保存先を選んでおくと安心です。複数の端末で使う場合は「Google ドライブ」がおすすめです（PC はパソコン版 Google ドライブの「自動バックアップ」フォルダを「フォルダ」方式で選んでも同期できます）。
 4. Google ドライブを使う場合は、下の「[Google ドライブを使うための準備](#google-ドライブを使うための準備)」を最初に1回だけ行います。
 
 ## 自分で公開する（GitHub Pages）
@@ -57,20 +59,20 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 
 最初に1回だけ必要です。Google ドライブを使わないなら不要です。
 
-1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作り、**Google Drive API** を有効にします。
+1. [Google Cloud Console](https://console.cloud.google.com/) でプロジェクトを作り、[Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com) を有効にします。
 2. 「Google Auth Platform」で、次の3つを設定します。
-   - アプリ名・サポートメール・対象「外部」
-   - スコープ `https://www.googleapis.com/auth/drive.file`
-   - テストユーザー（自分の Gmail）
-3. 「クライアント」→ **ウェブ アプリケーション** を作り、次の2つを登録します。
+   - [ブランディング](https://console.cloud.google.com/auth/branding)：アプリ名・サポートメール
+   - [対象](https://console.cloud.google.com/auth/audience)：「外部」・「テスト中」のまま、テストユーザーに自分の Gmail
+   - [データアクセス](https://console.cloud.google.com/auth/scopes)：スコープ `https://www.googleapis.com/auth/drive`（「スコープを追加または削除」→ 一覧の下の「スコープを手動で追加」に貼り付け）
+3. [クライアント](https://console.cloud.google.com/auth/clients) → **ウェブ アプリケーション** を作り、次の2つを登録します。
    - **承認済みの JavaScript 生成元**：`https://<ユーザー名>.github.io`（手元で試すなら `http://localhost:8765` も）
    - **承認済みのリダイレクト URI**：公開 URL そのもの（例：`https://<ユーザー名>.github.io/<リポジトリ名>/`。最後の `/` まで同じにします。手元で試すなら `http://localhost:8765/` も）
      - ホーム画面のアプリや、ポップアップが開けないときは、ページごと Google に移動してログインし、この URI に戻ってきます。
      - 登録がないと `redirect_uri_mismatch` になります。
 4. 表示された **クライアントID** を、エディターの「設定」→「クラウド」に入れて保存します。
    - すべての端末で同じクライアントID・同じ Google アカウントを使えば、どの端末で保存したファイルも、ほかの端末から開けます。
-5. （任意）保存先フォルダを Google Picker で選びたい場合は、**API キー**を作り（Google Picker API を有効化）、同じ画面に入れます。
 
+- ログインのとき「Google はこのアプリを確認していません」と出ます。自分で作ったアプリなので「詳細」→「（安全ではないページ）に移動」で進み、ドライブへのアクセスを許可してください。
 - アプリが「テスト中」の間は、約7日ごとにログインし直す必要があります。
 - 1回のログインは約1時間で切れます。切れると画面の上にログインのボタンが出ます。
 

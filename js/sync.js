@@ -314,16 +314,23 @@ export function markChecked(seenEntry = null) {
  * 戻り値: { added, updated, kept }
  */
 export async function loadAndMerge(entry, onConflict) {
-  const backup = parseBackup(await read(entry));
+  return mergeText(await read(entry), entry.name, onConflict);
+}
+
+/**
+ * バックアップの中身（文字列）を、作品ごとにまとめる。一覧にないファイル（「ファイルから選ぶ」）にも使う。
+ * 作品ごとに更新日時の新しいほうを使う。ファイル側が新しく、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く。
+ * name がバックアップの名前の形（プレフィックス＋日時）なら、それを「前回同期したもの」として記録する。
+ */
+export async function mergeText(text, name, onConflict) {
+  const backup = parseBackup(text);
   // 読み込む前の状態を残しておく（設定 → バックアップ「同期の前の状態を書き出す」）
   const before = await makeBackup();
-  await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: entry.name, text: before.text });
+  await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: name, text: before.text });
 
   const last = lastBackup();
-  // 他の端末で書き換えたか：前回同期したバックアップの日時とくらべる
-  const lastAt = last ? parseName(last.name)?.at || Date.parse(last.at) : null;
   // この端末で書き換えたか：前回同期した時刻（この端末の時計）とくらべる（端末どうしの時計のずれに左右されないように）
-  const localSince = last ? (last.syncedAt || lastAt) : null;
+  const localSince = last ? (last.syncedAt || parseName(last.name)?.at || Date.parse(last.at)) : null;
   const time = (p) => Date.parse(p?.updatedAt || 0) || 0;
   const taken = new Set();
   let added = 0;
@@ -336,15 +343,9 @@ export async function loadAndMerge(entry, onConflict) {
     const rT = time(r);
     const lT = time(l);
     if (rT === lT) continue;
-    let useRemote;
-    if (lastAt === null) {
-      useRemote = rT > lT; // 初めての同期：新しいほう
-    } else {
-      const remoteChanged = rT > lastAt;
-      const localChanged = lT > localSince;
-      if (remoteChanged && localChanged) useRemote = (await onConflict(normalize(l), normalize(r))) === 'remote';
-      else useRemote = remoteChanged && rT > lT;
-    }
+    let useRemote = rT > lT; // 作品ごとに新しいほう
+    // ファイル側が新しくても、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く
+    if (useRemote && localSince !== null && lT > localSince) useRemote = (await onConflict(normalize(l), normalize(r))) === 'remote';
     if (useRemote) { await db.put(normalize(r)); taken.add(r.id); updated++; } else kept++;
   }
   // 取り込んだ作品の版も入れる（同じ版はそのまま）
@@ -358,7 +359,9 @@ export async function loadAndMerge(entry, onConflict) {
     const ids = new Set(remoteTemplates.map((t) => t.id));
     prefs.set('templates', [...remoteTemplates, ...mine.filter((t) => !ids.has(t.id))]);
   }
-  prefs.set('sync.last', { name: entry.name, at: new Date(entry.at).toISOString(), syncedAt: Date.now() });
+  const parsed = parseName(name || '');
+  if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
+  else if (last) prefs.set('sync.last', { ...last, syncedAt: Date.now() });
   checked = true;
   return { added, updated, kept };
 }

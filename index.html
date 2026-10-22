@@ -345,7 +345,11 @@
       <select id="sync-restore-filter"></select>
     </label>
     <ul class="list" id="sync-restore-list"></ul>
-    <div class="dialog-foot"><button value="close">閉じる</button></div>
+    <p class="hint">一覧に出るのは、「自動バックアップ」という名前のフォルダの中のバックアップ（Win_・iPad_ など全端末の分）です。それ以外の場所にあるファイルは「ファイルから選ぶ」で選べます。</p>
+    <div class="dialog-foot">
+      <button type="button" id="sync-from-file">ファイルから選ぶ…</button>
+      <button value="close">閉じる</button>
+    </div>
   </form>
 </dialog>
 
