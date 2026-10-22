@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.8';
+const APP_VERSION = '2026.10.22-4.9';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2343,6 +2343,7 @@ function fitVisualViewport() {
   const vv = window.visualViewport;
   // 最大化中の iPhone で高さを決めてあれば、その高さにする
   const custom = maximized ? iphoneMaxHeight() : null;
+  document.body.classList.toggle('max-custom-height', !!custom);
   const height = custom || vv?.height || window.innerHeight || document.documentElement.clientHeight;
   const width = vv?.width || window.innerWidth || document.documentElement.clientWidth;
   document.documentElement.style.setProperty('--vv-height', Math.round(height) + 'px');

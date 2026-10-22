@@ -388,7 +388,13 @@ body.hide-max-plot [data-max="plot"], body.hide-max-memo [data-max="memo"] { dis
   border: 0;
   border-radius: 0;
 }
-.maximized textarea { flex: 1; min-height: 0; resize: none; }
+/* 最大化中は、欄の高さを枠に合わせる（狭い画面の「本文は画面の55%以上」などの最低の高さは外す。
+   外さないと、iPhone で高さを決めても入力欄が枠からはみ出し、キーボードの上の部分に隠れたままになる） */
+.maximized textarea { flex: 1 1 auto !important; min-height: 0 !important; resize: none; }
+/* iPhone で高さを決めたとき：枠が画面の下端まで届かないので、下の余白（ホームバーの分）は付けない */
+body.max-custom-height .maximized { padding-bottom: 12px; }
+/* その下（キーボードが出ていないとき見える部分）は、後ろの画面が透けないよう背景色でふさぐ */
+body.maximizing.max-custom-height::after { content: ""; position: fixed; inset: 0; background: var(--bg); z-index: 39; }
 .maximized input[type="text"] { font-size: 22px; }
 .maximized .max-btn { display: none !important; }
 .maximized[data-max-label]::before { content: attr(data-max-label); font-weight: 700; }
