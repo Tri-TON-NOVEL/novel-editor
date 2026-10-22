@@ -10,6 +10,11 @@ export const BACKUP_FORMAT = 'novel-editor-backup';
 const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.)/;
 const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
 
+// 端末ごとの設定のうち、「環境」として明示的に読み込むときだけ使うもの（ファイルの保存先の選び方・自動バックアップの間隔と件数・画面の幅など）。
+// 自動バックアップの状態・保存先フォルダ・プレフィックス・ログイン・開いている作品などは、端末そのものの記録なので入れない。
+const PORTABLE_DEVICE_PREFS = /^(file\.destination$|autoBackupInterval$|autoBackupKeep$|split$|sidebarWidth$|iphone\.)/;
+const portableDevicePrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => DEVICE_PREFS.test(k) && PORTABLE_DEVICE_PREFS.test(k)));
+
 // まとめるときに、id ごとに合わせる一覧（同じ id は読み込んだ側）
 const LISTS_BY_ID = ['templates', 'importPresets'];
 
@@ -58,6 +63,7 @@ export async function makeBackup({ device = null } = {}) {
       projects,
       versions: allVersions,
       prefs: sharedPrefs(prefs.entries()),
+      devicePrefs: portableDevicePrefs(prefs.entries()), // 「環境」を読み込むときだけ使う
     }, null, 1),
     count: projects.length,
     versionCount: allVersions.length,
@@ -72,6 +78,40 @@ export function parseBackup(text) {
   const o = JSON.parse(text);
   if (o?.format !== BACKUP_FORMAT || !Array.isArray(o.projects)) throw new Error('バックアップファイルではありません');
   return o;
+}
+
+// ---------- 環境（設定・ひな型・リンク・アカウントなど。小説は含まない） ----------
+
+const ENV_LABELS = [
+  ['templates', 'ひな型', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
+  ['links', 'リンク', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
+  ['accounts', '投稿サイトのアカウント', () => ''],
+  ['importPresets', 'TXT インポートの条件', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
+  ['gdrive.clientId', 'Google ドライブのクライアントID', () => ''],
+];
+
+/** バックアップに入っている環境の中身（画面で知らせる用）。何もなければ空の配列 */
+export function environmentSummary(backup) {
+  const p = backup?.prefs || {};
+  const lines = [];
+  for (const [key, label, count] of ENV_LABELS) if (p[key] !== undefined && p[key] !== null) lines.push(`${label}${count(p[key]) ? `（${count(p[key])}）` : ''}`);
+  const others = Object.keys(sharedPrefs(p)).filter((k) => !ENV_LABELS.some(([key]) => key === k)).length
+    + Object.keys(backup?.devicePrefs || {}).length;
+  if (others) lines.push(`表示・ファイル・自動バックアップの間隔・書き出しの選び方などの設定（${others}項目）`);
+  return lines;
+}
+
+/**
+ * バックアップの環境を、この端末に読み込む（小説は変えない）
+ *   'merge'   … この端末の設定を残してまとめる（mergeSharedPrefs と同じ）
+ *   'replace' … バックアップの設定で上書きする（端末ごとの設定のうち、表示・ファイル・自動バックアップの間隔なども）
+ * 自動バックアップの保存先・プレフィックス・ログインなど、端末そのものの記録は変えない。
+ */
+export function applyEnvironment(backup, mode) {
+  if (mode === 'merge') { mergeSharedPrefs(backup.prefs); return; }
+  for (const [key, value] of Object.entries({ ...sharedPrefs(backup.prefs), ...portableDevicePrefs(backup.devicePrefs) })) {
+    prefs.set(key, value);
+  }
 }
 
 /**
@@ -100,6 +140,8 @@ export async function restoreBackup(backup, mode) {
       prefs.set(key, value);
     }
   }
+  // 入れ替えるときは、表示・ファイル・自動バックアップの間隔などの端末の設定もバックアップのものにする
+  if (mode === 'replace') for (const [key, value] of Object.entries(portableDevicePrefs(backup.devicePrefs))) prefs.set(key, value);
   return backup.projects.length;
 }
 

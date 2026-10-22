@@ -1,12 +1,17 @@
 # 小説エディター
 
 「小説家になろう」「アルファポリス」に投稿する小説を書くための、ブラウザで動く執筆エディターです。
-Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画面に追加するとアプリ（PWA）として使えます。
+Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画面に追加するとアプリ（PWA）として使えます（Android は実機でのテストをしていません。[動作環境](#動作環境)を参照）。
 
-- **バージョン**：5.9（`2026.10.22-5.9`）
+## ここから実行
+
+**▶ [https://tri-ton-novel.github.io/novel-editor/](https://tri-ton-novel.github.io/novel-editor/)**
+
+ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
+
+- **バージョン**：5.10（`2026.10.22-5.10`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **使い方の詳細**：[docs/使い方.md](docs/使い方.md)
-- **アプリ**：GitHub Pages で公開した URL（例：`https://<ユーザー名>.github.io/<リポジトリ名>/`）を開くだけで使えます。
 
 > [!IMPORTANT]
 > 本アプリは無保証です。利用によって生じた損害について、作者は一切の責任を負いません。詳しくは下の[免責事項](#免責事項)をお読みください。
@@ -23,6 +28,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 - **「保存」ボタン**：ボタン1つ（Ctrl+S／⌘S）で、今の内容を全端末で共有する自動バックアップに保存します。他の端末の新しい記録があれば、先に知らせます。
 - **自動保存と版**：ブラウザ内に自動保存します。エピソードの版と作品全体のバックアップ版も残ります。
 - **ファイル**：全体（全作品）とエピソードの保存・開く、プレーンテキストの読み込み・書き出しができます。保存先は Google ドライブか、この端末・その他（iCloud・OneDrive など）です。
+- **環境のバックアップ**：バックアップには小説だけでなく、設定・ひな型・リンク・アカウントなどのアプリの環境も入ります。読み込むときの一覧で「⚙ 環境」を選ぶと、環境だけを読み込めます（まとめる／置き換える）。
 - **自動バックアップと端末どうしの同期**：自分で選んだフォルダ（端末のフォルダか Google ドライブ）へ、全作品を自動で保存します。他の端末の新しい記録があれば、お知らせとバックアップの一覧を1つの画面で出し、読み込むものを選べます。
 
 ## 動作環境
@@ -33,8 +39,9 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 |---|---|---|---|
 | Windows・Mac | **Chrome** | Edge、Safari（Mac） | Chrome・Edge は保存先を選ぶ画面が使え、自動バックアップの保存先に「フォルダ」も選べます。Mac の Safari は保存が「ダウンロード」フォルダへ、自動バックアップは Google ドライブのみ |
 | iPhone・iPad | **Chrome** | Safari | 保存は共有メニュー（「"ファイル"に保存」）。自動バックアップは Google ドライブのみ。ホーム画面に追加してアプリとしても使えます |
-| Android | **Chrome** | — | 自動バックアップは「フォルダ」（端末内）か Google ドライブ |
+| Android | **Chrome** | — | 自動バックアップは「フォルダ」（端末内）か Google ドライブ。**実機でのテストはしていません** |
 
+- **Android は実機でのテストを行っていません。** 機種やブラウザによっては、動かない・表示が崩れるなどの場合があります。
 - 同じ端末でも、ブラウザごと（Chrome と Safari、ブラウザとホーム画面のアプリ）に作品データと設定は別々です。ふだん使うブラウザを1つに決めておくと迷いません。
 
 ## データの保存先とプライバシー
@@ -48,7 +55,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 
 ## はじめかた
 
-1. 公開した URL を **Chrome** で開きます。
+1. [https://tri-ton-novel.github.io/novel-editor/](https://tri-ton-novel.github.io/novel-editor/) を **Chrome** で開きます。
 2. （任意）アプリとして使うときは、ホーム画面に追加します。
    - iPhone・iPad：Chrome の共有ボタン（アドレスバーの右）→「ホーム画面に追加」（Safari なら共有 →「ホーム画面に追加」）
    - Android：Chrome のメニュー →「アプリをインストール」
@@ -58,13 +65,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
    - 端末どうしで同期するときは、すべての端末で同じフォルダを選びます（PC は、パソコン版 Google ドライブの中のそのフォルダを「フォルダ」方式で選んでも同期できます）。
 4. Google ドライブを使う場合は、下の「[Google ドライブを使うための準備](#google-ドライブを使うための準備)」を最初に1回だけ行います。
 
-## 自分で公開する（GitHub Pages）
-
-1. このリポジトリを自分のアカウントにフォーク（またはファイルをアップロード）します。
-   公開に必要なのは `index.html`、`styles.css`、`sw.js`、`manifest.webmanifest`、`js/`、`icons/` です。`docs/`・`tests/`・`tools/` は任意です。
-2. **Settings → Pages** で、Branch を `main`、フォルダを `/ (root)` にして保存します。
-3. 数分後に `https://<ユーザー名>.github.io/<リポジトリ名>/` で開けます。
-4. 更新したら、各端末で一度再読み込みします（ホーム画面のアプリは閉じて開き直します）。
+- 新しい版が出たら、各端末で一度再読み込みします（ホーム画面のアプリは閉じて開き直します）。
 
 ## Google ドライブを使うための準備
 
@@ -76,8 +77,8 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
    - [対象](https://console.cloud.google.com/auth/audience)：「外部」・「テスト中」のまま、テストユーザーに自分の Gmail
    - [データアクセス](https://console.cloud.google.com/auth/scopes)：スコープ `https://www.googleapis.com/auth/drive`（「スコープを追加または削除」→ 一覧の下の「スコープを手動で追加」に貼り付け）
 3. [クライアント](https://console.cloud.google.com/auth/clients) → **ウェブ アプリケーション** を作り、次の2つを登録します。
-   - **承認済みの JavaScript 生成元**：`https://<ユーザー名>.github.io`（手元で試すなら `http://localhost:8765` も）
-   - **承認済みのリダイレクト URI**：公開 URL そのもの（例：`https://<ユーザー名>.github.io/<リポジトリ名>/`。最後の `/` まで同じにします。手元で試すなら `http://localhost:8765/` も）
+   - **承認済みの JavaScript 生成元**：`https://tri-ton-novel.github.io`
+   - **承認済みのリダイレクト URI**：`https://tri-ton-novel.github.io/novel-editor/`（最後の `/` まで同じにします）
      - ホーム画面のアプリや、ポップアップが開けないときは、ページごと Google に移動してログインし、この URI に戻ってきます。
      - 登録がないと `redirect_uri_mismatch` になります。
 4. 表示された **クライアントID** を、エディターの「設定」→「クラウド」に入れて保存します。
@@ -88,15 +89,6 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 - 1回のログインは約1時間で切れます。切れると画面の上にログインのボタンが出ます。
 
 ## 開発
-
-### 手元で試す（Windows）
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\serve.ps1
-```
-
-- アプリ：http://localhost:8765/
-- 自動テスト：http://localhost:8765/tests/index.html
 
 ### ファイル構成
 

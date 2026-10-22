@@ -6,7 +6,7 @@ import {
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import {
-  makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, backupFileName, requestPersistence,
+  makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
 } from './backup.js';
 import * as sync from './sync.js';
@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.9';
+const APP_VERSION = '2026.10.22-5.10';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1748,18 +1748,24 @@ async function mergeFrom(entry, { explicit = false, newest = '' } = {}) {
 async function loadBackupAs(text, name, { newest = '' } = {}) {
   const backup = parseBackup(text);
   const novels = (backup.projects || []).filter((p) => p?.id).map((p) => normalize(p));
-  if (!novels.length) { toast('このバックアップには小説が入っていません', true); return false; }
+  const env = environmentSummary(backup);
+  if (!novels.length && !env.length) { toast('このバックアップには小説も環境も入っていません', true); return false; }
   const time = (p) => Date.parse(p.updatedAt || 0) || 0;
   novels.sort((a, b) => time(b) - time(a));
   const same = novels.find((p) => p.id === project.id);
   const label = (p) => `${p.title || '無題'}（${p.episodes.length}話・${fmtTime(p.updatedAt)} 更新）`;
   const cur = project.title || '無題';
-  const r = await choose(`「${name}」から、小説を読み込みます。\n\n`
+  // 一覧の最後に「環境」（設定・ひな型・リンクなど）も入れる。選ぶと、環境だけを読み込む
+  const options = novels.map((p) => ({ value: p.id, label: label(p) }));
+  if (env.length) options.push({ value: ENV_CHOICE, label: '⚙ 環境（設定・ひな型・リンク・アカウントなど）' });
+  const r = await choose(`「${name}」から読み込みます。\n\n`
     + `・上書き：いま開いている小説「${cur}」を、選んだ小説の内容（タイトルから全部）で置き換えます。置き換える前の内容は「作品のバックアップ版」に残します。\n`
-    + '・新小説：選んだ小説を、新しい小説として追加して開きます（いま開いている小説はそのまま残ります）。',
+    + '・新小説：選んだ小説を、新しい小説として追加して開きます（いま開いている小説はそのまま残ります）。'
+    + (env.length ? '\n・一覧の最後の「⚙ 環境」を選ぶと、小説ではなく設定・ひな型・リンクなどを読み込みます（どちらのボタンでも、次に読み込み方を選べます）。' : ''),
   [{ value: 'overwrite', label: '上書き', danger: true }, { value: 'new', label: '新小説', primary: true }],
-  { select: { label: 'バックアップの中の小説', options: novels.map((p) => ({ value: p.id, label: label(p) })), value: (same || novels[0]).id } });
+  { select: { label: 'バックアップの中の小説・環境', options, value: (same || novels[0])?.id ?? ENV_CHOICE } });
   if (!r) return false;
+  if (r.value === ENV_CHOICE) return loadEnvironmentFrom(backup, name, env);
   const src = novels.find((p) => p.id === r.value);
   if (!src) { toast('読み込む小説を選んでください', true); return false; }
   await flush();
@@ -1785,6 +1791,24 @@ async function loadBackupAs(text, name, { newest = '' } = {}) {
     if (newest && newest !== name) prefs.set('sync.seen', newest);
     await inform(`「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
   }
+  return true;
+}
+
+const ENV_CHOICE = '__environment__';
+
+// バックアップの「環境」（設定・ひな型・リンク・アカウントなど）を読み込む。小説は変えない。読み込んだら画面を読み直す
+async function loadEnvironmentFrom(backup, name, env) {
+  const list = env.map((l) => '・' + l).join('\n');
+  const how = await choose(`「${name}」の環境を読み込みます。小説は変わりません。\n\n入っているもの：\n${list}\n\n`
+    + '・まとめる：この端末の設定を残したまま、足りないものを足します（ひな型・リンク・TXT インポートの条件は足し合わせ、アカウントは空の欄だけ埋めます）。\n'
+    + '・置き換える：バックアップの設定で上書きします（表示・ファイル・自動バックアップの間隔なども）。\n'
+    + '自動バックアップの保存先・プレフィックス・Google ドライブのログインは、どちらでも変わりません。',
+  [{ value: 'replace', label: '置き換える', danger: true }, { value: 'merge', label: 'まとめる', primary: true }]);
+  if (!how) return false;
+  await flush();
+  applyEnvironment(backup, how);
+  prefs.set('restoredReport', `「${name}」の環境を${how === 'merge' ? 'まとめて' : '置き換えて'}読み込みました。\n${list}`);
+  location.reload();
   return true;
 }
 
