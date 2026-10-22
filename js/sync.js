@@ -21,7 +21,7 @@
 //   読み込むときは作品ごとにまとめる（loadAndMerge）。両方で書き換えた作品だけ、どちらを使うか聞く。
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
 import { meta, prefs, db, versions } from './db.js';
-import { makeBackup, parseBackup } from './backup.js';
+import { makeBackup, parseBackup, mergeSharedPrefs } from './backup.js';
 import { normalize } from './format.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
@@ -397,13 +397,8 @@ export async function mergeText(text, name, onConflict, { explicit = false, onOl
   for (const v of backup.versions || []) {
     if (v?.id && taken.has(v.projectId)) await versions.put(v);
   }
-  // ひな型はまとめる（同じものは読み込んだ側）
-  const remoteTemplates = backup.prefs?.templates;
-  if (Array.isArray(remoteTemplates)) {
-    const mine = prefs.get('templates', []) || [];
-    const ids = new Set(remoteTemplates.map((t) => t.id));
-    prefs.set('templates', [...remoteTemplates, ...mine.filter((t) => !ids.has(t.id))]);
-  }
+  // ひな型・リンク・アカウント・書き出しの選び方などの設定もまとめる（この端末の設定は消さない）
+  mergeSharedPrefs(backup.prefs);
   const parsed = parseName(name || '');
   if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
   else if (last) prefs.set('sync.last', { ...last, syncedAt: Date.now() });

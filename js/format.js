@@ -12,8 +12,10 @@
 //     plot, freeMemo,                                              サイト共通
 //     createdAt, updatedAt,
 //   }],
+//   narouNcode, alphaWorkId（投稿サイトの作品との対応。任意）,
 //   world:      { categories: [{ id, name }], items: [{ id, categoryId, ...列 }] },  設定
-//   characters: { categories: [{ id, name }], items: [{ id, categoryId, ...列 }] },  登場人物
+//   characters: { categories: [{ id, name }], items: [{ id, categoryId, ...列,
+//                 orgs: [{ id: 設定の項目ID, note: 立場 }]（所属）, identityId（同じ値の行どうしが同一人物） }] },  登場人物
 //   reports: { x, narouTitle, narouBody },
 //   createdAt, updatedAt, links（端末ローカル）: { [クラウドID]: ファイルID }
 // }
@@ -97,7 +99,13 @@ function normalizeTable(t, fallback) {
   if (!t || !Array.isArray(t.categories) || !t.categories.length) return fallback;
   const cats = t.categories.map((c) => ({ ...c, id: c.id || makeId(), name: c.name ?? '' }));
   const ids = new Set(cats.map((c) => c.id));
-  const items = (t.items || []).map((i) => ({ ...i, id: i.id || makeId(), categoryId: ids.has(i.categoryId) ? i.categoryId : cats[0].id }));
+  const items = (t.items || []).map((i) => {
+    const item = { ...i, id: i.id || makeId(), categoryId: ids.has(i.categoryId) ? i.categoryId : cats[0].id };
+    // 登場人物の所属・同一人物（ないときは項目を作らない。古い版で読んでも、そのまま残る）
+    if ('orgs' in i) item.orgs = Array.isArray(i.orgs) ? i.orgs.filter((r) => r?.id).map((r) => ({ id: String(r.id), note: String(r.note ?? '') })) : [];
+    if ('identityId' in i) item.identityId = typeof i.identityId === 'string' ? i.identityId : '';
+    return item;
+  });
   return { categories: cats, items };
 }
 

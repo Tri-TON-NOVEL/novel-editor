@@ -6,8 +6,45 @@ export const BACKUP_FORMAT = 'novel-editor-backup';
 
 // 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
 // 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
-const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$)/;
+// 画面の幅・iPhone の高さなど、端末の画面に合わせたものも入れない。
+const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.)/;
 const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
+
+// まとめるときに、id ごとに合わせる一覧（同じ id は読み込んだ側）
+const LISTS_BY_ID = ['templates', 'importPresets'];
+
+function mergeList(remote, mine, keyOf) {
+  const keys = new Set(remote.map(keyOf));
+  return [...remote, ...mine.filter((x) => !keys.has(keyOf(x)))];
+}
+
+/**
+ * 読み込んだバックアップの設定を、この端末の設定にまとめる（この端末の設定は消さない）
+ *   ひな型・TXTインポートの条件 … id ごとにまとめる（同じものは読み込んだ側）
+ *   リンク                       … URL ごとにまとめる
+ *   投稿サイトのアカウント       … この端末で空の欄だけ埋める
+ *   そのほか（書き出しの列の選び方など） … この端末にまだない設定だけ入れる
+ */
+export function mergeSharedPrefs(remotePrefs) {
+  for (const [key, value] of Object.entries(sharedPrefs(remotePrefs))) {
+    if (value === null || value === undefined) continue;
+    const mine = prefs.get(key, null);
+    if (LISTS_BY_ID.includes(key) && Array.isArray(value)) {
+      prefs.set(key, mergeList(value, Array.isArray(mine) ? mine : [], (x) => x?.id));
+    } else if (key === 'links' && Array.isArray(value)) {
+      prefs.set(key, mine === null ? value : mergeList(value, Array.isArray(mine) ? mine : [], (x) => x?.url));
+    } else if (key === 'accounts' && typeof value === 'object') {
+      const merged = { ...(mine || {}) };
+      for (const [site, acc] of Object.entries(value)) {
+        merged[site] = { ...(merged[site] || {}) };
+        for (const [k, v] of Object.entries(acc || {})) if (v && !merged[site][k]) merged[site][k] = v;
+      }
+      prefs.set(key, merged);
+    } else if (mine === null) {
+      prefs.set(key, value);
+    }
+  }
+}
 
 export async function makeBackup({ device = null } = {}) {
   const projects = await db.all();
@@ -55,11 +92,10 @@ export async function restoreBackup(backup, mode) {
   }
   const saved = sharedPrefs(backup.prefs);
   for (const [key, value] of Object.entries(saved)) {
-    if (key === 'templates' && mode === 'merge') {
-      // ひな型は、端末にあるものとまとめる（同じものはバックアップ側を使う）
-      const mine = prefs.get('templates', []) || [];
-      const ids = new Set(value.map((t) => t.id));
-      prefs.set('templates', [...value, ...mine.filter((t) => !ids.has(t.id))]);
+    if (mode === 'merge' && LISTS_BY_ID.includes(key) && Array.isArray(value)) {
+      // ひな型・TXTインポートの条件は、端末にあるものとまとめる（同じものはバックアップ側を使う）
+      const mine = prefs.get(key, []) || [];
+      prefs.set(key, mergeList(value, Array.isArray(mine) ? mine : [], (x) => x?.id));
     } else {
       prefs.set(key, value);
     }

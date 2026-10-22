@@ -6,7 +6,7 @@ import {
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import {
-  makeBackup, isBackup, parseBackup, restoreBackup, backupFileName, requestPersistence,
+  makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
 } from './backup.js';
 import * as sync from './sync.js';
@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.6';
+const APP_VERSION = '2026.10.22-5.7';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1763,6 +1763,10 @@ async function loadBackupAs(text, name, { newest = '' } = {}) {
   const src = novels.find((p) => p.id === r.value);
   if (!src) { toast('読み込む小説を選んでください', true); return false; }
   await flush();
+  // ひな型・リンク・アカウントなどの設定も、この端末の設定を消さずにまとめる
+  mergeSharedPrefs(backup.prefs);
+  renderTemplateSelects();
+  buildLinksMenu();
   const now = new Date().toISOString();
   if (r.choice === 'overwrite') {
     await saveVersion(`「${name}」で上書きする前（自動）`, '', true);
