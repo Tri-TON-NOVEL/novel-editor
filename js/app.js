@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.13';
+const APP_VERSION = '2026.10.22-4.14';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -132,12 +132,24 @@ function updateStatus() {
   if (!db.persistent) parts.push('⚠ この環境では端末に保存できません');
   else if (saveError) parts.push('⚠ 保存に失敗しました');
   else if (otherTabEditing) parts.push('⚠ 別のタブでも編集中');
-  else if (dirty) parts.push('保存中…');
-  else if (lastSavedAt) parts.push('保存済み ' + fmtTime(lastSavedAt));
+  else if (dirty) parts.push('端末に保存中…');
+  else if (lastSavedAt) parts.push('端末に保存済み ' + fmtTime(lastSavedAt));
   parts.push('メイン: ' + SITES[project.site].short);
   const s = syncStatusShort();
   if (s) parts.push(s);
   $('status').textContent = parts.join(' ・ ');
+  renderSaveButton();
+}
+
+// 「保存」ボタン：まだ自動バックアップ（全端末で共有）に入っていない変更があれば「保存●」
+function renderSaveButton() {
+  const b = $('sync-save-btn');
+  const unsaved = sync.isDirty();
+  b.textContent = unsaved ? '保存●' : '保存';
+  b.classList.toggle('unsaved', unsaved);
+  const last = prefs.get('lastAutoBackupAt', null);
+  b.title = (unsaved ? 'まだ保存していない変更があります。' : '')
+    + `今の内容を自動バックアップに保存（Ctrl+S／⌘S）${last ? `　最後の保存 ${fmtTime(last)}` : ''}`;
 }
 
 function setCount(id, text) {
@@ -1099,52 +1111,15 @@ async function openFrom(title, { force = false, kind = 'json' } = {}) {
 }
 
 // ---------- 全体（すべての作品・ひな型・設定を1ファイルに） ----------
-// 上書き保存の行き先は、前回「全体」を保存・開いた場所（端末ごとに記録）
-//   file.allTarget = { type: 'gdrive', id, name }／{ type: 'local', name }（ファイルの場所は meta の allFileHandle）
-// iPhone・iPad などファイルを覚えておけない環境では、上書き保存は「名前を付けて保存」と同じ動きになる。
-let allHandle = null;
-
-function rememberAllTarget(r) {
-  if (r?.type === 'gdrive') {
-    prefs.set('file.allTarget', { type: 'gdrive', id: r.id, name: r.name });
-  } else if (r?.type === 'local' && r.handle) {
-    allHandle = r.handle;
-    meta.set('allFileHandle', r.handle).catch(() => {});
-    prefs.set('file.allTarget', { type: 'local', name: r.handle.name });
-  }
-}
+// 「ファイル」は、明示的に好きな場所・名前で保存する／開くときだけに使う（上書き保存は「保存」ボタン＝自動バックアップ）
 
 async function allSaveAs({ force = false } = {}) {
   await flush();
   const { text, count } = await makeBackup();
   const r = await saveTextTo(text, backupFileName(), { title: 'Google ドライブに保存（全体：すべての作品）', force });
   if (!r) return;
-  rememberAllTarget(r);
   prefs.set('lastBackupAt', new Date().toISOString());
   toast(savedMessage(r, `全体（${count}作品・ひな型・設定）`));
-}
-
-async function allSave() {
-  const t = prefs.get('file.allTarget', null);
-  const p = driveProvider();
-  if (t?.type === 'gdrive' && p) {
-    await flush();
-    const { text, count } = await makeBackup();
-    const id = await p.save(text, t.name, t.id);
-    prefs.set('file.allTarget', { ...t, id });
-    prefs.set('lastBackupAt', new Date().toISOString());
-    toast(`全体（${count}作品）を Google ドライブの「${t.name}」に上書き保存しました`);
-    return;
-  }
-  if (t?.type === 'local' && allHandle) {
-    await flush();
-    const { text, count } = await makeBackup();
-    await localFile.write(allHandle, text);
-    prefs.set('lastBackupAt', new Date().toISOString());
-    toast(`全体（${count}作品）を「${allHandle.name}」に上書き保存しました`);
-    return;
-  }
-  return allSaveAs();
 }
 
 // 全体のファイルのほか、以前の版で保存した「作品1つ」の .json も開ける（作品として取り込む）
@@ -1153,9 +1128,6 @@ async function allOpen({ force = false } = {}) {
   if (!src) return;
   if (isEpisodeFile(src.text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「開く」で開いてください', true); return; }
   if (isBackup(src.text)) {
-    // 開いたファイルを、次の上書き保存の行き先にする
-    if (src.source === 'gdrive') rememberAllTarget({ type: 'gdrive', id: src.id, name: src.name });
-    else if (src.handle) rememberAllTarget({ type: 'local', handle: src.handle });
     openRestoreDialog(src.text, src.name);
     return;
   }
@@ -1609,7 +1581,7 @@ function syncStatusShort() {
   if (sync.getError()) return '⚠ 自動バックアップに失敗';
   if (!sync.isChecked()) return '自動バックアップ：確認中';
   const last = prefs.get('lastAutoBackupAt', null);
-  return '自動バックアップ' + (last ? ' ' + fmtTime(last) : ' 有効');
+  return last ? '保存 ' + fmtTime(last) : '自動バックアップ 有効';
 }
 
 function renderSyncState() {
@@ -2657,9 +2629,46 @@ function closeMenus(except) {
   document.querySelectorAll('details.menu[open]').forEach((d) => { if (d !== except) d.open = false; });
 }
 
-// Ctrl+S／⌘S：全体の上書き保存
+// Ctrl+S／⌘S：「保存」ボタンと同じ
 function quickSave() {
-  return allSave();
+  return saveNow();
+}
+
+/**
+ * 「保存」ボタン：今の内容を、全端末で共有する自動バックアップに残す（毎回、新しいバックアップを1つ足す）。
+ * ・保存先が決まっていない → 案内して「設定」→「自動バックアップ」を開く
+ * ・Google ドライブのログイン切れ・フォルダの許可切れ → ログイン（許可）してから続ける
+ * ・他の端末のほうが新しい → 保存せずに「どちらの記録を使うか」を聞く
+ * ・変更がない → 保存しない（最後に保存した時刻を知らせる）
+ * 書いた内容そのものは、これとは別に端末の中へ自動で保存されている。
+ */
+async function saveNow() {
+  await flush();
+  let st = sync.getState();
+  if (st === 'off' || st === 'unsupported') {
+    toast('保存先が決まっていません。「自動バックアップ」の保存先を選んでください（書いた内容は端末の中に自動で保存されています）', true);
+    openSettings('backup');
+    return;
+  }
+  if (st === 'need-login' || st === 'need-permission') {
+    const ok = await sync.resume(); // Google ドライブ（ホーム画面のアプリ）では、ここでページごと Google へ移動する
+    if (!ok) { toast(st === 'need-login' ? 'ログインできませんでした' : '書き込みが許可されませんでした', true); return; }
+    st = sync.getState();
+  }
+  // 他の端末の更新をまだ確かめていない・「あとで」と答えたまま → 先に確かめる
+  if (syncPending || !sync.isChecked()) {
+    await runSyncCheck({ manual: !!syncPending });
+    if (syncPending || !sync.isChecked()) return;
+  }
+  if (!sync.isDirty()) {
+    const last = prefs.get('lastAutoBackupAt', null);
+    toast(`変更はありません${last ? `（最後の保存 ${fmtTime(last)}）` : ''}`);
+    return;
+  }
+  const ok = await sync.backupNow();
+  if (ok) toast(`保存しました（${sync.folderName()}）`);
+  else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください'), true);
+  // 他の端末のほうが新しかったときは、sync.onNewer から確認の画面が出る
 }
 
 const actions = {
@@ -2668,8 +2677,8 @@ const actions = {
   'new-project': createProject,
   settings: () => openSettings(),
   'all-open': () => allOpen(),
-  'all-save': allSave,
   'all-save-as': () => allSaveAs(),
+  'sync-save': () => saveNow(),
   'ep-open': () => epOpen(),
   'ep-save-as': () => epSaveAs(),
   'import-text': importText,
@@ -3080,7 +3089,6 @@ async function init() {
   showProject(p);
 
   requestPersistence();
-  allHandle = await meta.get('allFileHandle').catch(() => null);
 
   // 自動バックアップ（同期）：準備して、他の端末の更新を確認する
   const drive = syncProvider();

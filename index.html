@@ -22,12 +22,13 @@
     <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
     <button type="button" data-action="library">作品一覧</button>
     <button type="button" data-action="new-project">新しい作品</button>
+    <!-- 保存：今の内容を、全端末で共有する自動バックアップに残す（Ctrl+S／⌘S） -->
+    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="今の内容を自動バックアップに保存（Ctrl+S／⌘S）">保存</button>
     <details class="menu">
       <summary>ファイル</summary>
       <div class="menu-list">
         <div class="menu-head">全体（すべての作品）</div>
         <button type="button" data-action="all-open">開く…</button>
-        <button type="button" data-action="all-save" title="Ctrl+S／⌘S">上書き保存</button>
         <button type="button" data-action="all-save-as">名前を付けて保存…</button>
         <div class="menu-head">エピソード（今開いているもの）</div>
         <button type="button" data-action="ep-open">開く…</button>

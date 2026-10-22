@@ -152,6 +152,8 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .menu-list button { border: 0; text-align: left; }
 .menu-list hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .menu-list .menu-label { font-size: 12px; color: var(--muted); padding: 6px 12px 2px; }
+/* 「保存」ボタン：まだ自動バックアップに入っていない変更があるときは目立たせる */
+.actions .sync-save.unsaved { border-color: var(--accent); color: var(--accent); font-weight: 700; }
 .menu-list .menu-head { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
 .menu-list .menu-head:first-child { border-top: 0; margin-top: 0; padding-top: 4px; }
 /* 項目の多いメニュー（ファイル）は、画面からはみ出さないようにスクロールさせる */
