@@ -297,7 +297,7 @@
       </div>
       <div class="report-grid">
         <section class="card">
-          <h2>X（旧Twitter）</h2>
+          <h2><a class="report-site-link" id="report-link-x" data-report-link="x" rel="noopener noreferrer">X（旧Twitter）</a></h2>
           <div class="template-row">
             <select id="tpl-x" aria-label="X のひな型"></select>
             <button type="button" class="tool" data-tpl-apply="x">ひな型を使う</button>
@@ -316,7 +316,7 @@
         </section>
 
         <section class="card">
-          <h2>なろう 活動報告</h2>
+          <h2><a class="report-site-link" id="report-link-narou" data-report-link="narou" rel="noopener noreferrer">なろう 活動報告</a></h2>
           <div class="template-row">
             <select id="tpl-narou" aria-label="活動報告のひな型"></select>
             <button type="button" class="tool" data-tpl-apply="narou">ひな型を使う</button>
@@ -739,6 +739,22 @@
       <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。</p>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
+    </fieldset>
+    <fieldset id="report-link-settings">
+      <legend>活動報告のリンク</legend>
+      <label>X のURL
+        <span class="report-link-row">
+          <input type="text" id="report-url-x" inputmode="url" autocomplete="off" spellcheck="false" placeholder="例：https://x.com/ユーザー名">
+          <button type="button" class="tool" data-report-test="x">開く</button>
+        </span>
+      </label>
+      <label>なろう活動報告のURL
+        <span class="report-link-row">
+          <input type="text" id="report-url-narou" inputmode="url" autocomplete="off" spellcheck="false" placeholder="例：https://mypage.syosetu.com/mypageblog/list/userid/12345/">
+          <button type="button" class="tool" data-report-test="narou">開く</button>
+        </span>
+      </label>
+      <p class="hint">入れると、活動報告の画面の「X（旧Twitter）」「なろう 活動報告」の見出しがリンクになり、押すと別のウインドウで開きます。「リンク」メニューにも出ます（全作品共通）。</p>
     </fieldset>
     </div>
 

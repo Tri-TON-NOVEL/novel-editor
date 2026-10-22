@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.7';
+const APP_VERSION = '2026.10.22-5.8';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2446,6 +2446,33 @@ function links() {
   return prefs.get('links', null) || DEFAULT_LINKS;
 }
 
+// 活動報告のリンク（全作品共通）：活動報告の画面の見出しから開く。「リンク」メニューにも出す
+const REPORT_LINKS = { x: 'X', narou: 'なろう活動報告' };
+
+function reportLinks() {
+  return { x: '', narou: '', ...(prefs.get('reportLinks', {}) || {}) };
+}
+
+function setReportLink(key, value) {
+  prefs.set('reportLinks', { ...reportLinks(), [key]: value.trim() });
+  renderReportLinks();
+}
+
+function renderReportLinks() {
+  const rl = reportLinks();
+  for (const key of Object.keys(REPORT_LINKS)) {
+    const a = $(`report-link-${key}`);
+    const url = normalizeUrl(rl[key]);
+    if (url) {
+      a.href = url;
+      a.title = `${url}（別のウインドウで開く）`;
+    } else {
+      a.removeAttribute('href');
+      a.title = `「設定」→「リンク」で${REPORT_LINKS[key]}の URL を入れると、ここから開けます`;
+    }
+  }
+}
+
 function normalizeUrl(url) {
   const u = (url || '').trim();
   if (!u) return '';
@@ -2466,6 +2493,16 @@ function buildLinksMenu() {
     const b = button(l.name, () => { closeMenus(); openLink(l.url); });
     b.title = l.url;
     list.append(b);
+  }
+  const rl = reportLinks();
+  const reportKeys = Object.keys(REPORT_LINKS).filter((k) => rl[k]);
+  if (reportKeys.length) {
+    list.append(Object.assign(document.createElement('div'), { className: 'menu-head', textContent: '活動報告' }));
+    for (const k of reportKeys) {
+      const b = button(REPORT_LINKS[k], () => { closeMenus(); openLink(rl[k]); });
+      b.title = rl[k];
+      list.append(b);
+    }
   }
   list.append(document.createElement('hr'), button('リンクを編集…', () => {
     closeMenus();
@@ -2724,6 +2761,8 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   renderIphoneMaxSettings();
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
   $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
+  const rl = reportLinks();
+  for (const key of Object.keys(REPORT_LINKS)) $(`report-url-${key}`).value = rl[key];
   // 投稿サイトのアカウント（端末ごと）
   const acc = accounts();
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
@@ -3194,6 +3233,21 @@ function bindEvents() {
     const act = { restore: restoreVersion, copy: copyVersion, delete: deleteVersion }[e.submitter?.value];
     if (v && act) Promise.resolve().then(() => act(v)).catch(fail);
   });
+  // 活動報告のリンク（X・なろう活動報告）
+  for (const key of Object.keys(REPORT_LINKS)) {
+    $(`report-url-${key}`).addEventListener('input', (e) => setReportLink(key, e.target.value));
+  }
+  document.querySelectorAll('[data-report-test]').forEach((b) => b.addEventListener('click', () => {
+    const url = reportLinks()[b.dataset.reportTest];
+    if (url) openLink(url); else toast('URL を入れてください');
+  }));
+  document.querySelectorAll('[data-report-link]').forEach((a) => a.addEventListener('click', (e) => {
+    e.preventDefault();
+    const url = reportLinks()[a.dataset.reportLink];
+    if (url) openLink(url);
+    else toast(`「設定」→「リンク」で${REPORT_LINKS[a.dataset.reportLink]}の URL を入れると、ここから開けます`);
+  }));
+  renderReportLinks();
   $('add-link').addEventListener('click', () => {
     editingLinks.push({ name: '', url: '' });
     renderLinkEditor();
