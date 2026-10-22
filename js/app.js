@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.12';
+const APP_VERSION = '2026.10.22-4.13';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1734,9 +1734,22 @@ async function resolveSyncAttention() {
   await runSyncCheck();
 }
 
-async function openSyncRestore() {
+/**
+ * 保存先のバックアップ（全端末：Win_・Mac_・iPhone_・iPad_・android_ など）の一覧から選ぶ。新しい順、先頭が「最新」。
+ * mode 'sync'    …「他の端末の更新を確認」：選んだバックアップを、作品ごとに新しいほうを使ってこの端末とまとめる（普通は最新を選ぶ）
+ * mode 'restore' …「バックアップから戻す」：選んだバックアップに戻す（次の画面で「まとめる／入れ替える」）
+ */
+async function openSyncRestore(mode = 'restore') {
+  const isSync = mode === 'sync';
+  $('sync-restore-title').textContent = isSync ? '他の端末の記録を読み込む' : 'バックアップから戻す';
+  $('sync-restore-hint').textContent = isSync
+    ? '読み込むバックアップを選んでください（普通は先頭の「最新」）。作品ごとに新しいほうを使って、この端末の記録とまとめます。両方で書き換えた作品は、どちらを使うか聞きます。'
+    + '前の状態にそのまま戻したいときは「バックアップから戻す」を使ってください。'
+    : '戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。';
   const list = $('sync-restore-list');
+  const filter = $('sync-restore-filter');
   list.replaceChildren(li('empty', '読み込み中…'));
+  filter.replaceChildren(new Option('すべての端末', ''));
   $('sync-restore-dialog').showModal();
   let files;
   try {
@@ -1745,17 +1758,35 @@ async function openSyncRestore() {
     $('sync-restore-dialog').close();
     throw e;
   }
-  list.replaceChildren();
-  if (!files.length) { list.append(li('empty', 'まだバックアップはありません')); return; }
-  for (const f of files.slice(0, 300)) {
-    list.append(listItem(f.name, `${fmtTime(new Date(f.at).toISOString())}${f.mine ? '・この端末' : ''}`, [
-      button('選ぶ', async () => {
-        const text = await sync.read(f);
-        $('sync-restore-dialog').close();
-        openRestoreDialog(text, f.name);
-      }),
-    ]));
-  }
+  const keyOf = (f) => f.prefix || '__none__';
+  const prefixes = [...new Set(files.map(keyOf))].sort((a, b) => collator.compare(a, b));
+  for (const p of prefixes) filter.append(new Option(`${p === '__none__' ? '（プレフィックスなし）' : p}（${files.filter((f) => keyOf(f) === p).length}件）`, p));
+  const last = sync.lastBackup()?.name;
+  const render = () => {
+    const shown = files.filter((f) => !filter.value || keyOf(f) === filter.value);
+    list.replaceChildren();
+    if (!shown.length) { list.append(li('empty', 'まだバックアップはありません')); return; }
+    for (const f of shown.slice(0, 300)) {
+      const tags = [fmtTime(new Date(f.at).toISOString())];
+      if (f === files[0]) tags.push('最新');
+      if (f.mine) tags.push('この端末');
+      if (f.name === last) tags.push('前回同期したもの');
+      const act = isSync
+        ? button('読み込む', async () => {
+          $('sync-restore-dialog').close();
+          syncPending = null;
+          await mergeFrom(f);
+        }, f === files[0] ? 'primary' : '')
+        : button('選ぶ', async () => {
+          const text = await sync.read(f);
+          $('sync-restore-dialog').close();
+          openRestoreDialog(text, f.name);
+        });
+      list.append(listItem(f.name, tags.join('・'), [act]));
+    }
+  };
+  filter.onchange = render;
+  render();
 }
 
 async function exportPreSync() {
@@ -3005,7 +3036,7 @@ function bindEvents() {
       toast(ok ? '自動バックアップの保存先に保存しました' : '保存できませんでした：' + (sync.getError() || '保存先を確認してください'), !ok);
     } catch (err) { fail(err); }
   });
-  $('sync-check').addEventListener('click', () => runSyncCheck({ manual: true }).catch(fail));
+  $('sync-check').addEventListener('click', () => openSyncRestore('sync').catch(fail));
   $('sync-restore').addEventListener('click', () => openSyncRestore().catch(fail));
   $('sync-presync').addEventListener('click', () => exportPreSync().catch(fail));
 }

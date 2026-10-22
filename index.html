@@ -338,8 +338,11 @@
 
 <dialog id="sync-restore-dialog">
   <form method="dialog" class="dialog">
-    <h2>バックアップから戻す</h2>
-    <p class="hint">戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。</p>
+    <h2 id="sync-restore-title">バックアップから戻す</h2>
+    <p class="hint" id="sync-restore-hint"></p>
+    <label class="sync-filter">端末（プレフィックス）
+      <select id="sync-restore-filter"></select>
+    </label>
     <ul class="list" id="sync-restore-list"></ul>
     <div class="dialog-foot"><button value="close">閉じる</button></div>
   </form>
@@ -746,7 +749,7 @@
       <p id="sync-status"></p>
       <div class="button-row">
         <button type="button" id="sync-now">今すぐバックアップ</button>
-        <button type="button" id="sync-check">他の端末の更新を確認</button>
+        <button type="button" id="sync-check">他の端末の更新を確認…</button>
         <button type="button" id="sync-restore">バックアップから戻す…</button>
       </div>
       <div class="autobackup-options">

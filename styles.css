@@ -856,6 +856,9 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 #drive-dialog .field-label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 #drive-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; font-weight: 400; }
 #drive-list { max-height: min(45dvh, 360px); overflow-y: auto; }
+.sync-filter { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.sync-filter select { font-weight: 400; }
+#sync-restore-list { max-height: min(50dvh, 420px); overflow-y: auto; }
 .drive-path { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; font-size: 13px; }
 .drive-path button { border: 0; background: transparent; padding: 4px 6px; color: var(--accent); min-height: 32px; }
 .drive-path button:disabled { color: var(--text); font-weight: 700; opacity: 1; }
