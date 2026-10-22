@@ -118,6 +118,9 @@
         </select>
         <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
       </div>
+      <label class="ep-pick-box">章・エピソード
+        <select id="ep-pick" aria-label="編集するエピソード"></select>
+      </label>
       <div class="ep-search">
         <input type="search" id="ep-search" placeholder="検索（本文・タイトル・プロット・メモ）" aria-label="エピソードを検索" autocomplete="off" spellcheck="false" enterkeyhint="search">
       </div>
@@ -141,6 +144,7 @@
         <span class="ep-version">
           <select id="ep-version" aria-label="このエピソードの版"></select>
           <button type="button" class="tool" data-action="ep-version-up" title="今の内容を新しい版として残す">＋ 版を上げる</button>
+          <button type="button" class="tool danger" data-action="ep-version-delete" title="選んでいる版を削除する">この版を削除</button>
         </span>
       </div>
 
@@ -632,16 +636,30 @@
 
     <!-- 表示 -->
     <div class="settings-panel" data-spanel="display" role="tabpanel">
+    <fieldset class="ui-active-pick">
+      <legend>使う表示</legend>
+      <div class="radio-row">
+        <label><input type="radio" name="ui-active" value="simple"> 簡易</label>
+        <label><input type="radio" name="ui-active" value="detail"> 詳細</label>
+      </div>
+      <p class="hint">「簡易」「詳細」の2つの表示を下のタブで決めておき、ここで切り替えます。切り替えるとすぐに反映されます。</p>
+    </fieldset>
+    <div class="ui-prof-tabs" role="tablist" aria-label="編集する表示">
+      <button type="button" role="tab" data-uiprof="simple">簡易</button>
+      <button type="button" role="tab" data-uiprof="detail">詳細</button>
+    </div>
+    <p class="hint ui-prof-note" id="ui-prof-note"></p>
+    <div class="ui-prof-body">
     <fieldset>
-      <legend>表示</legend>
+      <legend>本文</legend>
       <label>本文の書体
-        <select name="font">
+        <select data-uiv="font">
           <option value="serif">明朝体</option>
           <option value="sans">ゴシック体</option>
         </select>
       </label>
       <label>文字サイズ
-        <select name="fontSize">
+        <select data-uiv="fontSize">
           <option value="16">小（16px）</option>
           <option value="18">中（18px）</option>
           <option value="20">大（20px）</option>
@@ -649,15 +667,55 @@
         </select>
       </label>
     </fieldset>
+    <p class="hint">隠しても、機能や内容は消えません（自動保存も続きます）。</p>
+    <fieldset class="checks">
+      <legend>エディター（上のバー）</legend>
+      <label><input type="checkbox" data-ui="editor.new"> 新しい作品</label>
+      <label><input type="checkbox" data-ui="editor.file"> ファイル</label>
+      <label><input type="checkbox" data-ui="editor.links"> リンク</label>
+      <p class="hint">「作品一覧」「設定」「戻す」「やり直す」「保存」は、いつも表示します。</p>
+    </fieldset>
+    <fieldset class="checks">
+      <legend>小説全体（目次）</legend>
+      <label><input type="checkbox" data-ui="novel.synopsis"> あらすじ</label>
+      <label><input type="checkbox" data-ui="novel.outline"> 全体プロット</label>
+      <label><input type="checkbox" data-ui="novel.world"> 設定</label>
+      <label><input type="checkbox" data-ui="novel.characters"> 登場人物</label>
+      <label><input type="checkbox" data-ui="novel.report"> 活動報告</label>
+      <label><input type="checkbox" data-ui="novel.workcodes"> 投稿サイトとの対応</label>
+    </fieldset>
+    <fieldset>
+      <legend>章・エピソード（目次）</legend>
+      <label>表し方
+        <select data-uiv="episodes">
+          <option value="full">全項目（章・並べ替え・検索・一覧）</option>
+          <option value="list">リスト（エピソードを選ぶプルダウンだけ）</option>
+        </select>
+      </label>
+      <p class="hint">「リスト」では、プルダウンで選んだエピソードを編集します。章・話の追加や並べ替え・検索は「全項目」で行います。</p>
+    </fieldset>
     <fieldset class="checks" id="show-settings">
       <legend>入力欄の表示（エピソード画面）</legend>
-      <p class="hint">タイトルと本文は常に表示します。非表示にしても内容は消えず、自動保存も続きます。チェックを変えるとすぐに反映されます（端末ごとの設定）。</p>
+      <p class="hint">タイトルと本文は常に表示します。</p>
       <label><input type="checkbox" data-ui="show.foreword"> 前書き</label>
       <label><input type="checkbox" data-ui="show.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
     </fieldset>
-    <p class="hint">下のボタンは、隠しても機能や内容は消えません。チェックを変えるとすぐに反映されます（端末ごとの設定）。</p>
+    <fieldset class="checks">
+      <legend>文字数ラベル</legend>
+      <label><input type="checkbox" data-ui="count.novel-title"> 小説タイトル</label>
+      <label><input type="checkbox" data-ui="count.ep-title"> エピソードタイトル</label>
+      <label><input type="checkbox" data-ui="count.body"> 本文</label>
+      <label><input type="checkbox" data-ui="count.foreword"> 前書き</label>
+      <label><input type="checkbox" data-ui="count.afterword"> 後書き</label>
+      <label><input type="checkbox" data-ui="count.plot"> プロット</label>
+      <label><input type="checkbox" data-ui="count.free-memo"> フリーメモ</label>
+      <label><input type="checkbox" data-ui="count.synopsis"> あらすじ</label>
+      <label><input type="checkbox" data-ui="count.x"> X の投稿文</label>
+      <label><input type="checkbox" data-ui="count.narou-report-title"> 活動報告のタイトル</label>
+      <label><input type="checkbox" data-ui="count.narou-report-body"> 活動報告の本文</label>
+    </fieldset>
     <fieldset class="checks">
       <legend>コピーボタン</legend>
       <label><input type="checkbox" data-ui="copy.ep-title"> エピソードタイトル</label>
@@ -682,6 +740,7 @@
       <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
       <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
     </fieldset>
+    </div>
     <fieldset id="iphone-max" hidden>
       <legend>iPhone：最大化したときの入力欄の高さ</legend>
       <p class="hint">キーボードの上の部分（予測変換など）に入力欄が隠れるときは、高さを決めてください。変えるとすぐに反映されます（この端末だけ）。</p>

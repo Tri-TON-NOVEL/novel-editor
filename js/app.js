@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.10';
+const APP_VERSION = '2026.10.23-5.11';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -485,7 +485,24 @@ function jumpToSearchHit(i) {
   toast(`${h.label}（${searchCursor.n + 1}／${hits.length}件目）${hits.length > 1 ? '　もう一度押すと次へ' : ''}`);
 }
 
+// 「表示」の章・エピソードを「リスト」にしたとき：エピソードを選ぶプルダウン（章ごとにまとめる）
+function renderEpisodePick() {
+  const sel = $('ep-pick');
+  const groups = episodeGroups().filter((g) => g.indexes.length);
+  const opt = (i) => new Option(`${i + 1}. ${episodeName(project.episodes[i], project.site)}`, String(i));
+  sel.replaceChildren(...groups.map((g) => {
+    if (!project.chapters.length) return null;
+    const og = document.createElement('optgroup');
+    og.label = g.chapter ? chapterName(g.chapter) : '未分類';
+    og.append(...g.indexes.map(opt));
+    return og;
+  }).filter(Boolean));
+  if (!project.chapters.length) sel.append(...project.episodes.map((_, i) => opt(i)));
+  sel.value = String(epIndex);
+}
+
 function renderEpisodeList() {
+  renderEpisodePick();
   const list = $('episode-list');
   list.replaceChildren();
   if (epSearch) { renderSearchResults(list); return; }
@@ -1376,12 +1393,54 @@ async function saveEpisodeVersion(name, ep = episode()) {
   return v;
 }
 
-async function renderEpisodeVersions() {
+// 版の一覧。shownId … 今その版の内容を表示しているとき（一覧で選んで切り替えたとき）の版
+let versionRenderSeq = 0;
+async function renderEpisodeVersions(shownId = '') {
   const sel = $('ep-version');
+  const seq = ++versionRenderSeq;
   const list = await episodeVersions();
+  if (seq !== versionRenderSeq) return; // あとから呼ばれた描画を優先する
   sel.replaceChildren(new Option(list.length ? `今の内容（版 ${list.length}件）` : '版はまだありません', ''));
   for (const v of list) sel.append(new Option(`${v.name}　${fmtTime(v.createdAt)}　${v.chars.toLocaleString()}字`, v.id));
-  sel.value = '';
+  sel.value = list.some((v) => v.id === shownId) ? shownId : '';
+}
+
+// 一覧で版を選んだら、その版の内容に切り替えるだけ（新しい版は作らない。残したいときは「版を上げる」）
+async function switchEpisodeVersion(id) {
+  const ep = episode();
+  const list = await episodeVersions();
+  const v = list.find((x) => x.id === id);
+  if (!v) return;
+  const now = JSON.stringify(episodeSnapshot(ep));
+  const saved = list.some((x) => JSON.stringify(x.data) === now);
+  if (!saved && !(await ask(`今の内容は、まだ版に残っていません。\n「${v.name}」に切り替えると、今の内容は消えます（残すときは、キャンセルして「＋ 版を上げる」を押してください）。\n切り替えますか？`, { ok: '切り替える', danger: true }))) {
+    await renderEpisodeVersions();
+    return;
+  }
+  applyEpisodeSnapshot(ep, v.data);
+  touchEpisode(ep);
+  changed();
+  showEpisode();
+  await renderEpisodeVersions(v.id);
+  toast(`「${episodeName(ep)}」を ${v.name} の内容にしました`);
+}
+
+// 「この版を削除」：一覧で選んでいる版。選んでいなければ、どの版を消すか選んでもらう
+async function deleteEpisodeVersion() {
+  const list = await episodeVersions();
+  if (!list.length) { toast('このエピソードには版がありません'); return; }
+  let v = list.find((x) => x.id === $('ep-version').value);
+  if (!v) {
+    const r = await choose('削除する版を選んでください。', [{ value: 'delete', label: '削除', danger: true }],
+      { select: { label: '版', options: list.map((x) => ({ value: x.id, label: `${x.name}　${fmtTime(x.createdAt)}　${x.chars.toLocaleString()}字` })) } });
+    if (!r) return;
+    v = list.find((x) => x.id === r.value);
+    if (!v) return;
+  }
+  if (!(await ask(`版「${v.name}」（${fmtTime(v.createdAt)}）を削除しますか？\n削除した版は元に戻せません。今の内容はそのままです。`, { ok: '削除する', danger: true }))) return;
+  await versions.remove(v.id);
+  await renderEpisodeVersions();
+  toast(`版「${v.name}」を削除しました`);
 }
 
 async function episodeVersionUp() {
@@ -2649,24 +2708,100 @@ function openWorkCodes() {
 }
 
 function applyPrefs() {
-  document.documentElement.dataset.font = prefs.get('font', 'serif');
-  document.documentElement.style.setProperty('--body-size', prefs.get('fontSize', '18') + 'px');
+  document.documentElement.dataset.font = uiValue('font', 'serif');
+  document.documentElement.style.setProperty('--body-size', uiValue('fontSize', '18') + 'px');
   applyUiPrefs();
 }
 
-// ---------- 入力欄・ボタンの表示（端末ごとの設定。作品データには入れない） ----------
-// 'show.foreword' などのキー。値が false のときだけ隠す（未設定は表示）
+// ---------- 表示（「簡易」「詳細」の2つを登録して切り替える。作品データには入れない） ----------
+// prefs 'uiProfiles' = { simple: {…}, detail: {…} }、'uiActive' = 'simple' | 'detail'
+// 各表示の中身：'show.foreword' などのチェックは false のときだけ隠す（未設定は表示）。font・fontSize・episodes は値。
+const UI_PROFILES = { simple: '簡易', detail: '詳細' };
+// 「簡易」の初期値（最初に作るときだけ使う。あとは自由に変えられる）
+const SIMPLE_PRESET = {
+  'show.foreword': false, 'show.afterword': false,
+  'copy.ep-title': false, 'copy.foreword': false, 'copy.afterword': false, 'copy.free-memo': false, 'copy.main-to-sub': false,
+  'max.title': false, 'max.foreword': false, 'max.afterword': false,
+  'editor.new': false, 'editor.links': false,
+  'novel.report': false, 'novel.workcodes': false,
+  'count.novel-title': false, 'count.ep-title': false, 'count.foreword': false, 'count.afterword': false, 'count.plot': false, 'count.free-memo': false,
+  episodes: 'list',
+};
+let uiEditing = null; // 設定画面で編集している表示
 
-function uiPref(key) {
-  return prefs.get('ui', {})[key] !== false;
+function uiProfiles() {
+  let all = prefs.get('uiProfiles', null);
+  if (!all || typeof all !== 'object') {
+    // 以前の版の表示設定は「詳細」に引き継ぐ
+    const detail = { ...(prefs.get('ui', {}) || {}), font: prefs.get('font', 'serif'), fontSize: prefs.get('fontSize', '18'), episodes: 'full' };
+    all = { simple: { ...detail, ...SIMPLE_PRESET }, detail };
+    prefs.set('uiProfiles', all);
+  }
+  return { simple: {}, detail: {}, ...all };
 }
 
-function setUiPref(key, on) {
-  prefs.set('ui', { ...prefs.get('ui', {}), [key]: on });
-  applyUiPrefs();
+function uiActive() {
+  const a = prefs.get('uiActive', 'detail');
+  return a in UI_PROFILES ? a : 'detail';
 }
+
+function uiPref(key, profile = uiActive()) {
+  return uiProfiles()[profile][key] !== false;
+}
+
+function uiValue(key, fallback, profile = uiActive()) {
+  return uiProfiles()[profile][key] ?? fallback;
+}
+
+function setUiPref(key, value, profile = uiEditing || uiActive()) {
+  const all = uiProfiles();
+  all[profile] = { ...all[profile], [key]: value };
+  prefs.set('uiProfiles', all);
+  if (profile === uiActive()) applyPrefs();
+}
+
+function setUiActive(profile) {
+  prefs.set('uiActive', profile);
+  applyPrefs();
+  renderUiProfileEditor(profile); // 選んだ表示を、そのまま編集できるようにする
+  toast(`表示を「${UI_PROFILES[profile]}」にしました`);
+}
+
+// 設定画面の「表示」タブ：編集している表示の値を入れる
+function renderUiProfileEditor(profile = uiEditing || uiActive()) {
+  uiEditing = profile;
+  const active = uiActive();
+  document.querySelectorAll('[name="ui-active"]').forEach((r) => { r.checked = r.value === active; });
+  document.querySelectorAll('[data-uiprof]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.uiprof === profile)));
+  document.querySelectorAll('[data-ui]').forEach((c) => { c.checked = uiPref(c.dataset.ui, profile); });
+  const defaults = { font: 'serif', fontSize: '18', episodes: 'full' };
+  document.querySelectorAll('[data-uiv]').forEach((s) => { s.value = String(uiValue(s.dataset.uiv, defaults[s.dataset.uiv], profile)); });
+  $('ui-prof-note').textContent = profile === active
+    ? `「${UI_PROFILES[profile]}」の表示を編集しています（今使っている表示なので、変えるとすぐに反映されます）。`
+    : `「${UI_PROFILES[profile]}」の表示を編集しています（今は「${UI_PROFILES[active]}」を使っているので、上で「${UI_PROFILES[profile]}」を選ぶと反映されます）。`;
+}
+
+// 表示・非表示を切り替える部品（キー → 要素）
+const UI_TARGETS = {
+  'editor.new': () => document.querySelector('.actions [data-action="new-project"]'),
+  'editor.file': () => document.querySelector('.actions details.menu:not(#links-menu)'),
+  'editor.links': () => $('links-menu'),
+  'novel.synopsis': () => document.querySelector('.nav-item[data-view="synopsis"]'),
+  'novel.outline': () => document.querySelector('.nav-item[data-view="outline"]'),
+  'novel.world': () => document.querySelector('.nav-item[data-view="world"]'),
+  'novel.characters': () => document.querySelector('.nav-item[data-view="characters"]'),
+  'novel.report': () => document.querySelector('.nav-item[data-view="report"]'),
+  'novel.workcodes': () => $('work-codes'),
+  ...Object.fromEntries(['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'x', 'narou-report-title', 'narou-report-body']
+    .map((k) => ['count.' + k, () => $('count-' + k)])),
+};
 
 function applyUiPrefs() {
+  for (const [key, target] of Object.entries(UI_TARGETS)) target()?.classList.toggle('ui-off', !uiPref(key));
+  // 隠した画面を開いていたら、エピソードの画面へ
+  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', report: 'novel.report' }[view];
+  if (viewKey && project && !uiPref(viewKey)) setView('episode');
+  document.body.classList.toggle('ep-list-mode', uiValue('episodes', 'full') === 'list');
   const cls = document.body.classList;
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
@@ -2785,8 +2920,7 @@ function selectSettingsTab(name) {
 
 function openSettings(tab = prefs.get('settingsTab', 'display')) {
   const form = $('settings-form');
-  form.font.value = prefs.get('font', 'serif');
-  form.fontSize.value = prefs.get('fontSize', '18');
+  renderUiProfileEditor(uiActive()); // 開いたときは、今使っている表示を編集する
   form.autoBackupInterval.value = String(sync.intervalMin());
   form.autoBackupKeep.value = String(sync.keepCount());
   renderFileDestination();
@@ -2817,7 +2951,6 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   }
   editingLinks = structuredClone(links());
   renderLinkEditor();
-  document.querySelectorAll('[data-ui]').forEach((c) => { c.checked = uiPref(c.dataset.ui); });
   selectSettingsTab(tab);
   $('settings-dialog').showModal();
 }
@@ -2867,8 +3000,6 @@ function commitProviderSetting(p, key, value) {
 
 function bindSettingsInputs() {
   const form = $('settings-form');
-  form.font.addEventListener('change', () => { prefs.set('font', form.font.value); applyPrefs(); });
-  form.fontSize.addEventListener('change', () => { prefs.set('fontSize', form.fontSize.value); applyPrefs(); });
   form.autoBackupInterval.addEventListener('change', () => {
     prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || sync.DEFAULT_INTERVAL_MIN);
     renderSyncState();
@@ -2969,6 +3100,7 @@ const actions = {
   'add-episode': () => addEpisode(),
   'add-chapter': addChapterFromList,
   'ep-version-up': episodeVersionUp,
+  'ep-version-delete': deleteEpisodeVersion,
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,
   'open-import': () => importScreen.open(),
@@ -3224,6 +3356,10 @@ function bindEvents() {
   }
   // 表示・ボタンの設定はチェックした時点で反映・保存する
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
+  document.querySelectorAll('[data-uiv]').forEach((s) => s.addEventListener('change', () => setUiPref(s.dataset.uiv, s.value)));
+  document.querySelectorAll('[name="ui-active"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) setUiActive(r.value); }));
+  document.querySelectorAll('[data-uiprof]').forEach((b) => b.addEventListener('click', () => renderUiProfileEditor(b.dataset.uiprof)));
+  $('ep-pick').addEventListener('change', (e) => selectEpisode(Number(e.target.value)));
   $('iphone-max-mode').addEventListener('change', saveIphoneMaxSettings);
   $('iphone-max-px').addEventListener('change', saveIphoneMaxSettings);
   // 別のタブで同じ作品が保存されたら知らせる
@@ -3255,8 +3391,7 @@ function bindEvents() {
   renderSortControls();
   $('ep-version').addEventListener('change', (e) => {
     const id = e.target.value;
-    e.target.value = '';
-    if (id) openVersion(id).catch(fail);
+    if (id) switchEpisodeVersion(id).catch(fail);
   });
   document.querySelectorAll('[data-stab]').forEach((b) => b.addEventListener('click', () => selectSettingsTab(b.dataset.stab)));
   bindDialog('version-dialog');

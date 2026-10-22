@@ -218,6 +218,15 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .report-site-link { color: inherit; text-decoration: none; }
 .report-site-link[href] { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
 .report-site-link[href]::after { content: " ↗"; font-size: .8em; }
+/* 設定 → 表示：簡易・詳細 */
+.radio-row { display: flex; gap: 18px; flex-wrap: wrap; }
+.dialog .radio-row label { flex-direction: row; align-items: center; gap: 6px; font-size: 15px; font-weight: 700; }
+.radio-row input { width: 20px; height: 20px; accent-color: var(--accent); }
+.ui-prof-tabs { display: flex; gap: 0; border-bottom: 1px solid var(--border); }
+.ui-prof-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; background: var(--bg); margin-right: 4px; padding: 6px 18px; color: var(--muted); }
+.ui-prof-tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); font-weight: 700; border-color: var(--accent); }
+.ui-prof-note { margin-top: -4px; }
+.ui-prof-body { display: flex; flex-direction: column; gap: 12px; }
 .link-role { font-size: 11px; color: var(--muted); white-space: nowrap; padding: 0 4px; }
 .link-btn { border: 0; background: transparent; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; font-size: inherit; cursor: pointer; }
 
@@ -372,6 +381,13 @@ body.resizing { cursor: col-resize; user-select: none; }
 .pane-side .field.grow { min-height: 80px; }
 
 /* 入力欄・ボタンの表示切り替え（設定 → 表示／ボタン） */
+/* 「表示」で隠した部品 */
+.ui-off { display: none !important; }
+/* 章・エピソード：「リスト」はプルダウンだけ */
+.ep-pick-box { display: none; }
+body.ep-list-mode .ep-pick-box { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+body.ep-list-mode .ep-pick-box select { font-size: 16px; font-weight: 400; padding: 8px; width: 100%; }
+body.ep-list-mode .nav-head, body.ep-list-mode .ep-sort, body.ep-list-mode .ep-search, body.ep-list-mode #episode-list { display: none !important; }
 body.hide-foreword [data-field="foreword"],
 body.hide-afterword [data-field="afterword"],
 body.hide-plot [data-field="plot"],

@@ -9,7 +9,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：5.10（`2026.10.22-5.10`）
+- **バージョン**：5.11（`2026.10.23-5.11`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **使い方の詳細**：[docs/使い方.md](docs/使い方.md)
 
