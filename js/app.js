@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.8';
+const APP_VERSION = '2026.10.22-5.9';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2428,12 +2428,6 @@ function renderTemplateList() {
   }
 }
 
-function openX() {
-  const text = project.reports.x;
-  if (!text) { toast('投稿文が空です'); return; }
-  window.open('https://x.com/intent/post?text=' + encodeURIComponent(text), '_blank', 'noopener');
-}
-
 // ---------- リンク（よく使うサイト。全作品共通） ----------
 
 const DEFAULT_LINKS = [
@@ -2442,33 +2436,51 @@ const DEFAULT_LINKS = [
   { name: 'みてみん', url: 'https://mitemin.net/' },
 ];
 
+// 活動報告で開くリンク（role つき）。「リンク」の一覧に必ず入っていて、消せない（URL は空でもよい）
+const REPORT_LINKS = {
+  x: { name: 'X', url: 'https://x.com/home' },
+  narou: { name: 'なろう活動報告', url: '' },
+};
+
 function links() {
-  return prefs.get('links', null) || DEFAULT_LINKS;
+  const saved = prefs.get('links', null);
+  const list = (Array.isArray(saved) ? saved : DEFAULT_LINKS).map((l) => ({ ...l }));
+  // 同じ用途のリンクは1つだけ。ないものは足す（5.8 の「活動報告のリンク」の設定があれば、その URL を使う）
+  const old = prefs.get('reportLinks', {}) || {};
+  const seen = new Set();
+  const out = list.filter((l) => {
+    if (!l.role) return true;
+    if (!REPORT_LINKS[l.role] || seen.has(l.role)) return false;
+    seen.add(l.role);
+    return true;
+  });
+  for (const [role, d] of Object.entries(REPORT_LINKS)) {
+    if (!seen.has(role)) out.push({ name: d.name, url: normalizeUrl(old[role]) || d.url, role });
+  }
+  return out;
 }
 
-// 活動報告のリンク（全作品共通）：活動報告の画面の見出しから開く。「リンク」メニューにも出す
-const REPORT_LINKS = { x: 'X', narou: 'なろう活動報告' };
-
-function reportLinks() {
-  return { x: '', narou: '', ...(prefs.get('reportLinks', {}) || {}) };
+function reportLink(role) {
+  return links().find((l) => l.role === role)?.url || '';
 }
 
-function setReportLink(key, value) {
-  prefs.set('reportLinks', { ...reportLinks(), [key]: value.trim() });
-  renderReportLinks();
+// 活動報告の「X を開く」「なろう活動報告を開く」と見出し：「リンク」に入れた URL を開くだけ
+function openReportLink(role) {
+  const url = reportLink(role);
+  if (url) openLink(url);
+  else toast(`「設定」→「リンク」で「${REPORT_LINKS[role].name}」の URL を入れてください`);
 }
 
 function renderReportLinks() {
-  const rl = reportLinks();
-  for (const key of Object.keys(REPORT_LINKS)) {
-    const a = $(`report-link-${key}`);
-    const url = normalizeUrl(rl[key]);
+  for (const role of Object.keys(REPORT_LINKS)) {
+    const a = $(`report-link-${role}`);
+    const url = normalizeUrl(reportLink(role));
     if (url) {
       a.href = url;
       a.title = `${url}（別のウインドウで開く）`;
     } else {
       a.removeAttribute('href');
-      a.title = `「設定」→「リンク」で${REPORT_LINKS[key]}の URL を入れると、ここから開けます`;
+      a.title = `「設定」→「リンク」で「${REPORT_LINKS[role].name}」の URL を入れると、ここから開けます`;
     }
   }
 }
@@ -2490,19 +2502,11 @@ function buildLinksMenu() {
   const all = links();
   if (!all.length) list.append(Object.assign(document.createElement('div'), { className: 'menu-label', textContent: 'リンクがありません' }));
   for (const l of all) {
-    const b = button(l.name, () => { closeMenus(); openLink(l.url); });
-    b.title = l.url;
+    const b = l.url
+      ? button(l.name, () => { closeMenus(); openLink(l.url); })
+      : button(`${l.name}（URL 未設定）`, () => { closeMenus(); openSettings('links'); });
+    b.title = l.url || '押すと「設定」→「リンク」を開きます';
     list.append(b);
-  }
-  const rl = reportLinks();
-  const reportKeys = Object.keys(REPORT_LINKS).filter((k) => rl[k]);
-  if (reportKeys.length) {
-    list.append(Object.assign(document.createElement('div'), { className: 'menu-head', textContent: '活動報告' }));
-    for (const k of reportKeys) {
-      const b = button(REPORT_LINKS[k], () => { closeMenus(); openLink(rl[k]); });
-      b.title = rl[k];
-      list.append(b);
-    }
   }
   list.append(document.createElement('hr'), button('リンクを編集…', () => {
     closeMenus();
@@ -2515,7 +2519,7 @@ function renderLinkEditor() {
   const list = $('link-list');
   list.replaceChildren();
   editingLinks.forEach((l, i) => {
-    const name = Object.assign(document.createElement('input'), { type: 'text', value: l.name, placeholder: 'サイト名', autocomplete: 'off' });
+    const name = Object.assign(document.createElement('input'), { type: 'text', value: l.name, placeholder: l.role ? REPORT_LINKS[l.role].name : 'サイト名', autocomplete: 'off' });
     // type="url" だと「https://」なしの入力で保存できなくなるため text にする（保存時に補う）
     const url = Object.assign(document.createElement('input'), { type: 'text', inputMode: 'url', value: l.url, placeholder: 'https://', autocomplete: 'off', spellcheck: false });
     name.setAttribute('aria-label', 'サイト名');
@@ -2534,12 +2538,16 @@ function renderLinkEditor() {
       button('開く', () => { if (l.url.trim()) openLink(l.url); else toast('URL を入れてください'); }, 'tool'),
       button('↑', () => move(-1), 'tool'),
       button('↓', () => move(1), 'tool'),
-      button('削除', async () => {
-        if (!(await ask(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`, { danger: true }))) return;
-        editingLinks.splice(i, 1);
-        commitLinks();
-        renderLinkEditor();
-      }, 'tool danger'));
+      // 活動報告で使うリンクは消せない（URL を空にすれば使わない）
+      l.role
+        ? Object.assign(document.createElement('span'), { className: 'link-role', textContent: '活動報告用', title: '活動報告の画面のボタン・見出しから開くリンクです（削除はできません）' })
+        : button('削除', async () => {
+          if (!(await ask(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`, { danger: true }))) return;
+          editingLinks.splice(i, 1);
+          commitLinks();
+          renderLinkEditor();
+        }, 'tool danger'));
+    if (l.role) item.classList.add('report-role');
     list.append(item);
   });
 }
@@ -2761,8 +2769,6 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   renderIphoneMaxSettings();
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
   $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
-  const rl = reportLinks();
-  for (const key of Object.keys(REPORT_LINKS)) $(`report-url-${key}`).value = rl[key];
   // 投稿サイトのアカウント（端末ごと）
   const acc = accounts();
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
@@ -2808,9 +2814,10 @@ function renderFileDestination() {
 // リンク：入力中の行（URL が空のもの）は一覧に入れず、URL が入った行だけを残す
 function commitLinks() {
   prefs.set('links', editingLinks
-    .map((l) => ({ name: l.name.trim(), url: normalizeUrl(l.url) }))
-    .filter((l) => l.url)
-    .map((l) => ({ ...l, name: l.name || l.url })));
+    .map((l) => ({ name: l.name.trim(), url: normalizeUrl(l.url), ...(l.role ? { role: l.role } : {}) }))
+    .filter((l) => l.url || l.role)
+    .map((l) => ({ ...l, name: l.name || (l.role ? REPORT_LINKS[l.role].name : l.url) })));
+  renderReportLinks();
 }
 
 function commitAccounts() {
@@ -2944,7 +2951,8 @@ const actions = {
   'toggle-sort-dir': () => setEpisodeSort({ dir: epSort.dir === 'asc' ? 'desc' : 'asc' }),
   'project-version-save': openVersionSave,
   'manage-templates': () => { renderTemplateList(); $('templates-dialog').showModal(); },
-  'open-x': openX,
+  'open-x': () => openReportLink('x'),
+  'open-narou-report': () => openReportLink('narou'),
   'auto-indent': runAutoIndent,
   replace: openReplace,
   undo: () => undoRedo('undo'),
@@ -3233,19 +3241,10 @@ function bindEvents() {
     const act = { restore: restoreVersion, copy: copyVersion, delete: deleteVersion }[e.submitter?.value];
     if (v && act) Promise.resolve().then(() => act(v)).catch(fail);
   });
-  // 活動報告のリンク（X・なろう活動報告）
-  for (const key of Object.keys(REPORT_LINKS)) {
-    $(`report-url-${key}`).addEventListener('input', (e) => setReportLink(key, e.target.value));
-  }
-  document.querySelectorAll('[data-report-test]').forEach((b) => b.addEventListener('click', () => {
-    const url = reportLinks()[b.dataset.reportTest];
-    if (url) openLink(url); else toast('URL を入れてください');
-  }));
+  // 活動報告の見出し（X・なろう活動報告）：「リンク」に入れた URL を開く
   document.querySelectorAll('[data-report-link]').forEach((a) => a.addEventListener('click', (e) => {
     e.preventDefault();
-    const url = reportLinks()[a.dataset.reportLink];
-    if (url) openLink(url);
-    else toast(`「設定」→「リンク」で${REPORT_LINKS[a.dataset.reportLink]}の URL を入れると、ここから開けます`);
+    openReportLink(a.dataset.reportLink);
   }));
   renderReportLinks();
   $('add-link').addEventListener('click', () => {

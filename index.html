@@ -308,7 +308,7 @@
               <label for="x-text">投稿文</label>
               <span class="count" id="count-x"></span>
               <span class="spacer"></span>
-              <button type="button" class="tool" data-action="open-x">X で開く</button>
+              <button type="button" class="tool" data-action="open-x" title="「リンク」の X の URL を開きます">X を開く</button>
               <button type="button" class="copy" data-copy="x-text">コピー</button>
             </div>
             <textarea id="x-text" spellcheck="false" placeholder="X に投稿する文章"></textarea>
@@ -327,6 +327,7 @@
               <label for="narou-report-title">タイトル</label>
               <span class="count" id="count-narou-report-title"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-action="open-narou-report" title="「リンク」のなろう活動報告の URL を開きます">なろう活動報告を開く</button>
               <button type="button" class="copy" data-copy="narou-report-title">コピー</button>
             </div>
             <input id="narou-report-title" type="text" autocomplete="off" placeholder="活動報告のタイトル">
@@ -736,25 +737,10 @@
     <div class="settings-panel" data-spanel="links" role="tabpanel" hidden>
     <fieldset id="link-settings">
       <legend>リンク（よく使うサイト）</legend>
-      <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。</p>
+      <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。
+        「活動報告用」の X・なろう活動報告は、活動報告の画面の「X を開く」「なろう活動報告を開く」ボタンと見出しで開くリンクです（削除はできません。URL を自分のページに変えられます）。</p>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
-    </fieldset>
-    <fieldset id="report-link-settings">
-      <legend>活動報告のリンク</legend>
-      <label>X のURL
-        <span class="report-link-row">
-          <input type="text" id="report-url-x" inputmode="url" autocomplete="off" spellcheck="false" placeholder="例：https://x.com/ユーザー名">
-          <button type="button" class="tool" data-report-test="x">開く</button>
-        </span>
-      </label>
-      <label>なろう活動報告のURL
-        <span class="report-link-row">
-          <input type="text" id="report-url-narou" inputmode="url" autocomplete="off" spellcheck="false" placeholder="例：https://mypage.syosetu.com/mypageblog/list/userid/12345/">
-          <button type="button" class="tool" data-report-test="narou">開く</button>
-        </span>
-      </label>
-      <p class="hint">入れると、活動報告の画面の「X（旧Twitter）」「なろう 活動報告」の見出しがリンクになり、押すと別のウインドウで開きます。「リンク」メニューにも出ます（全作品共通）。</p>
     </fieldset>
     </div>
 
