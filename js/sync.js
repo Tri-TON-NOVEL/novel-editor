@@ -311,6 +311,16 @@ export function markChecked(seenEntry = null) {
   listener();
 }
 
+// バックアップから小説を読み込んだ（上書き・新小説）。そのバックアップを「前回同期したもの」として記録し、確認済みにする。
+// 読み込んだ内容は、次の自動バックアップ（「保存」）で他の端末にも届くよう、変更ありにする
+export function markLoaded(name) {
+  const parsed = parseName(name || '');
+  if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
+  checked = true;
+  markDirty();
+  listener();
+}
+
 /**
  * バックアップを読み込んで、作品ごとにまとめる。
  * onConflict(local, remote) … 両方で書き換えた作品について、'remote' か 'local' を返す

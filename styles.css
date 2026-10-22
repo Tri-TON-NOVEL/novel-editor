@@ -152,6 +152,8 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .menu-list button { border: 0; text-align: left; }
 .menu-list hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; width: 100%; }
 .menu-list .menu-label { font-size: 12px; color: var(--muted); padding: 6px 12px 2px; }
+/* 「保存」ボタン：「設定」の右に、ボタンの間隔2つ分ほど離して置く */
+.actions .sync-save { margin-left: 16px; }
 /* 「保存」ボタン：まだ自動バックアップに入っていない変更があるときは目立たせる */
 .actions .sync-save.unsaved { border-color: var(--accent); color: var(--accent); font-weight: 700; }
 .menu-list .menu-head { font-size: 12px; font-weight: 700; color: var(--muted); padding: 8px 12px 2px; border-top: 1px solid var(--border); margin-top: 4px; }
@@ -371,6 +373,7 @@ body.hide-max-plot [data-max="plot"], body.hide-max-memo [data-max="memo"] { dis
 
 /* 入力欄の最大化 */
 .max-btn { min-width: 34px; }
+.jump-btn { min-width: 30px; padding-left: 6px; padding-right: 6px; } /* 入力欄の一番上・一番下へ */
 .maximized {
   position: fixed;
   inset: auto;
@@ -871,3 +874,5 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .drive-list .drive-folder:hover { background: var(--hover); }
 .drive-list .drive-folder .go { margin-left: auto; color: var(--muted); }
 .ask-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; }
+.ask-dialog .ask-select { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.ask-dialog .ask-select select { font-size: 16px; font-weight: 400; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }

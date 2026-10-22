@@ -22,8 +22,6 @@
     <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
     <button type="button" data-action="library">作品一覧</button>
     <button type="button" data-action="new-project">新しい作品</button>
-    <!-- 保存：今の内容を、全端末で共有する自動バックアップに残す（Ctrl+S／⌘S） -->
-    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="今の内容を自動バックアップに保存（Ctrl+S／⌘S）">保存</button>
     <details class="menu">
       <summary>ファイル</summary>
       <div class="menu-list">
@@ -45,6 +43,8 @@
       <div class="menu-list" id="links-menu-list"></div>
     </details>
     <button type="button" data-action="settings">設定</button>
+    <!-- 保存：今の内容を、全端末で共有する自動バックアップに残す（Ctrl+S／⌘S）。一番右に、少し離して置く -->
+    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="今の内容を自動バックアップに保存（Ctrl+S／⌘S）">保存</button>
   </nav>
   <div class="status" id="status" aria-live="polite"></div>
   <button type="button" class="warn" id="sync-attention" data-action="sync-attention" hidden></button>
@@ -163,6 +163,8 @@
               <span class="spacer"></span>
               <button type="button" class="tool max-btn" data-max="body" aria-label="本文を最大化" title="最大化">⤢</button>
               <button type="button" class="copy" data-copy="body">コピー</button>
+              <button type="button" class="tool jump-btn" data-jump="body" data-to="top" title="本文の一番上へ" aria-label="本文の一番上へ">↑</button>
+              <button type="button" class="tool jump-btn" data-jump="body" data-to="bottom" title="本文の一番下へ" aria-label="本文の一番下へ">↓</button>
             </div>
             <textarea id="body" spellcheck="false" placeholder="本文"></textarea>
           </section>
@@ -206,6 +208,8 @@
               <span class="spacer"></span>
               <button type="button" class="tool max-btn" data-max="plot" aria-label="プロットを最大化" title="最大化">⤢</button>
               <button type="button" class="copy" data-copy="plot">コピー</button>
+              <button type="button" class="tool jump-btn" data-jump="plot" data-to="top" title="プロットの一番上へ" aria-label="プロットの一番上へ">↑</button>
+              <button type="button" class="tool jump-btn" data-jump="plot" data-to="bottom" title="プロットの一番下へ" aria-label="プロットの一番下へ">↓</button>
             </div>
             <textarea id="plot" spellcheck="false" placeholder="このエピソードのプロット"></textarea>
           </section>
@@ -216,6 +220,8 @@
               <span class="spacer"></span>
               <button type="button" class="tool max-btn" data-max="memo" aria-label="フリーメモを最大化" title="最大化">⤢</button>
               <button type="button" class="copy" data-copy="free-memo">コピー</button>
+              <button type="button" class="tool jump-btn" data-jump="free-memo" data-to="top" title="フリーメモの一番上へ" aria-label="フリーメモの一番上へ">↑</button>
+              <button type="button" class="tool jump-btn" data-jump="free-memo" data-to="bottom" title="フリーメモの一番下へ" aria-label="フリーメモの一番下へ">↓</button>
             </div>
             <textarea id="free-memo" spellcheck="false" placeholder="修正したいこと、備忘録、書いていて気付いたことなど（なろう用・アルファ用で共通）"></textarea>
           </section>

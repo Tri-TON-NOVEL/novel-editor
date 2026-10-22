@@ -62,13 +62,23 @@ export function inform(message, opts = {}) {
  *   const where = await choose('保存先を選んでください', [{ value: 'gdrive', label: 'Google ドライブ', primary: true }, …]);
  * ボタンを押したその場で答えを返すので、続けて共有メニューやファイル選択を出せる（Safari は押した直後でないと出せない）。
  */
-export function choose(message, choices, { cancel = 'キャンセル' } = {}) {
+// select … { label, options: [{ value, label }], value }：プルダウンも出す。そのときの答えは { choice, value }（キャンセルは null）
+export function choose(message, choices, { cancel = 'キャンセル', select = null } = {}) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
     dlg.className = 'ask-dialog';
     const form = Object.assign(document.createElement('form'), { method: 'dialog', className: 'dialog' });
     const text = Object.assign(document.createElement('p'), { className: 'ask-message', textContent: message });
     const foot = Object.assign(document.createElement('div'), { className: 'dialog-foot choose-foot' });
+    let sel = null;
+    let selLabel = null;
+    if (select) {
+      sel = document.createElement('select');
+      for (const o of select.options) sel.append(new Option(o.label, o.value));
+      if (select.value !== undefined) sel.value = select.value;
+      selLabel = Object.assign(document.createElement('label'), { className: 'ask-select' });
+      selLabel.append(select.label || '', sel);
+    }
     let answered = false;
     const finish = (result) => {
       if (answered) return;
@@ -82,14 +92,14 @@ export function choose(message, choices, { cancel = 'キャンセル' } = {}) {
     foot.append(cancelBtn);
     let focusBtn = null;
     for (const c of choices) {
-      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: c.label, className: c.primary ? 'primary' : '' });
+      const b = Object.assign(document.createElement('button'), { type: 'button', textContent: c.label, className: c.primary ? 'primary' : c.danger ? 'danger-solid' : '' });
       b.dataset.choice = c.value;
-      b.addEventListener('click', () => finish(c.value));
+      b.addEventListener('click', () => finish(sel ? { choice: c.value, value: sel.value } : c.value));
       foot.append(b);
       if (c.primary) focusBtn = b;
     }
     form.addEventListener('submit', (e) => e.preventDefault());
-    form.append(text, foot);
+    form.append(text, ...(selLabel ? [selLabel] : []), foot);
     dlg.append(form);
     document.body.append(dlg);
     dlg.addEventListener('cancel', (e) => { e.preventDefault(); finish(null); });

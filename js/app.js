@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.3';
+const APP_VERSION = '2026.10.22-5.4';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1734,18 +1734,62 @@ async function mergeFrom(entry, { explicit = false, newest = '' } = {}) {
   afterMerge(res, entry.name);
 }
 
+/**
+ * バックアップから小説を1つ読み込む（「読み込む」「ファイルから選ぶ」のあと。どの OS・端末でも同じ）
+ *   バックアップの中の小説を選び（今開いている小説と同じものがあれば、それが最初に選ばれている）、
+ *   「上書き」… 今開いている小説を、選んだ小説の内容（タイトルから全部）で置き換える。置き換える前の内容は、作品のバックアップ版に残す
+ *   「新小説」… 選んだ小説を、新しい小説として追加して開く
+ *   「キャンセル」… 何もしない
+ * newest：そのときいちばん新しいバックアップの名前。古いものをあえて選んだときは、次の起動で最新を勧めない
+ * 戻り値：読み込んだら true（キャンセルは false）
+ */
+async function loadBackupAs(text, name, { newest = '' } = {}) {
+  const backup = parseBackup(text);
+  const novels = (backup.projects || []).filter((p) => p?.id).map((p) => normalize(p));
+  if (!novels.length) { toast('このバックアップには小説が入っていません', true); return false; }
+  const time = (p) => Date.parse(p.updatedAt || 0) || 0;
+  novels.sort((a, b) => time(b) - time(a));
+  const same = novels.find((p) => p.id === project.id);
+  const label = (p) => `${p.title || '無題'}（${p.episodes.length}話・${fmtTime(p.updatedAt)} 更新）`;
+  const cur = project.title || '無題';
+  const r = await choose(`「${name}」から、小説を読み込みます。\n\n`
+    + `・上書き：いま開いている小説「${cur}」を、選んだ小説の内容（タイトルから全部）で置き換えます。置き換える前の内容は「作品のバックアップ版」に残します。\n`
+    + '・新小説：選んだ小説を、新しい小説として追加して開きます（いま開いている小説はそのまま残ります）。',
+  [{ value: 'overwrite', label: '上書き', danger: true }, { value: 'new', label: '新小説', primary: true }],
+  { select: { label: 'バックアップの中の小説', options: novels.map((p) => ({ value: p.id, label: label(p) })), value: (same || novels[0]).id } });
+  if (!r) return false;
+  const src = novels.find((p) => p.id === r.value);
+  if (!src) { toast('読み込む小説を選んでください', true); return false; }
+  await flush();
+  const now = new Date().toISOString();
+  if (r.choice === 'overwrite') {
+    await saveVersion(`「${name}」で上書きする前（自動）`, '', true);
+    const p = normalize({ ...structuredClone(src), id: project.id, workId: project.workId, links: project.links || {}, updatedAt: now });
+    await db.put(p);
+    showProject(p);
+    syncPending = null;
+    sync.markLoaded(name);
+    if (newest && newest !== name) prefs.set('sync.seen', newest);
+    await inform(`いま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は、「設定」→「自動バックアップ」の「この作品のバックアップ版」に残しています）`);
+  } else {
+    const p = normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now });
+    await switchTo(p);
+    syncPending = null;
+    sync.markLoaded(name);
+    if (newest && newest !== name) prefs.set('sync.seen', newest);
+    await inform(`「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
+  }
+  return true;
+}
+
 // 一覧に出ないバックアップ（ほかの場所に置いたものなど）を、ファイルを選んで読み込む
 async function syncFromFile(mode) {
   const src = await openFrom('バックアップのファイルを選ぶ');
-  if (!src) return;
-  if (!isBackup(src.text)) { toast('全体（バックアップ）のファイルではありません', true); return; }
-  $('sync-restore-dialog').close();
-  if (mode === 'restore') { openRestoreDialog(src.text, src.name); return; }
-  await flush();
+  if (!src) return false;
+  if (!isBackup(src.text)) { toast('全体（バックアップ）のファイルではありません', true); return false; }
+  if (mode === 'restore') { openRestoreDialog(src.text, src.name); return true; }
   const newest = (await sync.listAll().catch(() => []))[0]?.name;
-  const res = await sync.mergeText(src.text, src.name, askSyncConflict, { explicit: true, onOlder: (list) => askReplaceNewer(src.name, list) });
-  if (res && newest && newest !== src.name) prefs.set('sync.seen', newest);
-  afterMerge(res, src.name);
+  return loadBackupAs(src.text, src.name, { newest });
 }
 
 // 許可・ログインが戻っていれば、起動時の確認をする
@@ -1826,7 +1870,9 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
   dialog.showModal();
   let files;
   // 一覧に出ないファイルも選べるように（押したその場でファイル選択を出す）
-  $('sync-from-file').onclick = () => { decide(); try { syncFromFile(mode).catch(fail); } catch (err) { fail(err); } };
+  $('sync-from-file').onclick = () => {
+    try { syncFromFile(mode).then((done) => { if (done) { decide(); dialog.close(); } }).catch(fail); } catch (err) { fail(err); }
+  };
   try {
     files = await sync.listAll();
   } catch (e) {
@@ -1848,10 +1894,11 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
       if (f.name === last) tags.push('前回同期したもの');
       const act = isSync
         ? button('読み込む', async () => {
+          // 一覧の画面は開いたまま、その上で「上書き／新小説／キャンセル」を聞く（キャンセルなら一覧に戻る）
+          const text = await sync.read(f);
+          if (!(await loadBackupAs(text, f.name, { newest: files[0].name }))) return;
           decide();
           dialog.close();
-          syncPending = null;
-          await mergeFrom(f, { explicit: true, newest: files[0].name });
         }, f === files[0] ? 'primary' : '')
         : button('選ぶ', async () => {
           const text = await sync.read(f);
@@ -2195,6 +2242,22 @@ function buildImageMenu() {
     item.append(actions);
     list.append(item);
   });
+}
+
+// 「↑」「↓」：入力欄の一番上・一番下へ移る（中のスクロールと、画面のスクロールの両方。カーソルもそこへ）
+// 指で触る端末では、キーボードが出ないよう、カーソルは動かさずにスクロールだけにする
+function jumpField(key, to) {
+  const t = { body: el.body, plot: el.plot, 'free-memo': el.freeMemo }[key];
+  if (!t) return;
+  const top = to === 'top';
+  t.scrollTop = top ? 0 : t.scrollHeight;
+  if (!t.closest('.maximized')) t.scrollIntoView({ block: top ? 'start' : 'end', behavior: 'smooth' });
+  if (!matchMedia('(pointer: coarse)').matches) {
+    const pos = top ? 0 : t.value.length;
+    t.focus({ preventScroll: true });
+    t.setSelectionRange(pos, pos);
+    t.scrollTop = top ? 0 : t.scrollHeight;
+  }
 }
 
 // 入力欄の中の位置を選んで、見える所までスクロールする
@@ -2940,6 +3003,8 @@ function bindEvents() {
       if (epSearch) jumpToSearchHit(Number(d.ep));
     } else if (d.epAct) {
       episodeAction(d.epAct, Number(d.epIndex), d.epTo);
+    } else if (d.jump) {
+      jumpField(d.jump, d.to);
     } else if (d.max) {
       maximizeField(d.max);
     } else if (d.toggleChapter) {
