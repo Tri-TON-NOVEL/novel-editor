@@ -60,7 +60,8 @@ function deviceId() {
 }
 
 // ---------- 状態 ----------
-// state: 'off' | 'on' | 'need-permission'（フォルダの許可切れ） | 'need-login'（Google のログイン切れ） | 'unsupported'
+// state: 'off' | 'on' | 'need-folder'（保存先のフォルダをまだ選んでいない） | 'need-permission'（フォルダの許可切れ）
+//        | 'need-login'（Google のログイン切れ） | 'unsupported'
 let state = 'off';
 let lastError = '';
 let dir = null;
@@ -94,11 +95,13 @@ export async function refresh() {
   if (m === 'folder') {
     if (!folderSupported) { setState('unsupported'); return; }
     dir = dir || await meta.get(DIR_KEY).catch(() => null);
-    if (!dir) { setState('off'); return; }
+    if (!dir) { setState('need-folder'); return; }
     const perm = await dir.queryPermission({ mode: 'readwrite' }).catch(() => 'denied');
     setState(perm === 'granted' ? 'on' : 'need-permission');
   } else if (m === 'gdrive') {
     if (!drive || !drive.isConfigured()) { setState('unsupported'); return; }
+    // フォルダを選ぶまでは保存しない（エディターが勝手にフォルダを作らない）
+    if (!drive.backups.hasFolder) { setState('need-folder'); return; }
     setState(drive.canSaveSilently() ? 'on' : 'need-login');
   } else {
     setState('off');
@@ -329,7 +332,7 @@ export async function loadAndMerge(entry, onConflict, opts = {}) {
  *
  * どちらも、この端末にしかない作品は消さない。読み込む前の状態は「同期の前の状態」に残す。
  * name がバックアップの名前の形（プレフィックス＋日時）なら、それを「前回同期したもの」として記録する。
- * 戻り値: { added, updated, kept }／null（やめた）
+ * 戻り値: { added, updated, kept, addedList, updatedList, keptList }（List は [{ id, title }]）／null（やめた）
  */
 export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null } = {}) {
   const backup = parseBackup(text);
@@ -369,14 +372,16 @@ export async function mergeText(text, name, onConflict, { explicit = false, onOl
   await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: name, text: before.text });
 
   const taken = new Set();
-  let added = 0;
-  let updated = 0;
-  let kept = 0;
+  // どの作品がどうなったか（画面で知らせ、変わった作品を開くため）：[{ id, title }]
+  const addedList = [];
+  const updatedList = [];
+  const keptList = [];
+  const item = (p) => ({ id: p.r.id, title: p.r.title || '無題' });
   for (const p of plan) {
-    if (!p.take) { kept++; continue; }
+    if (!p.take) { keptList.push(item(p)); continue; }
     await db.put(normalize(p.r));
     taken.add(p.r.id);
-    if (p.isNew) added++; else updated++;
+    (p.isNew ? addedList : updatedList).push(item(p));
   }
   // 取り込んだ作品の版も入れる（同じ版はそのまま）
   for (const v of backup.versions || []) {
@@ -393,5 +398,5 @@ export async function mergeText(text, name, onConflict, { explicit = false, onOl
   if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
   else if (last) prefs.set('sync.last', { ...last, syncedAt: Date.now() });
   checked = true;
-  return { added, updated, kept };
+  return { added: addedList.length, updated: updatedList.length, kept: keptList.length, addedList, updatedList, keptList };
 }

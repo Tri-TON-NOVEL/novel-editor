@@ -340,15 +340,19 @@
 <dialog id="sync-restore-dialog">
   <form method="dialog" class="dialog">
     <h2 id="sync-restore-title">バックアップから戻す</h2>
+    <!-- 新しいバックアップが見つかったときのお知らせ（起動時・保存の前・「他の端末の更新を確認」で共通） -->
+    <p class="sync-notice" id="sync-restore-notice" hidden></p>
     <p class="hint" id="sync-restore-hint"></p>
     <label class="sync-filter">端末（プレフィックス）
       <select id="sync-restore-filter"></select>
     </label>
     <ul class="list" id="sync-restore-list"></ul>
-    <p class="hint">一覧に出るのは、「自動バックアップ」という名前のフォルダの中のバックアップ（Win_・iPad_ など全端末の分）です。それ以外の場所にあるファイルは「ファイルから選ぶ」で選べます。</p>
+    <p class="hint">一覧に出るのは、バックアップ先のフォルダの中のバックアップ（Win_・iPad_ など全端末の分）です。それ以外の場所にあるファイルは「ファイルから選ぶ」で選べます。</p>
     <div class="dialog-foot">
       <button type="button" id="sync-from-file">ファイルから選ぶ…</button>
-      <button value="close">閉じる</button>
+      <button type="button" id="sync-keep-mine" hidden>この端末の記録を使う（すぐ保存）</button>
+      <button type="button" id="sync-later" hidden>あとで</button>
+      <button value="close" id="sync-restore-close">閉じる</button>
     </div>
   </form>
 </dialog>
@@ -748,6 +752,7 @@
         </select>
       </label>
       <p class="hint" id="sync-mode-hint"></p>
+      <p class="sync-folder-line" id="sync-folder-line"></p>
       <div class="button-row" id="sync-folder-row">
         <button type="button" id="sync-choose">フォルダを選ぶ…</button>
       </div>

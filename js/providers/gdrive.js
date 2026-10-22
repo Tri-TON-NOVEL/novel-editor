@@ -2,13 +2,15 @@
 // 権限は drive（ログインした人のマイドライブ全体）。このソフトは使う人専用なので、各自が自分のクライアントID で自分のドライブに使う。
 // どの方法で置いたファイル・フォルダ（パソコン版 Google ドライブの同期フォルダなど）も見える。
 //
-// 手動で保存するフォルダ（端末ごと。localStorage `novel-editor:gdrive.folder` = { id, name }）
-//   未指定      … マイドライブ直下の「小説エディター」フォルダ（なければ作る）
-//   指定あり    … エディター内のフォルダ選択画面で選んだ・作ったフォルダ
-// 保存先を変えても、すでに保存したファイルは移動しない（次に新しく保存するファイルから新しいフォルダへ）。
+// エディターが勝手にフォルダを作ることはない。フォルダは使う人が自分で作り（名前も自由）、それを選ぶ。
 //
-// 自動バックアップ（同期）のフォルダは、保存先フォルダの中の「自動バックアップ」（なければ作る）。
-// 一覧は、「自動バックアップ」という名前のフォルダの中の「プレフィックス＋日時.json」すべて（Win_ など、どの方法で置いたものも）。
+// 「ファイル」で最初に開くフォルダ（端末ごと。localStorage `novel-editor:gdrive.folder` = { id, name }）
+//   未指定 … マイドライブ直下
+//
+// 自動バックアップ（同期）のフォルダ（端末ごと。`novel-editor:gdrive.backupFolder` = { id, name }）
+//   「自動バックアップ」タブで選んだ・作ったフォルダに直接保存する。選ぶまでは保存しない。
+//   一覧は、そのフォルダの中の「プレフィックス＋日時.json」すべて（Win_ など、どの端末・どの方法で置いたものも）。
+//   端末どうしで同期するときは、すべての端末で同じフォルダを選ぶ。
 //
 // ログイン
 //   ブラウザ               … ポップアップ。開けなければ、ページごと Google に移動して戻ってくる（リダイレクト）
@@ -22,16 +24,12 @@ const BACKUP_NAME_RE = /\d{8}T\d{6}Z\.json$/;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
-const FOLDER_NAME = '小説エディター';
-const BACKUP_FOLDER_NAME = '自動バックアップ';
 const APP_KEY = 'novelEditor';
 // ここにクライアントIDを書いておくと、どの端末でも設定画面での入力が不要になる（公開しても問題ない値）
 const DEFAULT_CLIENT_ID = '';
 
 let gisPromise = null;
 let tokenClient = null;
-let defaultFolderId = null;
-const backupFolderIds = new Map(); // 保存先フォルダの id → その中の「自動バックアップ」フォルダの id
 // 自動バックアップの間は、ログイン画面を出さない（iPhone・iPad ではボタンを押したとき以外は出せないため）
 let silent = 0;
 // リダイレクトでページを離れる前に呼ぶ（書きかけの内容を端末に保存する）
@@ -39,6 +37,7 @@ let beforeRedirect = async () => {};
 
 function clientId() { return prefs.get('gdrive.clientId', '') || DEFAULT_CLIENT_ID; }
 function chosenFolder() { return prefs.get('gdrive.folder', null); }
+function chosenBackupFolder() { return prefs.get('gdrive.backupFolder', null); }
 
 // ホーム画面に追加したアプリとして開いているか
 const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches || navigator.standalone === true;
@@ -168,34 +167,25 @@ async function api(url, options = {}, retry = true) {
 
 const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "'";
 
-// 親フォルダの中の、その名前のフォルダ（なければ作る）。同じ名前が既にあれば、自分で作ったものでもそれを使う
-async function findOrCreateFolderIn(parent, name, marker) {
-  const query = `name = ${q(name)} and mimeType='${FOLDER_MIME}' and ${q(parent)} in parents and trashed=false`;
-  const res = await api(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=1`);
-  const found = (await res.json()).files[0];
-  if (found) return found.id;
-  const created = await api(`${API}/files?fields=id`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name, mimeType: FOLDER_MIME, parents: [parent], appProperties: { [APP_KEY]: marker } }),
-  });
-  return (await created.json()).id;
+// 選んだフォルダが使えるか（ゴミ箱に入っていない・消されていない）
+async function folderUsable(id) {
+  try {
+    const f = await (await api(`${API}/files/${encodeURIComponent(id)}?fields=id,trashed,mimeType`)).json();
+    return f.mimeType === FOLDER_MIME && !f.trashed;
+  } catch (e) {
+    if (/not found|404/i.test(e.message)) return false;
+    throw e;
+  }
 }
 
-// 保存先フォルダを決めていないとき：マイドライブ直下の「小説エディター」
-async function ensureDefaultFolder() {
-  if (!defaultFolderId) defaultFolderId = await findOrCreateFolderIn('root', FOLDER_NAME, 'folder');
-  return defaultFolderId;
-}
-
-// 自動バックアップのフォルダ：保存先フォルダ（「クラウド」タブで選んだ・作ったフォルダ。なければ「小説エディター」）の中の「自動バックアップ」。
-// 保存先フォルダを変えたら、次のバックアップから新しいフォルダの中の「自動バックアップ」に入る。
-async function ensureBackupFolder() {
-  const parent = await saveFolderId();
-  if (backupFolderIds.has(parent)) return backupFolderIds.get(parent);
-  const id = await findOrCreateFolderIn(parent, BACKUP_FOLDER_NAME, 'backup-folder');
-  backupFolderIds.set(parent, id);
-  return id;
+// 自動バックアップのフォルダ（選んだフォルダそのもの）。選んでいない・使えないときはエラー（勝手に別の場所へは保存しない）
+async function backupFolderId() {
+  const chosen = chosenBackupFolder();
+  if (!chosen?.id) throw new Error('自動バックアップのフォルダが決まっていません。「設定」→「自動バックアップ」でフォルダを選んでください');
+  if (!(await folderUsable(chosen.id))) {
+    throw new Error(`自動バックアップのフォルダ「${chosen.name}」が見つかりません（ゴミ箱に入れた・消した）。「設定」→「自動バックアップ」でフォルダを選び直してください`);
+  }
+  return chosen.id;
 }
 
 // 条件に合うファイルを全部（ページをまたいで）
@@ -211,8 +201,9 @@ async function listAll(query, fields = 'id,name') {
   return out;
 }
 
-async function saveFolderId() {
-  return chosenFolder()?.id || ensureDefaultFolder();
+// 「ファイル」で保存する先（フォルダの指定がないとき）：選んだフォルダ、なければマイドライブ直下
+function saveFolderId() {
+  return chosenFolder()?.id || 'root';
 }
 
 // mime：中身の種類（小説エディターのファイルは application/json、テキストは text/plain）
@@ -265,16 +256,14 @@ export const gdrive = {
   signOut() {
     if (token && window.google?.accounts) window.google.accounts.oauth2.revoke(token.value, () => {});
     setToken(null);
-    defaultFolderId = null;
-    backupFolderIds.clear();
   },
 
-  // ---------- 手動で保存するフォルダ ----------
+  // ---------- 「ファイル」で最初に開くフォルダ ----------
 
   // 戻り値: { id, name, isDefault }
   folderInfo() {
     const f = chosenFolder();
-    return f ? { ...f, isDefault: false } : { id: defaultFolderId || '', name: `${FOLDER_NAME}（自動で作るフォルダ）`, isDefault: true };
+    return f ? { ...f, isDefault: false } : { id: '', name: 'マイドライブ（直下）', isDefault: true };
   },
 
   resetFolder() { prefs.set('gdrive.folder', null); },
@@ -293,8 +282,13 @@ export const gdrive = {
     return (await res.json()).files;
   },
 
-  // フォルダを作る（parentId がなければマイドライブの直下）。保存先の設定は変えない。戻り値: { id, name, parents }
+  // フォルダを作る（parentId がなければマイドライブの直下）。保存先の設定は変えない。戻り値: { id, name, parents, existed }
+  // 同じ場所に同じ名前のフォルダが既にあれば、作らずにそれを返す（existed: true）。同じ名前のフォルダが並ばないように
   async makeFolder(name, parentId = null) {
+    const parent = parentId || 'root';
+    const query = `name = ${q(name)} and mimeType='${FOLDER_MIME}' and ${q(parent)} in parents and trashed=false`;
+    const found = (await (await api(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id,name,parents)&pageSize=1`)).json()).files[0];
+    if (found) return { ...found, existed: true };
     const res = await api(`${API}/files?fields=id,name,parents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -306,8 +300,12 @@ export const gdrive = {
   // 保存先フォルダ（「クラウド」タブ）を決める
   setFolder(folder) { prefs.set('gdrive.folder', folder ? { id: folder.id, name: folder.name } : null); },
 
-  // 保存先フォルダの id（未設定なら自動で作る「小説エディター」）
-  async defaultFolderId() { return saveFolderId(); },
+  // 自動バックアップのフォルダ（「自動バックアップ」タブで選ぶ）。戻り値: { id, name }／null（まだ選んでいない）
+  backupFolderInfo() { return chosenBackupFolder(); },
+  setBackupFolder(folder) { prefs.set('gdrive.backupFolder', folder ? { id: folder.id, name: folder.name } : null); },
+
+  // フォルダ選択画面で最初に開くフォルダ（「ファイル」の保存先。なければ一番上）
+  async defaultFolderId() { return chosenFolder()?.id || null; },
 
   // ---------- 手動で保存したファイル ----------
 
@@ -340,7 +338,7 @@ export const gdrive = {
       }
     }
     // folderId：エディター内のフォルダ選択画面で選んだフォルダ（なければ保存先フォルダ）
-    const parent = folderId || await saveFolderId();
+    const parent = folderId || saveFolderId();
     const ext = (name.match(/\.[a-z0-9]+$/i) || [''])[0];
     const base = ext ? name.slice(0, -ext.length) : name;
     let finalName = name;
@@ -361,40 +359,28 @@ export const gdrive = {
 
   // ---------- 自動バックアップ（同期）用 ----------
   backups: {
-    // 保存するフォルダの表示名（保存先フォルダ／自動バックアップ）
-    get folderName() { return `${chosenFolder()?.name || FOLDER_NAME}／${BACKUP_FOLDER_NAME}`; },
-    // 戻り値: [{ id, name }]（全端末のもの）
-    // 「自動バックアップ」という名前のフォルダ（どこにあっても）の中の「プレフィックス＋日時.json」と、
-    // このエディターが印を付けて保存した自動バックアップを合わせる。パソコン版 Google ドライブの同期フォルダに
-    // 「フォルダ」方式で書いた Win_ なども、「自動バックアップ」フォルダの中にあれば出る。
+    // 選んであるか（選ぶまでは自動バックアップしない）
+    get hasFolder() { return !!chosenBackupFolder()?.id; },
+    // 保存するフォルダの表示名
+    get folderName() { return chosenBackupFolder()?.name || ''; },
+    // 戻り値: [{ id, name }]（全端末のもの）：選んだフォルダの中の「プレフィックス＋日時.json」すべて
     async list() {
-      const byId = new Map();
-      const add = (files) => { for (const f of files) if (BACKUP_NAME_RE.test(f.name)) byId.set(f.id, { id: f.id, name: f.name }); };
-      add(await listAll(`appProperties has { key='${APP_KEY}' and value='autobackup' } and trashed=false`));
-      const dirs = await listAll(`name = ${q(BACKUP_FOLDER_NAME)} and mimeType='${FOLDER_MIME}' and trashed=false and 'me' in owners`);
-      for (const d of dirs) add(await listAll(`${q(d.id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`));
-      return [...byId.values()];
+      const id = await backupFolderId();
+      return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`))
+        .filter((f) => BACKUP_NAME_RE.test(f.name))
+        .map((f) => ({ id: f.id, name: f.name }));
     },
     async read(id) {
       const res = await api(`${API}/files/${encodeURIComponent(id)}?alt=media`);
       return res.text();
     },
     async write(name, text) {
-      const upload = async () => {
-        const meta = { name, mimeType: 'application/json', parents: [await ensureBackupFolder()], appProperties: { [APP_KEY]: 'autobackup' } };
-        const { body, headers } = multipart(meta, text);
-        const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
-        return (await res.json()).id;
-      };
-      try {
-        return await upload();
-      } catch (e) {
-        // フォルダがゴミ箱に入った・消された：覚えていた場所を忘れて、作り直してからもう一度
-        if (!/not found|404/i.test(e.message)) throw e;
-        backupFolderIds.clear();
-        defaultFolderId = null;
-        return upload();
-      }
+      // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
+      const folder = await backupFolderId();
+      const meta = { name, mimeType: 'application/json', parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
+      const { body, headers } = multipart(meta, text);
+      const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
+      return (await res.json()).id;
     },
     async remove(id) {
       await api(`${API}/files/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});

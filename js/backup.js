@@ -6,7 +6,7 @@ export const BACKUP_FORMAT = 'novel-editor-backup';
 
 // 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
 // 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
-const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|currentId$|settingsTab$)/;
+const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$)/;
 const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
 
 export async function makeBackup({ device = null } = {}) {

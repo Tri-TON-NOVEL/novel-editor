@@ -20,7 +20,8 @@ function open({ message, value = null, ok = 'OK', cancel = 'キャンセル', da
     const okBtn = Object.assign(document.createElement('button'), { type: 'submit', value: 'ok', textContent: ok });
     const isDanger = danger ?? DANGER.test(message);
     okBtn.className = isDanger ? 'danger-solid' : 'primary';
-    foot.append(cancelBtn, okBtn);
+    if (cancel === null) foot.append(okBtn); // お知らせだけ（OK のみ）
+    else foot.append(cancelBtn, okBtn);
     form.append(text, ...(input ? [input] : []), foot);
     dlg.append(form);
     document.body.append(dlg);
@@ -49,6 +50,11 @@ function open({ message, value = null, ok = 'OK', cancel = 'キャンセル', da
 /** はい／いいえの確認。OK で true、キャンセル・Esc で false */
 export function ask(message, opts = {}) {
   return open({ ...opts, message });
+}
+
+/** お知らせ（OK ボタンだけ）。閉じたら終わる */
+export function inform(message, opts = {}) {
+  return open({ ok: 'OK', ...opts, message, cancel: null, danger: false });
 }
 
 /**

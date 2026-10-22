@@ -12,7 +12,7 @@ import {
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
 import { decodeText } from './importer.js';
-import { ask, askText, choose } from './dialogs.js';
+import { ask, askText, choose, inform } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.1';
+const APP_VERSION = '2026.10.22-5.3';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1035,11 +1035,11 @@ async function newDriveFolder() {
   if (!ui) return;
   const name = await askText(`新しいフォルダの名前（${ui.cur ? `「${ui.byId.get(ui.cur).name}」の中` : 'マイドライブの直下'}に作ります）`, '小説');
   if (!name || !name.trim() || driveUi !== ui) return;
+  // 同じ場所に同じ名前のフォルダがあれば、作らずにそれを開く（同じ名前のフォルダが並ばないように）
   const f = await ui.p.makeFolder(name.trim(), ui.cur);
-  ui.folders.push(f);
-  ui.byId.set(f.id, f);
+  if (!ui.byId.has(f.id)) { ui.folders.push(f); ui.byId.set(f.id, f); }
   goDriveFolder(f.id);
-  toast(`フォルダ「${f.name}」を作りました`);
+  toast(f.existed ? `同じ名前のフォルダ「${f.name}」が既にあるので、それを開きました` : `フォルダ「${f.name}」を作りました`);
 }
 
 // 「このフォルダに保存」「このフォルダにする」
@@ -1551,11 +1551,18 @@ async function runRestore(mode) {
   if (!pendingBackup) return;
   if (mode === 'replace' && !(await ask('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？'))) return;
   await flush();
-  const n = await restoreBackup(pendingBackup, mode);
+  const backup = pendingBackup;
+  const before = new Set((await db.all()).map((p) => p.id));
+  await restoreBackup(backup, mode);
   pendingBackup = null;
   sync.markDirty(); // 戻した内容を、次の自動バックアップに入れる
-  prefs.set('restoredMessage', `${n}作品をバックアップから復元しました`);
-  location.reload();
+  const items = (backup.projects || []).filter((p) => p?.id).map((p) => ({ id: p.id, title: p.title || '無題' }));
+  if (mode === 'replace') {
+    // 入れ替え：この端末の作品はすべてバックアップの内容になった
+    reportAndReload(`この端末の作品をすべて、バックアップの内容（${items.length}作品）に入れ替えました。`, { updatedList: items.filter((x) => before.has(x.id)), addedList: items.filter((x) => !before.has(x.id)) });
+  } else {
+    reportAndReload(`バックアップの内容を、この端末の作品とまとめました（${items.length}作品）。`, { addedList: items.filter((x) => !before.has(x.id)), updatedList: items.filter((x) => before.has(x.id)) });
+  }
 }
 
 async function remindBackup() {
@@ -1583,6 +1590,7 @@ function syncProvider() {
 function syncStatusShort() {
   const st = sync.getState();
   if (st === 'off' || st === 'unsupported') return '';
+  if (st === 'need-folder') return '⚠ 自動バックアップのフォルダが未設定';
   if (st === 'need-permission') return '⚠ 自動バックアップ停止中（許可切れ）';
   if (st === 'need-login') return '⚠ 自動バックアップ停止中（ログインが必要）';
   if (syncPending) return '⚠ 他の端末で更新あり（自動バックアップ停止中）';
@@ -1597,6 +1605,7 @@ function renderSyncState() {
   const m = sync.mode();
   const b = $('sync-attention');
   const attention = syncPending ? '⚠ 他の端末の更新を確認'
+    : st === 'need-folder' ? '⚠ 自動バックアップのフォルダを選ぶ'
     : st === 'need-permission' ? '⚠ 自動バックアップを再開'
       : st === 'need-login' ? '⚠ Google ドライブにログイン（自動バックアップ）'
         : '';
@@ -1608,20 +1617,27 @@ function renderSyncState() {
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
   sel.querySelector('option[value="gdrive"]').disabled = !syncProvider()?.isConfigured() && m !== 'gdrive';
   $('sync-mode-hint').textContent = m === 'gdrive'
-    ? `Google ドライブの「${syncProvider()?.backups.folderName || ''}」に保存します（「クラウド」タブの保存先フォルダの中。端末ごとにフォルダが違っても、全端末のバックアップを読み込めます）。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。`
+    ? '自分で作ったフォルダ（名前は自由）を選ぶと、そのフォルダに直接保存します。選ぶ画面で新しいフォルダも作れます。端末どうしで同期するときは、すべての端末で同じフォルダを選んでください。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。'
     : m === 'folder'
-      ? 'OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（Google ドライブ方式）とも同期したいときは、パソコン版 Google ドライブの中の「自動バックアップ」フォルダを選ぶか、この端末も「Google ドライブ」にしてください。'
+      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（Google ドライブ方式）と同期するときは、パソコン版 Google ドライブの中の、iPhone・iPad と同じフォルダを選んでください。'
       : sync.folderSupported
         ? 'iPhone・iPad と同期するときは「Google ドライブ」がおすすめです（「クラウド」タブでクライアントIDを入れると選べます）。'
         : 'この端末では「Google ドライブ」を選べます（「クラウド」タブでクライアントIDを入れると選べます）。';
 
-  $('sync-choose').textContent = m === 'folder' ? (sync.folderName() ? 'フォルダを選び直す…' : 'フォルダを選ぶ…') : 'Google ドライブにログイン';
-  $('sync-folder-row').hidden = !(m === 'folder' || (m === 'gdrive' && st === 'need-login'));
+  // バックアップ先のフォルダ（フォルダ方式：端末のフォルダ／Google ドライブ方式：ドライブのフォルダ）
+  const backupInfo = m === 'gdrive' ? syncProvider()?.backupFolderInfo?.() : null;
+  $('sync-folder-line').textContent = m === 'folder' ? `バックアップ先：${sync.folderName() || '（まだ選んでいません）'}`
+    : m === 'gdrive' ? `バックアップ先：${backupInfo ? `Google ドライブの「${backupInfo.name}」` : '（まだ選んでいません）'}` : '';
+  $('sync-folder-line').hidden = !$('sync-folder-line').textContent;
+  $('sync-choose').textContent = m === 'folder' ? (sync.folderName() ? 'フォルダを選び直す…' : 'フォルダを選ぶ…')
+    : st === 'need-login' ? 'Google ドライブにログイン' : (backupInfo ? 'フォルダを選び直す・作る…' : 'フォルダを選ぶ・作る…');
+  $('sync-folder-row').hidden = !(m === 'folder' || m === 'gdrive');
 
   const last = sync.lastBackup();
   const lastText = last ? `\n最後に同期したバックアップ：${last.name}（${fmtTime(last.at)}）` : '';
   const err = sync.getError() ? `\n⚠ 前回の保存に失敗しました：${sync.getError()}` : '';
   const text = st === 'off' ? '止まっています。保存先を選ぶと始まります。'
+    : st === 'need-folder' ? '⚠ バックアップ先のフォルダを選んでください（「フォルダを選ぶ」）。選ぶまでは保存しません。'
     : st === 'unsupported' ? (m === 'folder' ? 'このブラウザではフォルダを使えません。「Google ドライブ」を選んでください。' : 'Google ドライブを使うには、「クラウド」タブでクライアントIDを入れてください。')
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
         : st === 'need-login' ? '⚠ Google ドライブへのログインが必要です。上のボタン（または下の「Google ドライブにログイン」）を押してください。'
@@ -1653,36 +1669,8 @@ async function runSyncCheck({ manual = false } = {}) {
     if (manual) toast('他の端末の新しいバックアップはありません');
     return;
   }
-  const { entry, localChanged } = r;
-  const who = `「${entry.prefix || '（プレフィックスなし）'}」${fmtTime(new Date(entry.at).toISOString())}`;
-  if (!localChanged) {
-    const ok = await ask(`他の端末（${who}）で、新しいバックアップが保存されています。読み込みますか？\n\n` +
-      '作品ごとに新しいほうを使います（この端末にしかない作品は残ります）。読み込む前の状態は残しておきます。',
-    { ok: '読み込む', cancel: '読み込まない', danger: false });
-    if (!ok) {
-      syncPending = null;
-      sync.markChecked(entry);
-      toast('読み込みませんでした');
-      return;
-    }
-    await mergeFrom(entry);
-    return;
-  }
-  const c = await choose(`⚠ 他の端末（${who}）でも更新されています。この端末にも、まだバックアップしていない変更があります。どちらの記録を使いますか？\n\n` +
-    '・他の端末の記録：作品ごとに新しいほうを使います。両方で書き換えた作品は、どちらを使うか作品ごとに聞きます。\n' +
-    '・この端末の記録：今の内容をすぐバックアップして、最新にします（他の端末の変更は読み込みません）。',
-  [{ value: 'mine', label: 'この端末の記録を使う' }, { value: 'other', label: '他の端末の記録を使う', primary: true }], { cancel: 'あとで' });
-  if (c === 'other') { await mergeFrom(entry); return; }
-  if (c === 'mine') {
-    syncPending = null;
-    sync.markChecked(entry);
-    const ok = await sync.backupNow({ force: true });
-    toast(ok ? 'この端末の記録をバックアップしました（これが最新になります）' : '自動バックアップに失敗しました', !ok);
-    return;
-  }
-  // あとで：決めるまで自動バックアップは止めておく（先に保存すると、他の端末の更新が隠れてしまうため）
-  syncPending = entry;
-  renderSyncState();
+  // 新しいバックアップがある：お知らせとバックアップの一覧を、1つの画面で出す（どの OS・保存先でも同じ）
+  await openSyncRestore('sync', { notice: r });
 }
 
 // 両方で書き換えた作品について、どちらを使うか聞く
@@ -1707,7 +1695,32 @@ async function askReplaceNewer(name, list) {
 function afterMerge(res, name) {
   if (!res) { toast('読み込みをやめました'); return; }
   syncPending = null;
-  prefs.set('restoredMessage', `「${name}」を読み込みました（追加 ${res.added}・更新 ${res.updated}・この端末のまま ${res.kept}）`);
+  reportAndReload(`「${name}」を読み込みました。`, res);
+}
+
+/**
+ * 読み込み・復元のあと：どの作品が「新しい小説として増えた」「中身が置き換わった」「この端末のまま」かを知らせ、
+ * 変わった作品を開いてから画面を読み直す（古い作品が表示されたままで、何が変わったか分からない、とならないように）。
+ * 開く作品：今開いている作品が置き換わったならそのまま。そうでなければ、追加した作品 → 置き換えた作品の順で最初のもの。
+ * res = { addedList, updatedList, keptList }（[{ id, title }]）
+ */
+function reportAndReload(head, { addedList = [], updatedList = [], keptList = [] }) {
+  const names = (list) => list.slice(0, 10).map((x) => `「${x.title}」`).join('、') + (list.length > 10 ? ` ほか${list.length - 10}作品` : '');
+  const lines = [head];
+  if (addedList.length) lines.push(`・新しい小説として追加（${addedList.length}）：${names(addedList)}`);
+  if (updatedList.length) lines.push(`・中身を置き換え（${updatedList.length}）：${names(updatedList)}`);
+  if (keptList.length) lines.push(`・この端末のまま（${keptList.length}）：${names(keptList)}`);
+  if (!addedList.length && !updatedList.length) lines.push('変わった作品はありません。');
+  const current = prefs.get('currentId', null);
+  let open = null;
+  if (updatedList.some((x) => x.id === current)) open = { ...updatedList.find((x) => x.id === current), how: 'この小説は中身を置き換えました' };
+  else if (addedList.length) open = { ...addedList[0], how: '追加した小説を開きました' };
+  else if (updatedList.length) open = { ...updatedList[0], how: '中身を置き換えた小説を開きました' };
+  if (open) {
+    prefs.set('currentId', open.id);
+    lines.push('', `いま開いているのは「${open.title}」です（${open.how}）。ほかの作品は「作品一覧」から開けます。`);
+  }
+  prefs.set('restoredReport', lines.join('\n'));
   location.reload();
 }
 
@@ -1743,6 +1756,7 @@ async function syncResumeIfReady() {
 
 async function resolveSyncAttention() {
   if (syncPending) { await runSyncCheck({ manual: true }); return; }
+  if (sync.getState() === 'need-folder') { openSettings('backup'); return; }
   const ok = await sync.resume(); // Google ドライブ（ホーム画面のアプリ）では、ここでページごと Google へ移動する
   if (!ok) { toast(sync.mode() === 'folder' ? '書き込みが許可されませんでした' : 'ログインできませんでした', true); return; }
   toast('自動バックアップを再開しました');
@@ -1751,24 +1765,68 @@ async function resolveSyncAttention() {
 
 /**
  * 保存先のバックアップ（全端末：Win_・Mac_・iPhone_・iPad_・android_ など）の一覧から選ぶ。新しい順、先頭が「最新」。
- * mode 'sync'    …「他の端末の更新を確認」：選んだバックアップを、作品ごとに新しいほうを使ってこの端末とまとめる（普通は最新を選ぶ）
+ * mode 'sync'    …「他の端末の更新を確認」：選んだバックアップの内容を使う（普通は最新を選ぶ）
  * mode 'restore' …「バックアップから戻す」：選んだバックアップに戻す（次の画面で「まとめる／入れ替える」）
+ * notice（sync のみ）… 新しいバックアップが見つかったとき（起動時・保存の前）の { entry, localChanged }。
+ *   お知らせと一覧を同じ画面に出し、「この端末の記録を使う」「あとで（読み込まない）」も選べるようにする。どの OS・保存先でも同じ。
  */
-async function openSyncRestore(mode = 'restore') {
+async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
   const isSync = mode === 'sync';
-  $('sync-restore-title').textContent = isSync ? '他の端末の記録を読み込む' : 'バックアップから戻す';
+  const dialog = $('sync-restore-dialog');
+  $('sync-restore-title').textContent = notice ? '他の端末で新しいバックアップがあります' : isSync ? '他の端末の記録を読み込む' : 'バックアップから戻す';
+  const n = $('sync-restore-notice');
+  n.hidden = !notice;
+  if (notice) {
+    const { entry, localChanged } = notice;
+    const who = `${entry.prefix || '（プレフィックスなし）'}　${fmtTime(new Date(entry.at).toISOString())}`;
+    n.textContent = `⚠ 他の端末（${who}）で、新しいバックアップが保存されています。`
+      + (localChanged ? '\nこの端末にも、まだ保存していない変更があります。' : '')
+      + '\n下の一覧から読み込むものを選んでください（先頭の「最新」が候補です）。'
+      + (localChanged ? '\n他の端末の記録を使わないときは「この端末の記録を使う」を押すと、今の内容をすぐ保存して最新にします。' : '');
+  }
   $('sync-restore-hint').textContent = isSync
-    ? '読み込むバックアップを選んでください（先頭の「最新」が候補ですが、どれでも選べます）。選んだファイルの内容を使います。'
-    + 'この端末のほうが新しい作品があるときは、置き換えるかを聞きます。この端末にしかない作品は消えません。'
+    ? '選んだファイルの内容を使います。この端末のほうが新しい作品があるときは、置き換えるかを聞きます。この端末にしかない作品は消えません。'
     : '戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。';
+  // お知らせのときは「この端末の記録を使う」「あとで／読み込まない」、そうでなければ「閉じる」
+  const keep = $('sync-keep-mine');
+  const later = $('sync-later');
+  keep.hidden = !(notice && notice.localChanged);
+  later.hidden = !notice;
+  later.textContent = notice?.localChanged ? 'あとで' : '読み込まない';
+  $('sync-restore-close').hidden = !!notice;
+  let decided = false;
+  const decide = () => { decided = true; };
+  const doLater = () => {
+    if (!notice) return;
+    if (notice.localChanged) {
+      // あとで：決めるまで自動バックアップは止めておく（先に保存すると、他の端末の更新が隠れてしまうため）
+      syncPending = notice.entry;
+    } else {
+      syncPending = null;
+      sync.markChecked(notice.entry); // 読み込まない：次に起動したとき同じことは聞かない
+    }
+    renderSyncState();
+  };
+  keep.onclick = async () => {
+    decide();
+    dialog.close();
+    syncPending = null;
+    sync.markChecked(notice.entry);
+    const ok = await sync.backupNow({ force: true });
+    toast(ok ? 'この端末の記録を保存しました（これが最新になります）' : '保存できませんでした：' + (sync.getError() || ''), !ok);
+  };
+  later.onclick = () => { decide(); dialog.close(); doLater(); };
+  // Esc などで閉じたときは「あとで／読み込まない」と同じ
+  dialog.onclose = () => { if (notice && !decided) doLater(); };
+
   const list = $('sync-restore-list');
   const filter = $('sync-restore-filter');
   list.replaceChildren(li('empty', '読み込み中…'));
   filter.replaceChildren(new Option('すべての端末', ''));
-  $('sync-restore-dialog').showModal();
+  dialog.showModal();
   let files;
   // 一覧に出ないファイルも選べるように（押したその場でファイル選択を出す）
-  $('sync-from-file').onclick = () => { try { syncFromFile(mode).catch(fail); } catch (err) { fail(err); } };
+  $('sync-from-file').onclick = () => { decide(); try { syncFromFile(mode).catch(fail); } catch (err) { fail(err); } };
   try {
     files = await sync.listAll();
   } catch (e) {
@@ -1790,7 +1848,8 @@ async function openSyncRestore(mode = 'restore') {
       if (f.name === last) tags.push('前回同期したもの');
       const act = isSync
         ? button('読み込む', async () => {
-          $('sync-restore-dialog').close();
+          decide();
+          dialog.close();
           syncPending = null;
           await mergeFrom(f, { explicit: true, newest: files[0].name });
         }, f === files[0] ? 'primary' : '')
@@ -1840,7 +1899,7 @@ function renderCloudActions() {
     if (p.folderInfo) section.append(renderCloudFolder(p));
     section.append(Object.assign(document.createElement('p'), {
       className: 'hint',
-      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください（下の保存先フォルダの中の「自動バックアップ」フォルダに入ります）。',
+      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください。バックアップ先のフォルダも、そのタブで選びます（下の保存先フォルダとは別）。',
     }));
     box.append(section);
   }
@@ -1859,7 +1918,7 @@ function renderCloudFolder(p) {
     if (!folder) return;
     renderCloudActions();
     renderSyncState();
-    toast(`保存先を「${folder.name}」にしました。次に保存するファイルと自動バックアップから、このフォルダ（自動バックアップはその中の「自動バックアップ」）に入ります`);
+    toast(`「ファイル」の保存先を「${folder.name}」にしました（自動バックアップの場所は「自動バックアップ」タブで決めます）`);
   };
   // エディター内の画面で、マイドライブのフォルダを選ぶ・作る（iPhone・iPad でも使える）
   const choose = button('フォルダを選ぶ・作る…', async () => {
@@ -1879,7 +1938,7 @@ function renderCloudFolder(p) {
   }
   wrap.append(row, Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '「ファイル」で保存するファイルはこのフォルダに、自動バックアップはこのフォルダの中の「自動バックアップ」フォルダに入ります（端末ごとの設定。既にあればそれを使います）。'
+    textContent: '「ファイル」で Google ドライブに保存・開くとき、最初に開くフォルダです（端末ごとの設定）。自動バックアップの場所は「自動バックアップ」タブで決めます。'
       + '保存先を変えても、すでに保存したファイルは移動しません。同じフォルダに同じ名前のファイルがあるときは、上書きせずに名前の後ろに番号を付けます。',
   }));
   return wrap;
@@ -2669,8 +2728,8 @@ function quickSave() {
 async function saveNow() {
   await flush();
   let st = sync.getState();
-  if (st === 'off' || st === 'unsupported') {
-    toast('保存先が決まっていません。「自動バックアップ」の保存先を選んでください（書いた内容は端末の中に自動で保存されています）', true);
+  if (st === 'off' || st === 'unsupported' || st === 'need-folder') {
+    toast('保存先が決まっていません。「自動バックアップ」の保存先とフォルダを選んでください（書いた内容は端末の中に自動で保存されています）', true);
     openSettings('backup');
     return;
   }
@@ -3049,11 +3108,24 @@ function bindEvents() {
     }
     await sync.setMode(m);
     syncPending = null;
-    if (m === 'folder' && sync.getState() === 'off') toast('「フォルダを選ぶ…」を押して、保存先のフォルダを選んでください');
-    if (m === 'gdrive' && sync.getState() === 'need-login') toast('「Google ドライブにログイン」を押してください');
+    if (sync.getState() === 'need-folder') toast('「フォルダを選ぶ」を押して、バックアップ先のフォルダを選んでください（新しく作ることもできます）');
+    else if (m === 'gdrive' && sync.getState() === 'need-login') toast('「Google ドライブにログイン」を押してください');
     await runSyncCheck();
   });
   $('sync-choose').addEventListener('click', () => {
+    // Google ドライブ方式でログイン済み：バックアップ先のフォルダを選ぶ（選んだフォルダに直接保存。中にフォルダは作らない）
+    if (sync.mode() === 'gdrive' && sync.getState() !== 'need-login') {
+      const p = syncProvider();
+      driveBrowse({ p, mode: 'folder', title: '自動バックアップのフォルダを選ぶ' }).then(async (folder) => {
+        if (!folder) return;
+        p.setBackupFolder(folder);
+        await sync.setMode('gdrive'); // 選び直したので、確認からやり直す
+        renderSyncState();
+        toast(`自動バックアップを「${folder.name}」に保存します（このフォルダに直接）`);
+        await runSyncCheck();
+      }).catch(fail);
+      return;
+    }
     const run = sync.mode() === 'folder' ? sync.chooseFolder() : sync.resume();
     run.then(async (ok) => {
       if (!ok) return;
@@ -3124,10 +3196,14 @@ async function init() {
   renderSyncState();
   const login = drive?.takeRedirectResult();
   const restored = prefs.get('restoredMessage', null);
+  const report = prefs.get('restoredReport', null);
   if (login) toast(login.ok ? 'Google ドライブにログインしました' : login.message, !login.ok);
   else if (restored) toast(restored);
   if (restored) prefs.set('restoredMessage', null);
-  if (!login && !restored) setTimeout(() => remindBackup().catch(() => {}), 1500);
+  if (report) prefs.set('restoredReport', null);
+  if (!login && !restored && !report) setTimeout(() => remindBackup().catch(() => {}), 1500);
+  // 読み込み・復元の結果を知らせてから、他の端末の更新を確認する（画面が重ならないように）
+  if (report) await inform(report, { ok: 'OK' });
   runSyncCheck().catch((e) => console.warn('他の端末の更新の確認に失敗', e));
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
