@@ -100,7 +100,7 @@ export function initImport(ctx) {
     const sel = $('imp-target');
     const projects = (await ctx.db.all()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
     sel.replaceChildren(new Option('新しい作品として取り込む', 'new'),
-      ...projects.map((p) => new Option(`既存の作品：${p.title || '（無題）'}`, p.id)));
+      ...projects.map((p) => new Option(`既存の作品：${p.title || '（無題）'}${p.narouNcode ? `（${p.narouNcode}）` : ''}`, p.id)));
     sel.value = projects.some((p) => p.id === state.target) ? state.target : 'new';
     state.target = sel.value;
   }
@@ -452,6 +452,11 @@ export function initImport(ctx) {
     state.siteInfo = I.extractSiteInfo(state.lines);
     const account = (ctx.prefs.get('accounts', {}) || {})[state.site] || {};
     state.mismatches = I.checkSiteInfo(state.siteInfo, account, state.site === 'narou' ? target?.narouNcode : '');
+    // TXT の Nコードが対応付けられている作品（取り込み先とは別のとき）
+    const code = state.siteInfo.ncode;
+    state.ncodeOwner = code && target?.narouNcode !== code
+      ? (await ctx.db.all()).find((p) => p.id !== target?.id && (p.narouNcode || '').toLowerCase() === code) || null
+      : null;
   }
 
   function mismatchText() {
@@ -477,6 +482,12 @@ export function initImport(ctx) {
       sum.append(Object.assign(document.createElement('div'), {
         className: 'imp-info warn imp-mismatch',
         textContent: `⚠ TXT の情報が、設定（投稿サイト）に登録した内容と違います。別のアカウント・別の作品の TXT かもしれません。\n${mismatchText()}`,
+      }));
+    }
+    if (state.ncodeOwner) {
+      sum.append(Object.assign(document.createElement('div'), {
+        className: 'imp-info warn',
+        textContent: `⚠ この TXT の Nコード（${state.siteInfo.ncode}）は、作品「${state.ncodeOwner.title || '（無題）'}」に対応付けられています。その作品に取り込むなら、最初の画面で取り込み先を選び直してください。`,
       }));
     }
     const stat = (t) => sum.append(Object.assign(document.createElement('div'), { className: 'stat', textContent: t }));

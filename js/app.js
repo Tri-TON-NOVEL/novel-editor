@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-5.4';
+const APP_VERSION = '2026.10.22-5.6';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -248,8 +248,6 @@ const bindings = [
   [el.afterword, (v) => editEpisode('afterword', v)],
   [el.plot, (v) => editEpisode('plot', v)],
   [el.freeMemo, (v) => editEpisode('freeMemo', v)],
-  [el.narouUrl, (v) => { project.narouUrl = v.trim(); }],
-  [el.alphaUrl, (v) => { project.alphaUrl = v.trim(); }],
   [el.xText, (v) => { project.reports.x = v; }],
   [el.nrTitle, (v) => { project.reports.narouTitle = v; }],
   [el.nrBody, (v) => { project.reports.narouBody = v; }],
@@ -685,6 +683,9 @@ function showProject(p, handle = null) {
   el.synopsis.value = project.synopsis;
   el.narouUrl.value = project.narouUrl;
   el.alphaUrl.value = project.alphaUrl;
+  $('work-ncode').value = project.narouNcode || '';
+  $('work-alpha-id').value = project.alphaWorkId || '';
+  renderWorkCodes();
   el.xText.value = project.reports.x;
   el.nrTitle.value = project.reports.narouTitle;
   el.nrBody.value = project.reports.narouBody;
@@ -821,7 +822,8 @@ async function renderLibrary() {
       }
       renderLibrary();
     }, 'danger'));
-    const meta = `${p.episodes.length}話 ・ 本文 ${totalChars(p).toLocaleString()}字 ・ ${fmtTime(p.updatedAt)}`;
+    const codes = [p.narouNcode && `なろう ${p.narouNcode}`, p.alphaWorkId && `アルファ ${p.alphaWorkId}`].filter(Boolean);
+    const meta = `${p.episodes.length}話 ・ 本文 ${totalChars(p).toLocaleString()}字 ・ ${fmtTime(p.updatedAt)}${codes.length ? ' ・ ' + codes.join('・') : ''}`;
     list.append(listItem(p.title || '（無題）', meta, buttons, current));
   }
 }
@@ -2040,8 +2042,19 @@ const outline = chapterList($('chapters'), () => project.chapters, {
   removeChapter: (ch) => removeChapter(ch),
   episodeCount: (ch) => episodeCountIn(ch),
 });
-const worldTable = categorizedTable($('world-tables'), () => project.world, { ...sectionOpts, columns: WORLD_COLUMNS, itemLabel: '項目' });
-const characterTable = categorizedTable($('character-tables'), () => project.characters, { ...sectionOpts, columns: CHARACTER_COLUMNS, itemLabel: '人物' });
+// 設定・登場人物の「テキストに書き出す」→「ファイルに保存」
+const tableOpts = {
+  ...sectionOpts,
+  fileBase: () => project.title || '作品',
+  save: (text, name, what) => saveTextTo(text, name, { title: `${what}を保存`, kind: 'txt' })
+    .then((r) => { if (r) toast(savedMessage(r, what)); }).catch(fail),
+};
+const worldTable = categorizedTable($('world-tables'), () => project.world, {
+  ...tableOpts, columns: WORLD_COLUMNS, itemLabel: '項目', title: '設定', exportKey: 'world', memberSource: () => project.characters,
+});
+const characterTable = categorizedTable($('character-tables'), () => project.characters, {
+  ...tableOpts, columns: CHARACTER_COLUMNS, itemLabel: '人物', title: '登場人物', exportKey: 'characters', orgSource: () => project.world,
+});
 
 // TXT インポート（確定するまで作品は変更しない）
 const importScreen = initImport({
@@ -2497,19 +2510,69 @@ function accounts() {
   return { narou: {}, alpha: {}, ...(prefs.get('accounts', {}) || {}) };
 }
 
-// この作品の Nコード・作品ID（作品データ）。Nコードを入れたら、なろうの作品URL が空なら作る
+// ---------- この作品と投稿サイトの作品の対応（作品データ。作品ごと・入れなくてもよい） ----------
+// Nコード・作品IDと作品URLは、片方を入れると、もう片方が空（または前に自動で入れたもの）なら自動で入れる
+const WORK_CODES = {
+  ncode: {
+    key: 'narouNcode', input: 'work-ncode', pair: 'narouUrl',
+    clean: (v) => v.toLowerCase(),
+    toPair: (v) => (/^n\d{4}[a-z]{1,3}$/.test(v) ? `https://ncode.syosetu.com/${v}/` : ''),
+  },
+  narouUrl: {
+    key: 'narouUrl', input: 'narou-url', pair: 'narouNcode',
+    toPair: (v) => (/(?:ncode|novel18)\.syosetu\.com\/(n\d{4}[a-z]{1,3})(?![a-z])/i.exec(v)?.[1].toLowerCase() || ''),
+  },
+  alpha: {
+    key: 'alphaWorkId', input: 'work-alpha-id', pair: 'alphaUrl',
+    // アルファの作品URLにはユーザIDも要る（設定 → 投稿サイトのユーザID）
+    toPair: (v) => { const user = accounts().alpha?.userId; return /^\d+$/.test(v) && user ? `https://www.alphapolis.co.jp/novel/${user}/${v}` : ''; },
+  },
+  alphaUrl: {
+    key: 'alphaUrl', input: 'alpha-url', pair: 'alphaWorkId',
+    toPair: (v) => /alphapolis\.co\.jp\/novel\/\d+\/(\d+)/.exec(v)?.[1] || '',
+  },
+};
+const WORK_KEY_INPUT = Object.fromEntries(Object.values(WORK_CODES).map((c) => [c.key, c.input]));
+
 function setWorkCode(kind, value) {
-  const v = value.trim();
-  if (kind === 'ncode') {
-    project.narouNcode = v.toLowerCase();
-    if (/^n\d{4}[a-z]{1,3}$/.test(project.narouNcode) && !project.narouUrl) {
-      project.narouUrl = `https://ncode.syosetu.com/${project.narouNcode}/`;
-      el.narouUrl.value = project.narouUrl;
-    }
-  } else {
-    project.alphaWorkId = v;
+  const c = WORK_CODES[kind];
+  const v = (c.clean || ((s) => s))(value.trim());
+  const before = project[c.key] || '';
+  project[c.key] = v;
+  const pair = project[c.pair] || '';
+  if (!pair || pair === c.toPair(before)) {
+    project[c.pair] = c.toPair(v);
+    $(WORK_KEY_INPUT[c.pair]).value = project[c.pair];
   }
+  renderWorkCodes();
   changed();
+}
+
+function renderWorkCodes() {
+  const parts = [];
+  if (project.narouNcode || project.narouUrl) parts.push(project.narouNcode || 'なろう');
+  if (project.alphaWorkId || project.alphaUrl) parts.push(project.alphaWorkId ? `アルファ ${project.alphaWorkId}` : 'アルファ');
+  $('work-codes-state').textContent = parts.length ? parts.join('・') : '（任意・未設定）';
+  $('work-codes-state').classList.toggle('unset', !parts.length);
+  $('report-url-state').textContent = `今の作品URL：なろう ${project.narouUrl || '（未設定）'}／アルファ ${project.alphaUrl || '（未設定）'}`;
+}
+
+// 同じ Nコード・作品IDが別の作品にも入っていたら知らせる（1つの投稿作品は1つの作品に対応させるため）
+async function warnSameWorkCode(kind) {
+  const key = WORK_CODES[kind].key;
+  const v = (project[key] || '').toLowerCase();
+  if (!v) return;
+  const others = (await allProjects()).filter((p) => p.id !== project.id && (p[key] || '').toLowerCase() === v);
+  if (!others.length) return;
+  const what = kind === 'ncode' ? 'Nコード' : '作品ID';
+  toast(`この${what}は「${others.map((p) => p.title || '（無題）').join('」「')}」にも入っています。別の作品なら見直してください`, true);
+}
+
+function openWorkCodes() {
+  document.body.classList.add('drawer-open');
+  $('work-codes').open = true;
+  $('work-codes').scrollIntoView({ block: 'nearest' });
+  $('work-ncode').focus();
 }
 
 function applyPrefs() {
@@ -2657,14 +2720,12 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   renderIphoneMaxSettings();
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
   $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
-  // 投稿サイトのアカウント（端末ごと）と、この作品の Nコード・作品ID
+  // 投稿サイトのアカウント（端末ごと）
   const acc = accounts();
   form.querySelectorAll('[name^="acc."]').forEach((input) => {
     const [, site, key] = input.name.split('.');
     input.value = acc[site]?.[key] || '';
   });
-  $('work-ncode').value = project.narouNcode || '';
-  $('work-alpha-id').value = project.alphaWorkId || '';
   const box = $('provider-settings');
   box.querySelectorAll(':scope > :not(legend)').forEach((n) => n.remove());
   for (const p of providers) {
@@ -2819,6 +2880,7 @@ async function saveNow() {
 
 const actions = {
   'toggle-drawer': () => document.body.classList.toggle('drawer-open'),
+  'open-work-codes': openWorkCodes,
   library: openLibrary,
   'new-project': createProject,
   settings: () => openSettings(),
@@ -3081,8 +3143,10 @@ function bindEvents() {
     if (e.key === 'Enter') { clearTimeout(searchTimer); setEpisodeSearch(e.target.value.trim()); }
   });
   $('ep-grouping').addEventListener('change', (e) => setEpisodeSort({ grouped: e.target.value === 'chapters' }));
-  $('work-ncode').addEventListener('input', (e) => setWorkCode('ncode', e.target.value));
-  $('work-alpha-id').addEventListener('input', (e) => setWorkCode('alpha', e.target.value));
+  for (const [kind, c] of Object.entries(WORK_CODES)) {
+    $(c.input).addEventListener('input', (e) => setWorkCode(kind, e.target.value));
+    if (kind === 'ncode' || kind === 'alpha') $(c.input).addEventListener('change', () => warnSameWorkCode(kind).catch(fail));
+  }
   // 表示・ボタンの設定はチェックした時点で反映・保存する
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
   $('iphone-max-mode').addEventListener('change', saveIphoneMaxSettings);

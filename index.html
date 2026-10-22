@@ -18,8 +18,6 @@
   <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
   <div class="brand">小説エディター</div>
   <nav class="actions">
-    <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶<span class="label"> 戻す</span></button>
-    <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
     <button type="button" data-action="library">作品一覧</button>
     <button type="button" data-action="new-project">新しい作品</button>
     <details class="menu">
@@ -43,6 +41,8 @@
       <div class="menu-list" id="links-menu-list"></div>
     </details>
     <button type="button" data-action="settings">設定</button>
+    <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶<span class="label"> 戻す</span></button>
+    <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
     <!-- 保存：今の内容を、全端末で共有する自動バックアップに残す（Ctrl+S／⌘S）。一番右に、少し離して置く -->
     <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="今の内容を自動バックアップに保存（Ctrl+S／⌘S）">保存</button>
   </nav>
@@ -67,6 +67,28 @@
       </div>
       <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
     </section>
+
+    <!-- この作品と、投稿サイトの作品の対応（作品ごと・入れなくても使える） -->
+    <details class="work-codes" id="work-codes">
+      <summary>投稿サイトとの対応 <span class="work-codes-state" id="work-codes-state"></span></summary>
+      <div class="work-codes-body">
+        <label>なろうの Nコード
+          <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab">
+        </label>
+        <label>なろうの作品URL
+          <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
+        </label>
+        <label>アルファポリスの作品ID
+          <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789">
+        </label>
+        <label>アルファポリスの作品URL
+          <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
+        </label>
+        <p class="hint">この作品だけの情報です（作品ごとに別々）。入れなくても使えます。
+          Nコード・作品IDか作品URLのどちらかを入れると、もう一方は空なら自動で入ります。
+          作品URLは活動報告のひな型の {URL} に、Nコードは TXT インポートの照合に使います。</p>
+      </div>
+    </details>
 
     <nav class="nav">
       <button type="button" class="nav-item" data-view="synopsis">あらすじ</button>
@@ -253,31 +275,20 @@
     <!-- 設定（分類つきの表） -->
     <section class="view scroll" id="view-world" hidden>
       <h1 class="view-title">設定</h1>
-      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。</p>
+      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。国・種族・組織などをここに書いておくと、登場人物の「所属」に選べます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="world-tables"></div>
     </section>
 
     <!-- 登場人物（分類つきの表） -->
     <section class="view scroll" id="view-characters" hidden>
       <h1 class="view-title">登場人物</h1>
-      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。</p>
+      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。「所属」には「設定」の項目（国・種族・組織など）をいくつでも選べます。名前を変えた同じ人物は「同一人物」でつなげます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="character-tables"></div>
     </section>
 
     <!-- 活動報告 -->
     <section class="view" id="view-report" hidden>
-      <details class="extra" id="url-box">
-        <summary>作品URL（ひな型の {URL} に使います）</summary>
-        <div class="extra-body url-grid">
-          <label>なろうの作品URL
-            <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
-          </label>
-          <label>アルファポリスの作品URL
-            <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
-          </label>
-          <p class="hint">なろうは「作品URL＋何番目のエピソードか」でエピソードのURLになります。</p>
-        </div>
-      </details>
+      <p class="hint report-url-hint">ひな型の {URL} には、目次の<button type="button" class="link-btn" data-action="open-work-codes">「投稿サイトとの対応」</button>に入れた作品URLが入ります（なろうは「作品URL＋何番目のエピソードか」）。<span id="report-url-state"></span></p>
       <div class="report-bar">
         <label>対象エピソード
           <select id="report-episode"></select>
@@ -718,12 +729,7 @@
       <label>ユーザ名 <input type="text" name="acc.alpha.userName" autocomplete="off"></label>
       <label>作者名（ペンネーム） <input type="text" name="acc.alpha.author" autocomplete="off"></label>
     </fieldset>
-    <fieldset class="account-grid">
-      <legend>この作品（作品データに保存・すぐに反映）</legend>
-      <label>なろうの Nコード <input type="text" id="work-ncode" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
-      <label>アルファポリスの作品ID <input type="text" id="work-alpha-id" autocomplete="off" spellcheck="false"></label>
-      <p class="hint">Nコードを入れると、なろうの作品URL（活動報告の {URL} に使います）が空のときに自動で入ります。TXT から取り込んだときに Nコードが空なら、TXT の Nコードを入れます。</p>
-    </fieldset>
+    <p class="hint">作品ごとの Nコード・作品ID・作品URLは、左の目次の「投稿サイトとの対応」で入れます（作品ごとに別々・入れなくても使えます）。</p>
     </div>
 
     <!-- リンク -->
