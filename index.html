@@ -655,6 +655,20 @@
       <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
       <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
     </fieldset>
+    <fieldset id="iphone-max" hidden>
+      <legend>iPhone：最大化したときの入力欄の高さ</legend>
+      <p class="hint">キーボードの上の部分（予測変換など）に入力欄が隠れるときは、高さを決めてください。変えるとすぐに反映されます（この端末だけ）。</p>
+      <label>高さ
+        <select id="iphone-max-mode">
+          <option value="auto">自動（見えている範囲いっぱい）</option>
+          <option value="half">画面の縦の半分</option>
+          <option value="px">ピクセルで指定</option>
+        </select>
+      </label>
+      <label id="iphone-max-px-row">高さ（ピクセル）
+        <input type="number" id="iphone-max-px" min="120" max="2000" step="10" inputmode="numeric">
+      </label>
+    </fieldset>
     </div>
 
     <!-- ファイル -->
@@ -670,7 +684,7 @@
       </label>
       <p class="hint" id="file-destination-hint"></p>
       <p class="hint">「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（Google ドライブの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
-        「保存」を押すと反映されます。</p>
+        変えるとすぐに反映されます。</p>
     </fieldset>
     </div>
 
@@ -756,7 +770,7 @@
         </label>
       </div>
       <p class="hint">ファイル名は「プレフィックス＋日時」です（例：iPad_20261022T001500Z.json）。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
-        プレフィックス・保存間隔・残す件数は「保存」で反映されます。</p>
+        設定は変えるとすぐに反映されます。</p>
       <div class="button-row" id="sync-presync-row" hidden>
         <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>
       </div>
@@ -807,9 +821,10 @@
     </fieldset>
     </div>
 
+    <!-- 設定は変えた時点で反映・保存するので、「閉じる」だけ -->
     <div class="dialog-foot">
-      <button type="button" value="cancel">キャンセル</button>
-      <button value="save" class="primary">保存</button>
+      <span class="hint settings-note">変更はすぐに反映・保存されます</span>
+      <button type="button" value="cancel" class="primary">閉じる</button>
     </div>
   </form>
 </dialog>

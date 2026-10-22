@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.22-4.6';
+const APP_VERSION = '2026.10.22-4.8';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1563,7 +1563,7 @@ function renderSyncState() {
   const lastText = last ? `\n最後に同期したバックアップ：${last.name}（${fmtTime(last.at)}）` : '';
   const err = sync.getError() ? `\n⚠ 前回の保存に失敗しました：${sync.getError()}` : '';
   const text = st === 'off' ? '止まっています。保存先を選ぶと始まります。'
-    : st === 'unsupported' ? (m === 'folder' ? 'このブラウザではフォルダを使えません。「Google ドライブ」を選んでください。' : 'Google ドライブを使うには、「クラウド」タブでクライアントIDを入れて「保存」を押してください。')
+    : st === 'unsupported' ? (m === 'folder' ? 'このブラウザではフォルダを使えません。「Google ドライブ」を選んでください。' : 'Google ドライブを使うには、「クラウド」タブでクライアントIDを入れてください。')
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
         : st === 'need-login' ? '⚠ Google ドライブへのログインが必要です。上のボタン（または下の「Google ドライブにログイン」）を押してください。'
           : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
@@ -1697,7 +1697,7 @@ function renderCloudActions() {
     const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
     section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
     if (!p.isConfigured()) {
-      section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '下の「クラウド接続の設定」にクライアントIDを入れて「保存」を押すと使えるようになります。' }));
+      section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '下の「クラウド接続の設定」にクライアントIDを入れると使えるようになります（入れ終わって欄を離れたときに反映されます）。' }));
       box.append(section);
       continue;
     }
@@ -2230,12 +2230,13 @@ function renderLinkEditor() {
     const url = Object.assign(document.createElement('input'), { type: 'text', inputMode: 'url', value: l.url, placeholder: 'https://', autocomplete: 'off', spellcheck: false });
     name.setAttribute('aria-label', 'サイト名');
     url.setAttribute('aria-label', 'URL');
-    name.addEventListener('input', () => { l.name = name.value; });
-    url.addEventListener('input', () => { l.url = url.value; });
+    name.addEventListener('input', () => { l.name = name.value; commitLinks(); });
+    url.addEventListener('input', () => { l.url = url.value; commitLinks(); });
     const move = (d) => {
       const j = i + d;
       if (j < 0 || j >= editingLinks.length) return;
       [editingLinks[i], editingLinks[j]] = [editingLinks[j], editingLinks[i]];
+      commitLinks();
       renderLinkEditor();
     };
     const item = document.createElement('li');
@@ -2246,6 +2247,7 @@ function renderLinkEditor() {
       button('削除', async () => {
         if (!(await ask(`「${l.name || l.url || '（名前なし）'}」をリンクから外しますか？`, { danger: true }))) return;
         editingLinks.splice(i, 1);
+        commitLinks();
         renderLinkEditor();
       }, 'tool danger'));
     list.append(item);
@@ -2308,9 +2310,40 @@ function applyUiPrefs() {
 const MAX_LABELS = { title: 'エピソードタイトル', body: '本文', foreword: '前書き', afterword: '後書き', plot: 'プロット', memo: 'フリーメモ' };
 let maximized = null; // { box, input }
 
+// iPhone だけの設定：最大化したときの入力欄の高さ（キーボードの上の部分に隠れないように）
+//   prefs 'iphone.maxHeight' = { mode: 'auto'（見えている範囲いっぱい）| 'half'（画面の縦の半分）| 'px', px }
+const isIPhone = () => /iPhone|iPod/.test(navigator.userAgent);
+const IPHONE_MAX_DEFAULT = { mode: 'auto', px: 360 };
+
+function iphoneMaxHeight() {
+  if (!isIPhone()) return null;
+  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get('iphone.maxHeight', {}) };
+  const screenH = window.innerHeight || document.documentElement.clientHeight;
+  if (s.mode === 'half') return Math.round(screenH / 2);
+  if (s.mode === 'px') return Math.min(screenH, Math.max(120, Number(s.px) || IPHONE_MAX_DEFAULT.px));
+  return null;
+}
+
+function renderIphoneMaxSettings() {
+  $('iphone-max').hidden = !isIPhone();
+  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get('iphone.maxHeight', {}) };
+  $('iphone-max-mode').value = s.mode;
+  $('iphone-max-px').value = String(s.px);
+  $('iphone-max-px-row').hidden = s.mode !== 'px';
+}
+
+function saveIphoneMaxSettings() {
+  const px = Math.min(2000, Math.max(120, Number($('iphone-max-px').value) || IPHONE_MAX_DEFAULT.px));
+  prefs.set('iphone.maxHeight', { mode: $('iphone-max-mode').value, px });
+  $('iphone-max-px-row').hidden = $('iphone-max-mode').value !== 'px';
+  fitVisualViewport();
+}
+
 function fitVisualViewport() {
   const vv = window.visualViewport;
-  const height = vv?.height || window.innerHeight || document.documentElement.clientHeight;
+  // 最大化中の iPhone で高さを決めてあれば、その高さにする
+  const custom = maximized ? iphoneMaxHeight() : null;
+  const height = custom || vv?.height || window.innerHeight || document.documentElement.clientHeight;
   const width = vv?.width || window.innerWidth || document.documentElement.clientWidth;
   document.documentElement.style.setProperty('--vv-height', Math.round(height) + 'px');
   document.documentElement.style.setProperty('--vv-width', Math.round(width) + 'px');
@@ -2383,14 +2416,8 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   form.fontSize.value = prefs.get('fontSize', '18');
   form.autoBackupInterval.value = String(sync.intervalMin());
   form.autoBackupKeep.value = String(sync.keepCount());
-  // 「ファイル」メニューの保存先：Google ドライブを設定していなければ「この端末・その他」だけ
-  const dest = $('file-destination');
-  const hasDrive = !!driveProvider();
-  dest.querySelector('option[value="ask"]').disabled = !hasDrive;
-  dest.querySelector('option[value="gdrive"]').disabled = !hasDrive;
-  dest.value = hasDrive ? prefs.get(DEST_KEY, 'ask') : 'local';
-  $('file-destination-hint').textContent = hasDrive ? ''
-    : 'Google ドライブはまだ使えません（「クラウド」タブでクライアントIDを入れて「保存」すると選べます）。今は「この端末・その他」を使います。';
+  renderFileDestination();
+  renderIphoneMaxSettings();
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
   $('sync-prefix').placeholder = `${sync.defaultPrefix()}（この端末の既定）`;
   // 投稿サイトのアカウント（端末ごと）と、この作品の Nコード・作品ID
@@ -2407,9 +2434,12 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
     for (const s of p.settings) {
       const label = document.createElement('label');
       label.textContent = s.label;
-      label.append(Object.assign(document.createElement('input'), {
+      const input = Object.assign(document.createElement('input'), {
         type: 'text', name: s.key, value: prefs.get(s.key, ''), placeholder: s.placeholder || '', autocomplete: 'off', spellcheck: false,
-      }));
+      });
+      // 入れ終わった（欄を離れた・Enter）時点で反映する
+      input.addEventListener('change', () => { commitProviderSetting(p, s.key, input.value); renderFileDestination(); });
+      label.append(input);
       box.append(label);
       if (s.hint) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: s.hint }));
     }
@@ -2421,34 +2451,70 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   $('settings-dialog').showModal();
 }
 
-function saveSettings() {
-  const form = $('settings-form');
-  prefs.set('font', form.font.value);
-  prefs.set('fontSize', form.fontSize.value);
-  prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || sync.DEFAULT_INTERVAL_MIN);
-  prefs.set('autoBackupKeep', Math.min(2000, Math.max(10, Number(form.autoBackupKeep.value) || sync.DEFAULT_KEEP)));
-  prefs.set('sync.prefix', sync.cleanPrefix($('sync-prefix').value.trim()));
-  if (driveProvider()) prefs.set(DEST_KEY, $('file-destination').value);
-  const acc = { narou: {}, alpha: {} };
-  form.querySelectorAll('[name^="acc."]').forEach((input) => {
-    const [, site, key] = input.name.split('.');
-    acc[site][key] = input.value.trim();
-  });
-  prefs.set('accounts', acc);
-  renderSyncState();
+// ---------- 設定はすべて、変えた時点で反映・保存する（設定画面は「閉じる」だけ） ----------
+
+// 「ファイル」メニューの保存先：Google ドライブを設定していなければ「この端末・その他」だけ
+function renderFileDestination() {
+  const dest = $('file-destination');
+  const hasDrive = !!driveProvider();
+  dest.querySelector('option[value="ask"]').disabled = !hasDrive;
+  dest.querySelector('option[value="gdrive"]').disabled = !hasDrive;
+  dest.value = hasDrive ? prefs.get(DEST_KEY, 'ask') : 'local';
+  $('file-destination-hint').textContent = hasDrive ? ''
+    : 'Google ドライブはまだ使えません（「クラウド」タブでクライアントIDを入れると選べます）。今は「この端末・その他」を使います。';
+}
+
+// リンク：入力中の行（URL が空のもの）は一覧に入れず、URL が入った行だけを残す
+function commitLinks() {
   prefs.set('links', editingLinks
     .map((l) => ({ name: l.name.trim(), url: normalizeUrl(l.url) }))
     .filter((l) => l.url)
     .map((l) => ({ ...l, name: l.name || l.url })));
-  for (const p of providers) {
-    for (const s of p.settings) {
-      const v = form.elements[s.key].value.trim();
-      if (v !== prefs.get(s.key, '')) { prefs.set(s.key, v); p.signOut(); }
-    }
-    p.preload();
-  }
-  applyPrefs();
-  toast('設定を保存しました');
+}
+
+function commitAccounts() {
+  const acc = { narou: {}, alpha: {} };
+  $('settings-form').querySelectorAll('[name^="acc."]').forEach((input) => {
+    const [, site, key] = input.name.split('.');
+    acc[site][key] = input.value.trim();
+  });
+  prefs.set('accounts', acc);
+}
+
+// クラウド接続（クライアントID・API キー）：変わったらログインし直しになる
+function commitProviderSetting(p, key, value) {
+  const v = value.trim();
+  if (v === prefs.get(key, '')) return;
+  prefs.set(key, v);
+  p.signOut();
+  p.preload();
+  renderCloudActions();
+  sync.refresh().then(renderSyncState).catch(() => {});
+  toast(v ? '接続の設定を変えました（ログインし直してください）' : '接続の設定を消しました');
+}
+
+function bindSettingsInputs() {
+  const form = $('settings-form');
+  form.font.addEventListener('change', () => { prefs.set('font', form.font.value); applyPrefs(); });
+  form.fontSize.addEventListener('change', () => { prefs.set('fontSize', form.fontSize.value); applyPrefs(); });
+  form.autoBackupInterval.addEventListener('change', () => {
+    prefs.set('autoBackupInterval', Number(form.autoBackupInterval.value) || sync.DEFAULT_INTERVAL_MIN);
+    renderSyncState();
+  });
+  form.autoBackupKeep.addEventListener('change', () => {
+    const n = Math.min(2000, Math.max(10, Number(form.autoBackupKeep.value) || sync.DEFAULT_KEEP));
+    form.autoBackupKeep.value = String(n);
+    prefs.set('autoBackupKeep', n);
+    renderSyncState();
+  });
+  $('sync-prefix').addEventListener('change', (e) => {
+    const v = sync.cleanPrefix(e.target.value.trim());
+    e.target.value = v;
+    prefs.set('sync.prefix', v);
+    renderSyncState();
+  });
+  $('file-destination').addEventListener('change', (e) => { if (driveProvider()) prefs.set(DEST_KEY, e.target.value); });
+  form.querySelectorAll('[name^="acc."]').forEach((input) => input.addEventListener('input', commitAccounts));
 }
 
 // ---------- イベント ----------
@@ -2701,7 +2767,8 @@ function bindEvents() {
     if (d.id === 'image-menu') buildImageMenu();
   }));
 
-  bindDialog('settings-dialog', saveSettings);
+  bindDialog('settings-dialog');
+  bindSettingsInputs();
   bindDialog('drive-save-dialog');
   // Google ドライブに保存：押したその場で保存を始める（ログイン画面を出すことがあるため）
   $('drive-save-form').addEventListener('submit', (e) => {
@@ -2741,6 +2808,8 @@ function bindEvents() {
   $('work-alpha-id').addEventListener('input', (e) => setWorkCode('alpha', e.target.value));
   // 表示・ボタンの設定はチェックした時点で反映・保存する
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
+  $('iphone-max-mode').addEventListener('change', saveIphoneMaxSettings);
+  $('iphone-max-px').addEventListener('change', saveIphoneMaxSettings);
   // 別のタブで同じ作品が保存されたら知らせる
   if (tabChannel) {
     tabChannel.onmessage = (e) => {
