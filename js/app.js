@@ -23,7 +23,7 @@ import { providers } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.23-5.11';
+const APP_VERSION = '2026.10.23-5.12';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -230,6 +230,7 @@ function editEpisode(field, value) {
   if (DRAFT_FIELDS.includes(field)) cur()[field] = value;
   else episode()[field] = value;
   touchEpisode();
+  refreshCurrentVersionLabel();
   if (wasEmpty !== (!cur().body && !cur().title)) renderSiteTabs(); // 「（空）」の表示を更新
   // 目次の表示（タイトル・並び順・文字数）を少し待ってから更新する
   if (field === 'title' || epSort.key !== 'file') {
@@ -1183,7 +1184,7 @@ async function epOpen({ force = false } = {}) {
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
-  await saveEpisodeVersion('開く前（自動）', ep);
+  await raiseEpisodeVersion(ep); // 開く前の内容は前の番号の版に残る
   applyEpisodeSnapshot(ep, data.episode);
   touchEpisode(ep);
   changed();
@@ -1202,7 +1203,7 @@ async function importText() {
   const body = text.replace(/\r\n?/g, '\n');
   const d = cur();
   if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
-  if (d.body) await saveEpisodeVersion('テキストを読み込む前（自動）');
+  if (d.body) await raiseEpisodeVersion(); // 読み込む前の内容は前の番号の版に残る
   d.body = body;
   touchEpisode();
   changed();
@@ -1332,7 +1333,7 @@ async function runSiteCopy() {
   // 上書きする前の状態を残す（元に戻せるように）
   if (over.length) {
     if (plan.all) await saveVersion(`${toName}用へのコピー前（自動）`, `${new Date().toLocaleString('ja-JP')} にメインから${toName}用へ全エピソードをコピーする前の状態`);
-    else await saveEpisodeVersion(`${toName}用へのコピー前`, plan.eps[0]);
+    else await raiseEpisodeVersion(plan.eps[0]); // コピー前の内容は前の番号の版に残る
   }
   for (const c of plan.changes) {
     c.ep.drafts[plan.to][c.f] = c.text;
@@ -1378,6 +1379,7 @@ async function episodeVersions(episodeId = episode().id) {
 
 async function saveEpisodeVersion(name, ep = episode()) {
   await flush();
+  const now = new Date().toISOString();
   const v = {
     id: newVersionId(),
     kind: 'episode',
@@ -1385,7 +1387,8 @@ async function saveEpisodeVersion(name, ep = episode()) {
     episodeId: ep.id,
     name,
     memo: '',
-    createdAt: new Date().toISOString(),
+    createdAt: now,
+    updatedAt: now,
     chars: countChars(mainDraft(ep).body).all,
     data: episodeSnapshot(ep),
   };
@@ -1393,63 +1396,123 @@ async function saveEpisodeVersion(name, ep = episode()) {
   return v;
 }
 
-// 版の一覧。shownId … 今その版の内容を表示しているとき（一覧で選んで切り替えたとき）の版
-let versionRenderSeq = 0;
-async function renderEpisodeVersions(shownId = '') {
-  const sel = $('ep-version');
-  const seq = ++versionRenderSeq;
-  const list = await episodeVersions();
-  if (seq !== versionRenderSeq) return; // あとから呼ばれた描画を優先する
-  sel.replaceChildren(new Option(list.length ? `今の内容（版 ${list.length}件）` : '版はまだありません', ''));
-  for (const v of list) sel.append(new Option(`${v.name}　${fmtTime(v.createdAt)}　${v.chars.toLocaleString()}字`, v.id));
-  sel.value = list.some((v) => v.id === shownId) ? shownId : '';
+// ---- 版の考え方 ----
+// 編集している内容は、いつもどれか1つの版（ep.versionId）。書いた内容はその版のもの。
+// 別の版を選ぶと、今の版に今の内容をしまってから、選んだ版の内容を出す（何も消えない）。
+// 「版を上げる」は、今の版をしまって、同じ内容で次の番号の版（第N+1版）を作り、それを編集する。
+const versionNo = (v) => Number(/^第(\d+)版$/.exec(v?.name || '')?.[1] || 0);
+const versionTime = (v) => v.updatedAt || v.createdAt;
+const nextVersionNo = (list) => Math.max(0, ...list.map(versionNo)) + 1;
+
+// 今の版を確かめる。まだなければ（以前の版で作ったエピソードなど）、今の内容を次の番号の版にする
+const ensuringVersion = new Map();
+function ensureEpisodeVersion(ep = episode()) {
+  if (!ensuringVersion.has(ep.id)) {
+    ensuringVersion.set(ep.id, (async () => {
+      const list = await episodeVersions(ep.id);
+      let cur = list.find((v) => v.id === ep.versionId);
+      if (!cur) {
+        cur = await saveEpisodeVersion(`第${nextVersionNo(list)}版`, ep);
+        list.unshift(cur);
+        ep.versionId = cur.id;
+        // 版の割り当てだけなので、作品の更新日時は変えずに端末へ保存する
+        dirty = true;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(flush, AUTOSAVE_MS);
+      }
+      return { list, cur };
+    })().finally(() => ensuringVersion.delete(ep.id)));
+  }
+  return ensuringVersion.get(ep.id);
 }
 
-// 一覧で版を選んだら、その版の内容に切り替えるだけ（新しい版は作らない。残したいときは「版を上げる」）
+// 今の版に、今の内容をしまう
+async function storeCurrentVersion(ep, cur) {
+  const data = episodeSnapshot(ep);
+  if (JSON.stringify(cur.data) === JSON.stringify(data)) return cur;
+  const v = { ...cur, data, chars: countChars(mainDraft(ep).body).all, updatedAt: ep.updatedAt || new Date().toISOString() };
+  await versions.put(v);
+  return v;
+}
+
+// 版を上げる（前の版は今の内容のまま残り、同じ内容の新しい番号の版を編集する）
+async function raiseEpisodeVersion(ep = episode()) {
+  await flush();
+  const { list, cur } = await ensureEpisodeVersion(ep);
+  await storeCurrentVersion(ep, cur);
+  const v = await saveEpisodeVersion(`第${nextVersionNo(list)}版`, ep);
+  ep.versionId = v.id;
+  changed();
+  return { from: cur, to: v };
+}
+
+const versionLabel = (name, time, chars) => `${name}　${fmtTime(time)}　${Number(chars || 0).toLocaleString()}字`;
+
+// 版の一覧（「第○版　時刻　文字数」）。編集している版を選んだ状態にする
+let versionRenderSeq = 0;
+async function renderEpisodeVersions() {
+  const sel = $('ep-version');
+  const ep = episode();
+  const seq = ++versionRenderSeq;
+  const { list, cur } = await ensureEpisodeVersion(ep);
+  if (seq !== versionRenderSeq || ep !== episode()) return; // あとから呼ばれた描画を優先する
+  const sorted = [...list].sort((a, b) => versionNo(b) - versionNo(a) || String(versionTime(b)).localeCompare(String(versionTime(a))));
+  sel.replaceChildren(...sorted.map((v) => (v.id === cur.id
+    ? new Option(versionLabel(v.name, [ep.updatedAt, versionTime(v)].filter(Boolean).sort().pop(), countChars(mainDraft(ep).body).all), v.id)
+    : new Option(versionLabel(v.name, versionTime(v), v.chars), v.id))));
+  sel.value = cur.id;
+}
+
+// 書いているあいだ、編集している版の「時刻・文字数」を新しくする
+let versionLabelTimer = null;
+function refreshCurrentVersionLabel() {
+  clearTimeout(versionLabelTimer);
+  versionLabelTimer = setTimeout(() => {
+    const ep = episode();
+    const opt = $('ep-version').selectedOptions[0];
+    if (!opt || opt.value !== ep.versionId) return;
+    opt.textContent = versionLabel(opt.textContent.split('　')[0], ep.updatedAt, countChars(mainDraft(ep).body).all);
+  }, 1000);
+}
+
+// 一覧で版を選んだら、今の版に今の内容をしまってから、その版の内容に切り替える
 async function switchEpisodeVersion(id) {
   const ep = episode();
-  const list = await episodeVersions();
+  const { list, cur } = await ensureEpisodeVersion(ep);
   const v = list.find((x) => x.id === id);
-  if (!v) return;
-  const now = JSON.stringify(episodeSnapshot(ep));
-  const saved = list.some((x) => JSON.stringify(x.data) === now);
-  if (!saved && !(await ask(`今の内容は、まだ版に残っていません。\n「${v.name}」に切り替えると、今の内容は消えます（残すときは、キャンセルして「＋ 版を上げる」を押してください）。\n切り替えますか？`, { ok: '切り替える', danger: true }))) {
-    await renderEpisodeVersions();
-    return;
-  }
+  if (!v || v.id === cur.id) return;
+  await storeCurrentVersion(ep, cur);
   applyEpisodeSnapshot(ep, v.data);
-  touchEpisode(ep);
+  ep.versionId = v.id;
+  ep.updatedAt = versionTime(v); // その版の内容を最後に書いた時刻
   changed();
   showEpisode();
-  await renderEpisodeVersions(v.id);
-  toast(`「${episodeName(ep)}」を ${v.name} の内容にしました`);
+  toast(`「${episodeName(ep)}」を ${v.name} に切り替えました（${cur.name}は残っています）`);
 }
 
-// 「この版を削除」：一覧で選んでいる版。選んでいなければ、どの版を消すか選んでもらう
+// 「この版を削除」：今表示している版を削除し、残っている一番新しい版を表示する
 async function deleteEpisodeVersion() {
-  const list = await episodeVersions();
-  if (!list.length) { toast('このエピソードには版がありません'); return; }
-  let v = list.find((x) => x.id === $('ep-version').value);
-  if (!v) {
-    const r = await choose('削除する版を選んでください。', [{ value: 'delete', label: '削除', danger: true }],
-      { select: { label: '版', options: list.map((x) => ({ value: x.id, label: `${x.name}　${fmtTime(x.createdAt)}　${x.chars.toLocaleString()}字` })) } });
-    if (!r) return;
-    v = list.find((x) => x.id === r.value);
-    if (!v) return;
-  }
-  if (!(await ask(`版「${v.name}」（${fmtTime(v.createdAt)}）を削除しますか？\n削除した版は元に戻せません。今の内容はそのままです。`, { ok: '削除する', danger: true }))) return;
-  await versions.remove(v.id);
-  await renderEpisodeVersions();
-  toast(`版「${v.name}」を削除しました`);
+  const ep = episode();
+  const { list, cur } = await ensureEpisodeVersion(ep);
+  const rest = list.filter((v) => v.id !== cur.id)
+    .sort((a, b) => versionNo(b) - versionNo(a) || String(versionTime(b)).localeCompare(String(versionTime(a))));
+  if (!rest.length) { toast(`${cur.name}しかないので削除できません（版は最低1つ必要です）`); return; }
+  const next = rest[0];
+  if (!(await ask(`今表示している「${cur.name}」を削除しますか？\n削除した版は元に戻せません。削除すると「${next.name}」を表示します。`, { ok: '削除する', danger: true }))) return;
+  await versions.remove(cur.id);
+  applyEpisodeSnapshot(ep, next.data);
+  ep.versionId = next.id;
+  ep.updatedAt = versionTime(next);
+  changed();
+  showEpisode();
+  toast(`「${cur.name}」を削除して、「${next.name}」を表示しました`);
 }
 
 async function episodeVersionUp() {
   const ep = episode();
-  // 「第○版」の続きの番号にする（「○○に戻す前」は数えない）
-  const n = Math.max(0, ...(await episodeVersions()).map((x) => Number(/^第(\d+)版$/.exec(x.name)?.[1] || 0))) + 1;
-  const v = await saveEpisodeVersion(`第${n}版`, ep);
+  const { from, to } = await raiseEpisodeVersion(ep);
   await renderEpisodeVersions();
-  toast(`「${episodeName(ep)}」を ${v.name} として残しました`);
+  toast(`${to.name}にしました（${from.name}は今の内容のまま残っています）`);
 }
 
 async function removeEpisodeVersions(episodeId) {
@@ -1555,19 +1618,15 @@ async function openVersion(id) {
 }
 
 async function restoreVersion(v) {
-  if (!(await ask(`「${v.name}」の内容に戻しますか？\n今の内容は「${v.name}に戻す前」として自動で残ります。`))) return;
+  // エピソードの版は、その版に切り替えるだけ（今の版は今の内容のまま残る）
   if (isEpisodeVersion(v)) {
     const index = project.episodes.findIndex((e) => e.id === v.episodeId);
     if (index < 0) { toast('このエピソードは削除されています', true); return; }
-    const ep = project.episodes[index];
-    await saveEpisodeVersion(`${v.name}に戻す前`, ep);
-    applyEpisodeSnapshot(ep, v.data);
-    touchEpisode(ep);
-    changed();
     selectEpisode(index);
-    toast(`「${episodeName(ep)}」を ${v.name} に戻しました`);
+    await switchEpisodeVersion(v.id);
     return;
   }
+  if (!(await ask(`「${v.name}」の内容に戻しますか？\n今の内容は「${v.name}に戻す前」として自動で残ります。`))) return;
   await saveVersion(`${v.name}に戻す前`, `${new Date().toLocaleString('ja-JP')} に「${v.name}」へ戻す前の状態`);
   const restored = normalize({ ...v.data, id: project.id, links: project.links, createdAt: project.createdAt });
   restored.updatedAt = new Date().toISOString();
