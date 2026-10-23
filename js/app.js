@@ -18,12 +18,12 @@ import {
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
 } from './notation.js';
 import { localFile, WORK_TYPES, TEXT_TYPES } from './localfile.js';
-import { providers } from './providers/index.js';
+import { providers, activeProvider } from './providers/index.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.23-5.12';
+const APP_VERSION = '2026.10.23-5.13';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -891,26 +891,32 @@ async function importContent(content, links = {}) {
 
 // ---------- ローカルファイル ----------
 
-// ---------- 保存先の選択（Google ドライブ／この端末・その他） ----------
-// 設定（端末ごと）：'ask' 毎回選ぶ（既定）／'gdrive' Google ドライブを優先／'local' この端末・その他を優先
-// Google ドライブを設定していない端末では、選ぶ画面を出さずに「この端末・その他」にする。
+// ---------- 保存先の選択（クラウド／この端末・その他） ----------
+// クラウドは「設定」→「クラウド」で選んだ1つ（Google ドライブか OneDrive）。
+// 設定（端末ごと）：'ask' 毎回選ぶ（既定）／'cloud' クラウドを優先／'local' この端末・その他を優先
+// クラウドを設定していない端末では、選ぶ画面を出さずに「この端末・その他」にする。
+// （以前の版の 'gdrive' は 'cloud' として読む）
 const DEST_KEY = 'file.destination';
+const oldCloud = (v) => (v === 'gdrive' ? 'cloud' : v);
 
+// 「ファイル」で使えるクラウド（選んだクラウドに ID を入れてあれば）
 function driveProvider() {
-  return providers.find((p) => p.isConfigured() && p.save) || null;
+  const p = activeProvider();
+  return p.isConfigured() && p.save ? p : null;
 }
+const cloudName = () => activeProvider().label;
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 async function chooseDestination(kind) {
   const p = driveProvider();
   if (!p) return 'local';
-  const pref = prefs.get(DEST_KEY, 'ask');
+  const pref = oldCloud(prefs.get(DEST_KEY, 'ask'));
   if (pref !== 'ask') return pref;
-  const last = prefs.get('file.lastDestination', 'local');
-  const drive = { value: 'gdrive', label: p.label, primary: last === 'gdrive' };
-  const local = { value: 'local', label: 'この端末・その他（iCloud・OneDrive など）', primary: last !== 'gdrive' };
+  const last = oldCloud(prefs.get('file.lastDestination', 'local'));
+  const drive = { value: 'cloud', label: p.label, primary: last === 'cloud' };
+  const local = { value: 'local', label: 'この端末・その他（iCloud など）', primary: last !== 'cloud' };
   // 前回使ったほうを右端（目立つボタン）に置く
-  const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'gdrive' ? [local, drive] : [drive, local]);
+  const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'cloud' ? [local, drive] : [drive, local]);
   if (r) prefs.set('file.lastDestination', r);
   return r;
 }
@@ -921,22 +927,25 @@ const FILE_KINDS = {
   txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
 };
 
-// ---------- Google ドライブの画面（エディター内のフォルダ選択） ----------
-// iPhone・iPad でも、マイドライブのフォルダをたどって選び、その場で新しいフォルダを作れる。
+// ---------- クラウドの画面（エディター内のフォルダ選択。Google ドライブ・OneDrive 共通） ----------
+// iPhone・iPad でも、クラウドのフォルダをたどって選び、その場で新しいフォルダを作れる。
+// フォルダの読み方はサービスごと：Google ドライブは全部を一度に（folders）、OneDrive は開くたびに（childFolders）。
 //
 // mode: 'save'   … ファイル名を入れて、このフォルダに保存（一覧のファイルを押すと上書き）
 //       'open'   … フォルダをたどって、ファイルを選ぶ
-//       'folder' … フォルダを選ぶ（「クラウド」タブの保存先フォルダ）
-// 戻り値: save → { type: 'gdrive', id, name }／'local'（この端末・その他を選び直した）／null
+//       'folder' … フォルダを選ぶ（「クラウド」タブの保存先フォルダ・自動バックアップのフォルダ）
+// 戻り値: save → { type: 'cloud', label, id, name }／'local'（この端末・その他を選び直した）／null
 //         open → { id, name }／'local'／null
 //         folder → { id, name }／null
-let driveUi = null; // { p, mode, kind, text, workId, resolve, folders, byId, cur }
+let driveUi = null; // { p, mode, kind, text, workId, resolve, folders, byId, cur, lazy, loaded }
 
 const hasExt = (name, kind) => name.toLowerCase().endsWith(FILE_KINDS[kind].ext);
+// 前回開いたフォルダ（サービスごと。Google ドライブは以前の版と同じ gdrive.lastFolder）
+const lastFolderKey = (p) => `${p.id}.lastFolder`;
 
 function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', workId = '' }) {
   return new Promise((resolve) => {
-    driveUi = { p, mode, kind, text, workId, resolve, folders: null, byId: new Map(), cur: null };
+    driveUi = { p, mode, kind, text, workId, resolve, folders: null, byId: new Map(), cur: null, lazy: !p.folders, loaded: new Set() };
     $('drive-title').textContent = title;
     $('drive-name').value = name;
     $('drive-name-row').hidden = mode !== 'save';
@@ -944,10 +953,20 @@ function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', work
     $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : 'このフォルダに保存';
     $('drive-local').hidden = mode === 'folder';
     $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
-    $('drive-hint').textContent = 'マイドライブのフォルダが出ます（共有されたフォルダは出ません）。';
+    $('drive-hint').textContent = p.browseHint || '';
     $('drive-dialog').showModal();
     loadDriveFolders().catch((e) => { finishDrive(null); fail(e); });
   });
+}
+
+// 開くたびに読むサービス：そのフォルダの中のフォルダを読んでおく（一番上は null）
+async function ensureDriveChildren(ui, id) {
+  if (!ui.lazy || ui.loaded.has(id ?? '')) return;
+  const subs = await ui.p.childFolders(id);
+  for (const f of subs) {
+    if (!ui.byId.has(f.id)) { ui.folders.push(f); ui.byId.set(f.id, f); }
+  }
+  ui.loaded.add(id ?? '');
 }
 
 function finishDrive(result) {
@@ -972,11 +991,33 @@ async function loadDriveFolders() {
   }
   list.replaceChildren(li('empty', '読み込み中…'));
   const home = await ui.p.defaultFolderId().catch(() => null);
+  const last = prefs.get(lastFolderKey(ui.p), null);
+  if (ui.lazy) {
+    // 前回のフォルダ → 保存先フォルダ → 一番上。そのフォルダまでの並びを読んでおく（消されていれば次の候補）
+    ui.folders = [];
+    ui.byId = new Map();
+    let start = null;
+    for (const id of [last, home]) {
+      if (!id) continue;
+      const path = await ui.p.folderPath(id).catch(() => null);
+      if (driveUi !== ui) return;
+      if (path?.length) {
+        for (const f of path) if (!ui.byId.has(f.id)) { ui.folders.push(f); ui.byId.set(f.id, f); }
+        start = id;
+        break;
+      }
+    }
+    await ensureDriveChildren(ui, null);
+    if (start) await ensureDriveChildren(ui, start);
+    if (driveUi !== ui) return;
+    ui.cur = start;
+    await renderDrive();
+    return;
+  }
   const folders = await ui.p.folders();
   if (driveUi !== ui) return;
   ui.folders = folders;
   ui.byId = new Map(folders.map((f) => [f.id, f]));
-  const last = prefs.get('gdrive.lastFolder', null);
   ui.cur = [last, home].find((id) => id && ui.byId.has(id)) || null;
   await renderDrive();
 }
@@ -996,8 +1037,11 @@ function drivePath(id) {
 }
 
 function goDriveFolder(id) {
-  driveUi.cur = id;
-  renderDrive().catch(fail);
+  const ui = driveUi;
+  if (!ui) return;
+  ui.cur = id;
+  if (ui.lazy && !ui.loaded.has(id ?? '')) $('drive-list').replaceChildren(li('empty', '読み込み中…'));
+  ensureDriveChildren(ui, id).then(() => { if (driveUi === ui) return renderDrive(); }).catch(fail);
 }
 
 async function renderDrive() {
@@ -1005,7 +1049,7 @@ async function renderDrive() {
   if (!ui) return;
   // 場所（パンくず）
   const path = $('drive-path');
-  const crumbs = [{ id: null, name: 'マイドライブ' }, ...drivePath(ui.cur)];
+  const crumbs = [{ id: null, name: ui.p.rootName || ui.p.label }, ...drivePath(ui.cur)];
   path.replaceChildren();
   crumbs.forEach((c, i) => {
     if (i) path.append(Object.assign(document.createElement('span'), { className: 'sep', textContent: '▸' }));
@@ -1039,7 +1083,7 @@ async function renderDrive() {
       const act = ui.mode === 'open'
         ? button('開く', () => finishDrive({ id: f.id, name: f.name }), 'primary')
         : button('上書き', async () => {
-          if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は Google ドライブの「版を管理」から戻せます）`, { ok: '上書きする' }))) return;
+          if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${ui.p.label} の版の履歴から戻せます）`, { ok: '上書きする' }))) return;
           await runDriveSave(f.name, f.id);
         }, 'danger');
       list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [act]));
@@ -1053,11 +1097,16 @@ async function renderDrive() {
 async function newDriveFolder() {
   const ui = driveUi;
   if (!ui) return;
-  const name = await askText(`新しいフォルダの名前（${ui.cur ? `「${ui.byId.get(ui.cur).name}」の中` : 'マイドライブの直下'}に作ります）`, '小説');
+  const name = await askText(`新しいフォルダの名前（${ui.cur ? `「${ui.byId.get(ui.cur).name}」の中` : `${ui.p.rootName || ui.p.label}の直下`}に作ります）`, '小説');
   if (!name || !name.trim() || driveUi !== ui) return;
   // 同じ場所に同じ名前のフォルダがあれば、作らずにそれを開く（同じ名前のフォルダが並ばないように）
   const f = await ui.p.makeFolder(name.trim(), ui.cur);
-  if (!ui.byId.has(f.id)) { ui.folders.push(f); ui.byId.set(f.id, f); }
+  if (!ui.byId.has(f.id)) {
+    // 開くたびに読むサービスでは、親が一番上でも一覧の上に並ぶよう、親を今のフォルダにそろえる
+    const entry = ui.lazy ? { ...f, parents: ui.cur ? [ui.cur] : [] } : f;
+    ui.folders.push(entry);
+    ui.byId.set(f.id, entry);
+  }
   goDriveFolder(f.id);
   toast(f.existed ? `同じ名前のフォルダ「${f.name}」が既にあるので、それを開きました` : `フォルダ「${f.name}」を作りました`);
 }
@@ -1066,7 +1115,7 @@ async function newDriveFolder() {
 async function driveOk() {
   const ui = driveUi;
   if (!ui?.cur) return;
-  prefs.set('gdrive.lastFolder', ui.cur);
+  prefs.set(lastFolderKey(ui.p), ui.cur);
   if (ui.mode === 'folder') { const f = ui.byId.get(ui.cur); finishDrive({ id: f.id, name: f.name }); return; }
   if (ui.mode === 'save') await runDriveSave($('drive-name').value);
 }
@@ -1076,10 +1125,11 @@ async function runDriveSave(name, fileId = null) {
   if (!ui || !ui.cur) return;
   let finalName = name.trim() || 'untitled';
   if (!hasExt(finalName, ui.kind)) finalName += FILE_KINDS[ui.kind].ext;
-  const id = await ui.p.save(ui.text, finalName, fileId, { workId: ui.workId, mime: FILE_KINDS[ui.kind].mime, folderId: ui.cur });
-  prefs.set('gdrive.lastFolder', ui.cur);
-  prefs.set('file.lastDestination', 'gdrive');
-  finishDrive({ type: 'gdrive', id, name: finalName });
+  // 戻り値は ID（Google ドライブ）か { id, name }（OneDrive。同じ名前があって番号を付けたときは、その名前）
+  const saved = await ui.p.save(ui.text, finalName, fileId, { workId: ui.workId, mime: FILE_KINDS[ui.kind].mime, folderId: ui.cur });
+  prefs.set(lastFolderKey(ui.p), ui.cur);
+  prefs.set('file.lastDestination', 'cloud');
+  finishDrive({ type: 'cloud', label: ui.p.label, id: saved?.id ?? saved, name: saved?.name || finalName });
 }
 
 // 保存・開くで使う入口（前の版からの名前）
@@ -1092,13 +1142,14 @@ function pickDriveFile(p, title, kind = 'json') {
 }
 
 /**
- * 保存先を選んで保存する（Google ドライブ／この端末・その他）。設定の「ファイル」タブに従う。
- * 戻り値: { type: 'gdrive', id, name }／{ type: 'local', handle, how, name }／null（やめた）
+ * 保存先を選んで保存する（クラウド／この端末・その他）。設定の「ファイル」タブに従う。
+ * title：クラウドの画面の見出し（「（全体：すべての作品）」など。前に「○○に保存」を付ける）
+ * 戻り値: { type: 'cloud', label, id, name }／{ type: 'local', handle, how, name }／null（やめた）
  */
 async function saveTextTo(text, name, { title, force = false, workId = '', kind = 'json' } = {}) {
   const dest = await chooseDestination('save', { force });
   let where = dest;
-  if (dest === 'gdrive') {
+  if (dest === 'cloud') {
     const r = await openDriveSave({ p: driveProvider(), title, name, text, workId, kind });
     if (r !== 'local') return r;
     where = 'local';
@@ -1113,7 +1164,7 @@ async function saveTextTo(text, name, { title, force = false, workId = '', kind 
 }
 
 function savedMessage(r, what) {
-  if (r.type === 'gdrive') return `${what}を Google ドライブに「${r.name}」として保存しました`;
+  if (r.type === 'cloud') return `${what}を ${r.label} に「${r.name}」として保存しました`;
   if (r.how === 'downloaded') return `${what}を書き出しました（「ダウンロード」フォルダ）`;
   if (r.how === 'shared') return `${what}を渡しました（共有メニューで選んだ保存先）`;
   return `${what}を「${r.name}」に保存しました`;
@@ -1121,15 +1172,15 @@ function savedMessage(r, what) {
 
 /**
  * 保存先を選んで開く（「どこから開きますか？」。設定の「ファイル」タブに従う）。kind: 'json'／'txt'
- * 戻り値: { text, name, source: 'gdrive'|'local', id?, handle?, file? }／null
+ * 戻り値: { text, name, source: 'cloud'|'local', id?, handle?, file? }／null
  */
 async function openFrom(title, { force = false, kind = 'json' } = {}) {
   const dest = await chooseDestination('open', { force });
   let where = dest;
-  if (dest === 'gdrive') {
+  if (dest === 'cloud') {
     const p = driveProvider();
     const f = await pickDriveFile(p, title, kind);
-    if (f && f !== 'local') return { text: await p.load(f.id), name: f.name, source: 'gdrive', id: f.id };
+    if (f && f !== 'local') return { text: await p.load(f.id), name: f.name, source: 'cloud', id: f.id };
     if (f !== 'local') return null;
     where = 'local'; // 「この端末・その他から開く」を選び直した
   }
@@ -1144,7 +1195,7 @@ async function openFrom(title, { force = false, kind = 'json' } = {}) {
 async function allSaveAs({ force = false } = {}) {
   await flush();
   const { text, count } = await makeBackup();
-  const r = await saveTextTo(text, backupFileName(), { title: 'Google ドライブに保存（全体：すべての作品）', force });
+  const r = await saveTextTo(text, backupFileName(), { title: `${cloudName()}に保存（全体：すべての作品）`, force });
   if (!r) return;
   prefs.set('lastBackupAt', new Date().toISOString());
   toast(savedMessage(r, `全体（${count}作品・ひな型・設定）`));
@@ -1169,7 +1220,7 @@ async function epSaveAs({ force = false } = {}) {
   await flush();
   const ep = episode();
   const label = mainDraft(ep).title || `第${epIndex + 1}話`;
-  const r = await saveTextTo(makeEpisodeFile(ep, project.title), fileName(`${project.title || '無題'}_${label}`, '.json'), { title: 'Google ドライブに保存（このエピソード）', force });
+  const r = await saveTextTo(makeEpisodeFile(ep, project.title), fileName(`${project.title || '無題'}_${label}`, '.json'), { title: `${cloudName()}に保存（このエピソード）`, force });
   if (r) toast(savedMessage(r, `エピソード「${label}」`));
 }
 
@@ -1217,7 +1268,7 @@ async function exportEpisode() {
   const d = cur();
   if (!d.body) { toast('本文は空です'); return; }
   const name = fileName(`${project.title || '無題'}_${d.title || epIndex + 1}`, '.txt');
-  const r = await saveTextTo(convert(editSite, d.body), name, { title: 'Google ドライブに保存（このエピソードのテキスト）', kind: 'txt' });
+  const r = await saveTextTo(convert(editSite, d.body), name, { title: `${cloudName()}に保存（このエピソードのテキスト）`, kind: 'txt' });
   if (r) toast(savedMessage(r, `「${d.title || '（無題）'}」のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -1227,7 +1278,7 @@ async function exportAll() {
     .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
     .join('\n\n――――――――――\n\n');
   const head = project.title ? project.title + '\n\n' : '';
-  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: 'Google ドライブに保存（全エピソードのテキスト）', kind: 'txt' });
+  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: `${cloudName()}に保存（全エピソードのテキスト）`, kind: 'txt' });
   if (r) toast(savedMessage(r, `全${project.episodes.length}話のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -1703,8 +1754,10 @@ async function remindBackup() {
 
 let syncPending = null; // 「あとで」と答えた、他の端末の新しいバックアップ
 
+// 自動バックアップの「クラウド」方式で使うサービス（「設定」→「クラウド」で選んだもの）
 function syncProvider() {
-  return providers.find((p) => p.backups) || null;
+  const p = activeProvider();
+  return p.backups ? p : null;
 }
 
 function syncStatusShort() {
@@ -1723,44 +1776,49 @@ function syncStatusShort() {
 function renderSyncState() {
   const st = sync.getState();
   const m = sync.mode();
+  const cloud = syncProvider();
+  const cloudLabel = cloud?.label || 'クラウド';
   const b = $('sync-attention');
   const attention = syncPending ? '⚠ 他の端末の更新を確認'
     : st === 'need-folder' ? '⚠ 自動バックアップのフォルダを選ぶ'
     : st === 'need-permission' ? '⚠ 自動バックアップを再開'
-      : st === 'need-login' ? '⚠ Google ドライブにログイン（自動バックアップ）'
+      : st === 'need-login' ? `⚠ ${cloudLabel}にログイン（自動バックアップ）`
         : '';
   b.textContent = attention;
   b.hidden = !attention;
 
   const sel = $('sync-mode');
+  const cloudOpt = sel.querySelector('option[value="cloud"]');
+  cloudOpt.textContent = `${cloudLabel}（「クラウド」タブで選んだもの）`;
   sel.value = m;
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
-  sel.querySelector('option[value="gdrive"]').disabled = !syncProvider()?.isConfigured() && m !== 'gdrive';
-  $('sync-mode-hint').textContent = m === 'gdrive'
-    ? '自分で作ったフォルダ（名前は自由）を選ぶと、そのフォルダに直接保存します。選ぶ画面で新しいフォルダも作れます。端末どうしで同期するときは、すべての端末で同じフォルダを選んでください。ログインは約1時間で切れます。切れたら上に出るボタンを押してください。'
+  cloudOpt.disabled = !cloud?.isConfigured() && m !== 'cloud';
+  $('sync-mode-hint').textContent = m === 'cloud'
+    ? `${cloudLabel}の、自分で作ったフォルダ（名前は自由）を選ぶと、そのフォルダに直接保存します。選ぶ画面で新しいフォルダも作れます。端末どうしで同期するときは、すべての端末で同じクラウド・同じフォルダを選んでください。`
+      + (cloud?.id === 'onedrive' ? 'ログインは約1日続きます（使っているあいだは自動で更新します）。切れたら上に出るボタンを押してください。' : 'ログインは約1時間で切れます。切れたら上に出るボタンを押してください。')
     : m === 'folder'
-      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（Google ドライブ方式）と同期するときは、パソコン版 Google ドライブの中の、iPhone・iPad と同じフォルダを選んでください。'
+      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。PC のネットワークドライブ（NAS など）や、OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（クラウド方式）と同期するときは、パソコン版のアプリの同期フォルダの中の、iPhone・iPad と同じフォルダを選んでください。'
       : sync.folderSupported
-        ? 'iPhone・iPad と同期するときは「Google ドライブ」がおすすめです（「クラウド」タブでクライアントIDを入れると選べます）。'
-        : 'この端末では「Google ドライブ」を選べます（「クラウド」タブでクライアントIDを入れると選べます）。';
+        ? `iPhone・iPad と同期するときは「${cloudLabel}」がおすすめです（「クラウド」タブで選んで、ID を入れると使えます）。`
+        : `この端末では「${cloudLabel}」を選べます（「クラウド」タブで選んで、ID を入れると使えます）。`;
 
-  // バックアップ先のフォルダ（フォルダ方式：端末のフォルダ／Google ドライブ方式：ドライブのフォルダ）
-  const backupInfo = m === 'gdrive' ? syncProvider()?.backupFolderInfo?.() : null;
+  // バックアップ先のフォルダ（フォルダ方式：端末のフォルダ／クラウド方式：クラウドのフォルダ）
+  const backupInfo = m === 'cloud' ? cloud?.backupFolderInfo?.() : null;
   $('sync-folder-line').textContent = m === 'folder' ? `バックアップ先：${sync.folderName() || '（まだ選んでいません）'}`
-    : m === 'gdrive' ? `バックアップ先：${backupInfo ? `Google ドライブの「${backupInfo.name}」` : '（まだ選んでいません）'}` : '';
+    : m === 'cloud' ? `バックアップ先：${backupInfo ? `${cloudLabel}の「${backupInfo.name}」` : '（まだ選んでいません）'}` : '';
   $('sync-folder-line').hidden = !$('sync-folder-line').textContent;
   $('sync-choose').textContent = m === 'folder' ? (sync.folderName() ? 'フォルダを選び直す…' : 'フォルダを選ぶ…')
-    : st === 'need-login' ? 'Google ドライブにログイン' : (backupInfo ? 'フォルダを選び直す・作る…' : 'フォルダを選ぶ・作る…');
-  $('sync-folder-row').hidden = !(m === 'folder' || m === 'gdrive');
+    : st === 'need-login' ? `${cloudLabel}にログイン` : (backupInfo ? 'フォルダを選び直す・作る…' : 'フォルダを選ぶ・作る…');
+  $('sync-folder-row').hidden = !(m === 'folder' || m === 'cloud');
 
   const last = sync.lastBackup();
   const lastText = last ? `\n最後に同期したバックアップ：${last.name}（${fmtTime(last.at)}）` : '';
   const err = sync.getError() ? `\n⚠ 前回の保存に失敗しました：${sync.getError()}` : '';
   const text = st === 'off' ? '止まっています。保存先を選ぶと始まります。'
     : st === 'need-folder' ? '⚠ バックアップ先のフォルダを選んでください（「フォルダを選ぶ」）。選ぶまでは保存しません。'
-    : st === 'unsupported' ? (m === 'folder' ? 'このブラウザではフォルダを使えません。「Google ドライブ」を選んでください。' : 'Google ドライブを使うには、「クラウド」タブでクライアントIDを入れてください。')
+    : st === 'unsupported' ? (m === 'folder' ? `このブラウザではフォルダを使えません。「${cloudLabel}」を選んでください。` : `${cloudLabel}を使うには、「クラウド」タブで ID を入れてください。`)
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
-        : st === 'need-login' ? '⚠ Google ドライブへのログインが必要です。上のボタン（または下の「Google ドライブにログイン」）を押してください。'
+        : st === 'need-login' ? `⚠ ${cloudLabel}へのログインが必要です。上のボタン（または下の「${cloudLabel}にログイン」）を押してください。`
           : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
             : `✅ 「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
   $('sync-status').textContent = text + lastText + err;
@@ -1920,7 +1978,7 @@ async function loadEnvironmentFrom(backup, name, env) {
   const how = await choose(`「${name}」の環境を読み込みます。小説は変わりません。\n\n入っているもの：\n${list}\n\n`
     + '・まとめる：この端末の設定を残したまま、足りないものを足します（ひな型・リンク・TXT インポートの条件は足し合わせ、アカウントは空の欄だけ埋めます）。\n'
     + '・置き換える：バックアップの設定で上書きします（表示・ファイル・自動バックアップの間隔なども）。\n'
-    + '自動バックアップの保存先・プレフィックス・Google ドライブのログインは、どちらでも変わりません。',
+    + '自動バックアップの保存先・プレフィックス・使うクラウドとそのログインは、どちらでも変わりません。',
   [{ value: 'replace', label: '置き換える', danger: true }, { value: 'merge', label: 'まとめる', primary: true }]);
   if (!how) return false;
   await flush();
@@ -2071,33 +2129,57 @@ async function exportPreSync() {
 
 // ---------- クラウド（設定の「クラウド」タブ） ----------
 
+// 使うクラウド（Google ドライブ／OneDrive）を切り替える。つなぎ直すため、画面を読み直す
+async function changeCloudProvider(id) {
+  const next = providers.find((p) => p.id === id);
+  if (!next || next === activeProvider()) return;
+  const usingBackup = sync.mode() === 'cloud';
+  if (!(await ask(`使うクラウドを「${next.label}」に切り替えますか？\n画面を読み直します。`
+    + (usingBackup ? `\n自動バックアップ（クラウド方式）も「${next.label}」のフォルダに保存するようになります（${activeProvider().label}のバックアップは消えません）。` : ''),
+  { ok: '切り替える', danger: false }))) {
+    $('cloud-provider').value = activeProvider().id;
+    return;
+  }
+  await flush();
+  prefs.set('cloud.provider', next.id);
+  prefs.set('settingsTab', 'cloud');
+  prefs.set('restoredMessage', `使うクラウドを「${next.label}」にしました`);
+  location.reload();
+}
+
 function renderCloudActions() {
   const box = $('cloud-action-list');
   box.replaceChildren();
-  for (const p of providers) {
-    const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
-    section.append(Object.assign(document.createElement('strong'), { textContent: p.label }));
-    if (!p.isConfigured()) {
-      section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '下の「クラウド接続の設定」にクライアントIDを入れると使えるようになります（入れ終わって欄を離れたときに反映されます）。' }));
-      box.append(section);
-      continue;
-    }
-    const row = Object.assign(document.createElement('div'), { className: 'button-row' });
-    row.append(p.isSignedIn()
-      ? button('ログアウト', () => { p.signOut(); renderCloudActions(); sync.refresh(); toast(p.label + 'からログアウトしました'); })
-      : button('ログイン', async () => { await p.signIn(); renderCloudActions(); await syncResumeIfReady(); toast(p.label + 'にログインしました'); }));
-    section.append(row);
-    section.append(Object.assign(document.createElement('p'), {
-      className: 'hint',
-      textContent: '「ファイル」メニューで Google ドライブを使うか、この端末・その他を使うか（両方か）は、「ファイル」タブで選べます。',
-    }));
-    if (p.folderInfo) section.append(renderCloudFolder(p));
-    section.append(Object.assign(document.createElement('p'), {
-      className: 'hint',
-      textContent: '自動バックアップ（同期）に Google ドライブを使うときは、「自動バックアップ」タブで保存先を「Google ドライブ」にしてください。バックアップ先のフォルダも、そのタブで選びます（下の保存先フォルダとは別）。',
-    }));
+  const p = activeProvider();
+  $('cloud-provider').value = p.id;
+  $('cloud-actions-legend').textContent = `${p.label}：ログインと保存先フォルダ`;
+  const section = Object.assign(document.createElement('div'), { className: 'cloud-provider' });
+  if (!p.isConfigured()) {
+    section.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: `下の「${p.label}の接続の設定」に ID を入れると使えるようになります（入れ終わって欄を離れたときに反映されます）。手順は README にあります。` }));
     box.append(section);
+    return;
   }
+  const row = Object.assign(document.createElement('div'), { className: 'button-row' });
+  row.append(p.isSignedIn()
+    ? button('ログアウト', () => { p.signOut(); renderCloudActions(); sync.refresh(); toast(p.label + 'からログアウトしました'); })
+    : button('ログイン', async () => { await p.signIn(); renderCloudActions(); await syncResumeIfReady(); toast(p.label + 'にログインしました'); }));
+  section.append(row);
+  if (p.id === 'onedrive') {
+    section.append(Object.assign(document.createElement('p'), {
+      className: 'hint',
+      textContent: 'ログインは、いったん Microsoft のページに移動して行い、終わるとこの画面に戻ります。ログインは約1日続き、使っているあいだは自動で更新します。',
+    }));
+  }
+  section.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: `「ファイル」メニューで ${p.label} を使うか、この端末・その他を使うか（両方か）は、「ファイル」タブで選べます。`,
+  }));
+  if (p.folderInfo) section.append(renderCloudFolder(p));
+  section.append(Object.assign(document.createElement('p'), {
+    className: 'hint',
+    textContent: `自動バックアップ（同期）に ${p.label} を使うときは、「自動バックアップ」タブで保存先を「${p.label}」にしてください。バックアップ先のフォルダも、そのタブで選びます（上の保存先フォルダとは別）。`,
+  }));
+  box.append(section);
 }
 
 // 保存先フォルダ（端末ごとの設定）
@@ -2115,7 +2197,7 @@ function renderCloudFolder(p) {
     renderSyncState();
     toast(`「ファイル」の保存先を「${folder.name}」にしました（自動バックアップの場所は「自動バックアップ」タブで決めます）`);
   };
-  // エディター内の画面で、マイドライブのフォルダを選ぶ・作る（iPhone・iPad でも使える）
+  // エディター内の画面で、クラウドのフォルダを選ぶ・作る（iPhone・iPad でも使える）
   const choose = button('フォルダを選ぶ・作る…', async () => {
     const folder = await driveBrowse({ p, mode: 'folder', title: '保存先のフォルダを選ぶ' });
     if (!folder) return;
@@ -2124,8 +2206,9 @@ function renderCloudFolder(p) {
   });
   row.append(choose);
   if (!f.isDefault) {
-    row.append(button('「小説エディター」に戻す', async () => {
-      if (!(await ask('保存先を、マイドライブの「小説エディター」フォルダに戻しますか？（保存済みのファイルは移動しません）'))) return;
+    const top = p.rootName || p.label;
+    row.append(button(`${top}の一番上に戻す`, async () => {
+      if (!(await ask(`保存先を、${top}の一番上に戻しますか？（保存済みのファイルは移動しません）`))) return;
       p.resetFolder();
       renderCloudActions();
       renderSyncState();
@@ -2133,7 +2216,7 @@ function renderCloudFolder(p) {
   }
   wrap.append(row, Object.assign(document.createElement('p'), {
     className: 'hint',
-    textContent: '「ファイル」で Google ドライブに保存・開くとき、最初に開くフォルダです（端末ごとの設定）。自動バックアップの場所は「自動バックアップ」タブで決めます。'
+    textContent: `「ファイル」で ${p.label} に保存・開くとき、最初に開くフォルダです（端末ごとの設定）。自動バックアップの場所は「自動バックアップ」タブで決めます。`
       + '保存先を変えても、すでに保存したファイルは移動しません。同じフォルダに同じ名前のファイルがあるときは、上書きせずに名前の後ろに番号を付けます。',
   }));
   return wrap;
@@ -2994,7 +3077,9 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   });
   const box = $('provider-settings');
   box.querySelectorAll(':scope > :not(legend)').forEach((n) => n.remove());
-  for (const p of providers) {
+  // 今使うクラウドの接続の設定だけ出す（もう一方の設定も消さずに残っている）
+  box.querySelector('legend').textContent = `${activeProvider().label}の接続の設定`;
+  for (const p of [activeProvider()]) {
     for (const s of p.settings) {
       const label = document.createElement('label');
       label.textContent = s.label;
@@ -3016,15 +3101,17 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
 
 // ---------- 設定はすべて、変えた時点で反映・保存する（設定画面は「閉じる」だけ） ----------
 
-// 「ファイル」メニューの保存先：Google ドライブを設定していなければ「この端末・その他」だけ
+// 「ファイル」メニューの保存先：クラウドを設定していなければ「この端末・その他」だけ
 function renderFileDestination() {
   const dest = $('file-destination');
   const hasDrive = !!driveProvider();
+  const cloudOpt = dest.querySelector('option[value="cloud"]');
+  cloudOpt.textContent = `${cloudName()}だけを使う`;
   dest.querySelector('option[value="ask"]').disabled = !hasDrive;
-  dest.querySelector('option[value="gdrive"]').disabled = !hasDrive;
-  dest.value = hasDrive ? prefs.get(DEST_KEY, 'ask') : 'local';
-  $('file-destination-hint').textContent = hasDrive ? ''
-    : 'Google ドライブはまだ使えません（「クラウド」タブでクライアントIDを入れると選べます）。今は「この端末・その他」を使います。';
+  cloudOpt.disabled = !hasDrive;
+  dest.value = hasDrive ? oldCloud(prefs.get(DEST_KEY, 'ask')) : 'local';
+  $('file-destination-hint').textContent = hasDrive ? `クラウドは今「${cloudName()}」です。`
+    : `${cloudName()}はまだ使えません（「クラウド」タブで ID を入れると選べます）。今は「この端末・その他」を使います。`;
 }
 
 // リンク：入力中の行（URL が空のもの）は一覧に入れず、URL が入った行だけを残す
@@ -3075,6 +3162,8 @@ function bindSettingsInputs() {
     prefs.set('sync.prefix', v);
     renderSyncState();
   });
+  // 使うクラウド（Google ドライブ／OneDrive）
+  $('cloud-provider').addEventListener('change', (e) => changeCloudProvider(e.target.value).catch(fail));
   $('file-destination').addEventListener('change', (e) => { if (driveProvider()) prefs.set(DEST_KEY, e.target.value); });
   form.querySelectorAll('[name^="acc."]').forEach((input) => input.addEventListener('input', commitAccounts));
 }
@@ -3513,17 +3602,17 @@ function bindEvents() {
     await sync.setMode(m);
     syncPending = null;
     if (sync.getState() === 'need-folder') toast('「フォルダを選ぶ」を押して、バックアップ先のフォルダを選んでください（新しく作ることもできます）');
-    else if (m === 'gdrive' && sync.getState() === 'need-login') toast('「Google ドライブにログイン」を押してください');
+    else if (m === 'cloud' && sync.getState() === 'need-login') toast(`「${syncProvider()?.label || 'クラウド'}にログイン」を押してください`);
     await runSyncCheck();
   });
   $('sync-choose').addEventListener('click', () => {
-    // Google ドライブ方式でログイン済み：バックアップ先のフォルダを選ぶ（選んだフォルダに直接保存。中にフォルダは作らない）
-    if (sync.mode() === 'gdrive' && sync.getState() !== 'need-login') {
+    // クラウド方式でログイン済み：バックアップ先のフォルダを選ぶ（選んだフォルダに直接保存。中にフォルダは作らない）
+    if (sync.mode() === 'cloud' && sync.getState() !== 'need-login') {
       const p = syncProvider();
-      driveBrowse({ p, mode: 'folder', title: '自動バックアップのフォルダを選ぶ' }).then(async (folder) => {
+      driveBrowse({ p, mode: 'folder', title: `自動バックアップのフォルダを選ぶ（${p.label}）` }).then(async (folder) => {
         if (!folder) return;
         p.setBackupFolder(folder);
-        await sync.setMode('gdrive'); // 選び直したので、確認からやり直す
+        await sync.setMode('cloud'); // 選び直したので、確認からやり直す
         renderSyncState();
         toast(`自動バックアップを「${folder.name}」に保存します（このフォルダに直接）`);
         await runSyncCheck();
@@ -3578,7 +3667,7 @@ async function init() {
   selectTab('body');
   $('template-vars').textContent = TEMPLATE_VARS.join(' ');
   renderTemplateSelects();
-  providers.forEach((p) => p.preload());
+  activeProvider().preload();
   await migrate();
 
   let p = null;
@@ -3592,16 +3681,23 @@ async function init() {
 
   // 自動バックアップ（同期）：準備して、他の端末の更新を確認する
   const drive = syncProvider();
-  if (drive) drive.onBeforeRedirect = () => flush(); // Google のログインでページを離れる前に、書きかけを保存
+  // ログインでページを離れる前に、書きかけを保存
+  for (const cp of providers) cp.onBeforeRedirect = () => flush();
+  // ログイン画面から戻ってきたとき：ログインの鍵を受け取り終わるのを待つ（OneDrive）
+  await Promise.all(providers.map((cp) => cp.ready?.().catch(() => {})));
   sync.onChange(renderSyncState);
   // 自動バックアップしようとしたら他の端末のほうが新しかった：画面が見えていれば、その場で確認する
   sync.onNewer(() => { if (document.visibilityState === 'visible') runSyncCheck().catch(fail); });
   await sync.init({ provider: drive }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
   renderSyncState();
-  const login = drive?.takeRedirectResult();
+  let login = null;
+  for (const cp of providers) {
+    const r = cp.takeRedirectResult?.();
+    if (r && !login) login = { ...r, label: cp.label };
+  }
   const restored = prefs.get('restoredMessage', null);
   const report = prefs.get('restoredReport', null);
-  if (login) toast(login.ok ? 'Google ドライブにログインしました' : login.message, !login.ok);
+  if (login) toast(login.ok ? `${login.label}にログインしました` : login.message, !login.ok);
   else if (restored) toast(restored);
   if (restored) prefs.set('restoredMessage', null);
   if (report) prefs.set('restoredReport', null);

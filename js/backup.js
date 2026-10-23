@@ -7,7 +7,7 @@ export const BACKUP_FORMAT = 'novel-editor-backup';
 // 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
 // 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
 // 画面の幅・iPhone の高さなど、端末の画面に合わせたものも入れない。
-const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.)/;
+const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|onedrive\.folder$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.)/;
 const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
 
 // 端末ごとの設定のうち、「環境」として明示的に読み込むときだけ使うもの（ファイルの保存先の選び方・自動バックアップの間隔と件数・画面の幅など）。
@@ -88,6 +88,7 @@ const ENV_LABELS = [
   ['accounts', '投稿サイトのアカウント', () => ''],
   ['importPresets', 'TXT インポートの条件', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
   ['gdrive.clientId', 'Google ドライブのクライアントID', () => ''],
+  ['onedrive.clientId', 'OneDrive のアプリケーション（クライアント）ID', () => ''],
 ];
 
 /** バックアップに入っている環境の中身（画面で知らせる用）。何もなければ空の配列 */

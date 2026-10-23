@@ -764,12 +764,12 @@
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>
-          <option value="gdrive">Google ドライブだけを使う</option>
-          <option value="local">この端末・その他（iCloud・OneDrive など）だけを使う</option>
+          <option value="cloud">クラウドだけを使う</option>
+          <option value="local">この端末・その他（iCloud など）だけを使う</option>
         </select>
       </label>
       <p class="hint" id="file-destination-hint"></p>
-      <p class="hint">「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（Google ドライブの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
+      <p class="hint">クラウドは「クラウド」タブで選んだもの（Google ドライブか OneDrive）です。「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（クラウドの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
         変えるとすぐに反映されます。</p>
     </fieldset>
     </div>
@@ -805,6 +805,7 @@
 
     <!-- バックアップ -->
     <div class="settings-panel" data-spanel="backup" role="tabpanel" hidden>
+    <p class="hint">この端末の中には、設定しなくても、いつも自動で保存しています（書いた内容と、下の「作品のバックアップ版」）。下の「自動バックアップ」は、端末の外（フォルダ・ネットワークドライブ・Google ドライブ・OneDrive）への保存です。</p>
     <fieldset>
       <legend>この作品のバックアップ版（作品全体）</legend>
       <p class="hint">作品全体（全エピソード・プロット・設定など）をまるごと残したものです。書いている間は10分ごと、画面を閉じるときにも自動で残ります（最新30件）。</p>
@@ -820,8 +821,8 @@
       <label>保存先（この端末）
         <select id="sync-mode">
           <option value="off">使わない</option>
-          <option value="folder">フォルダ（PC の Chrome・Edge／Android の Chrome）</option>
-          <option value="gdrive">Google ドライブ</option>
+          <option value="folder">フォルダ（PC の Chrome・Edge／Android の Chrome。ネットワークドライブも可）</option>
+          <option value="cloud">クラウド</option>
         </select>
       </label>
       <p class="hint" id="sync-mode-hint"></p>
@@ -895,8 +896,18 @@
 
     <!-- クラウド -->
     <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
+    <fieldset id="cloud-choice">
+      <legend>使うクラウド（この端末）</legend>
+      <label>クラウド
+        <select id="cloud-provider">
+          <option value="gdrive">Google ドライブ</option>
+          <option value="onedrive">OneDrive</option>
+        </select>
+      </label>
+      <p class="hint">「ファイル」の保存・開くと、自動バックアップ（「クラウド」方式）で使うクラウドです。切り替えると画面を読み直します。それぞれのログイン・フォルダの設定は別々に残るので、戻せば元のとおりに使えます。</p>
+    </fieldset>
     <fieldset id="cloud-actions">
-      <legend>Google ドライブ（ファイルの保存・開く／自動バックアップ）</legend>
+      <legend id="cloud-actions-legend">ログインと保存先フォルダ</legend>
       <div id="cloud-action-list"></div>
     </fieldset>
     <fieldset id="provider-settings">

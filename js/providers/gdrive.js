@@ -225,6 +225,9 @@ async function patchFile(fileId, text, name, workId, mime) {
 export const gdrive = {
   id: 'gdrive',
   label: 'Google ドライブ',
+  // エディター内のフォルダ選択画面の表示
+  rootName: 'マイドライブ',
+  browseHint: 'マイドライブのフォルダが出ます（共有されたフォルダは出ません）。',
 
   isConfigured() { return !!clientId(); },
   isSignedIn() { return !!token && Date.now() < token.expiresAt; },

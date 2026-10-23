@@ -4,8 +4,9 @@
 //   2. 複数の端末（Windows・Mac・iPhone・iPad・Android）のあいだの、楽観的な同期
 //
 // 保存先（端末ごとに選ぶ）
-//   'folder' … 普通のフォルダ（PC の Chrome・Edge、Android の Chrome。OneDrive・iCloud Drive などの同期フォルダも可）
-//   'gdrive' … Google ドライブ（API）の「小説エディター／自動バックアップ」。iPhone・iPad はこちらだけ
+//   'folder' … 普通のフォルダ（PC の Chrome・Edge、Android の Chrome。ネットワークドライブ、OneDrive・iCloud Drive などの同期フォルダも可）
+//   'cloud'  … クラウド（API）。「設定」→「クラウド」で選んだ Google ドライブか OneDrive の、自分で選んだフォルダ。iPhone・iPad はこちらだけ
+//              （以前の版の 'gdrive' は 'cloud' として読む）
 //
 // ファイル名：プレフィックス + 日時（世界時）  例：iPad_20261022T001500Z.json
 //   名前の日時でどれが新しいかを決める（同期ソフトがファイルの更新日時を変えても困らないように）。
@@ -47,11 +48,16 @@ export function defaultPrefix() {
 // ファイル名に使えない文字は _ にする
 export function cleanPrefix(s) { return String(s ?? '').replace(/[\\/:*?"<>|\s]/g, '_').slice(0, 40); }
 export function prefix() { return cleanPrefix(prefs.get('sync.prefix', '') || defaultPrefix()); }
-export function mode() { return prefs.get('sync.mode', 'off'); }
+export function mode() {
+  const m = prefs.get('sync.mode', 'off');
+  return m === 'gdrive' ? 'cloud' : m; // 以前の版の「Google ドライブ」方式
+}
 export function intervalMin() { return Math.max(1, Number(prefs.get('autoBackupInterval', DEFAULT_INTERVAL_MIN)) || DEFAULT_INTERVAL_MIN); }
 export function keepCount() { return Math.max(1, Number(prefs.get('autoBackupKeep', DEFAULT_KEEP)) || DEFAULT_KEEP); }
 export function lastBackup() { return prefs.get('sync.last', null); }
-export function folderName() { return mode() === 'gdrive' ? drive?.backups.folderName || '' : dir?.name || ''; }
+export function folderName() { return mode() === 'cloud' ? drive?.backups.folderName || '' : dir?.name || ''; }
+// クラウド方式で使うサービス（Google ドライブ／OneDrive）
+export function cloud() { return drive; }
 
 function deviceId() {
   let id = prefs.get('sync.deviceId', '');
@@ -61,7 +67,7 @@ function deviceId() {
 
 // ---------- 状態 ----------
 // state: 'off' | 'on' | 'need-folder'（保存先のフォルダをまだ選んでいない） | 'need-permission'（フォルダの許可切れ）
-//        | 'need-login'（Google のログイン切れ） | 'unsupported'
+//        | 'need-login'（クラウドのログイン切れ） | 'unsupported'
 let state = 'off';
 let lastError = '';
 let dir = null;
@@ -98,7 +104,7 @@ export async function refresh() {
     if (!dir) { setState('need-folder'); return; }
     const perm = await dir.queryPermission({ mode: 'readwrite' }).catch(() => 'denied');
     setState(perm === 'granted' ? 'on' : 'need-permission');
-  } else if (m === 'gdrive') {
+  } else if (m === 'cloud') {
     if (!drive || !drive.isConfigured()) { setState('unsupported'); return; }
     // フォルダを選ぶまでは保存しない（エディターが勝手にフォルダを作らない）
     if (!drive.backups.hasFolder) { setState('need-folder'); return; }
@@ -132,14 +138,14 @@ export async function chooseFolder() {
   return true;
 }
 
-// フォルダの書き込み許可をもらい直す／Google にログインする（ボタンを押したときに呼ぶ）
+// フォルダの書き込み許可をもらい直す／クラウドにログインする（ボタンを押したときに呼ぶ）
 export async function resume() {
   if (mode() === 'folder') {
     if (!dir) return false;
     const perm = await dir.requestPermission({ mode: 'readwrite' });
     if (perm !== 'granted') return false;
-  } else if (mode() === 'gdrive') {
-    await drive.signIn(); // ホーム画面のアプリでは、ここでページごと Google へ移動する
+  } else if (mode() === 'cloud') {
+    await drive.signIn(); // ページごとログイン画面へ移動することがある（ホーム画面のアプリ・OneDrive）
   }
   await refresh();
   return state === 'on';
@@ -173,7 +179,7 @@ function target() {
       async remove(id) { await dir.removeEntry(id).catch(() => {}); },
     };
   }
-  if (mode() === 'gdrive' && drive) {
+  if (mode() === 'cloud' && drive) {
     const b = drive.backups;
     return {
       list: () => drive.silently(() => b.list()),
