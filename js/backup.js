@@ -7,7 +7,7 @@ export const BACKUP_FORMAT = 'novel-editor-backup';
 // 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
 // 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
 // 画面の幅・iPhone の高さなど、端末の画面に合わせたものも入れない。
-const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|onedrive\.folder$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.)/;
+const DEVICE_PREFS = /^(sync\.|file\.|cloud\.|gdrive\.(folder|known)$|onedrive\.folder$|autoBackup|lastAutoBackupAt$|lastBackupAt$|restoredMessage$|restoredReport$|currentId$|settingsTab$|split$|sidebarWidth$|iphone\.|fold\.)/;
 const sharedPrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !DEVICE_PREFS.test(k)));
 
 // 端末ごとの設定のうち、「環境」として明示的に読み込むときだけ使うもの（ファイルの保存先の選び方・自動バックアップの間隔と件数・画面の幅など）。
@@ -149,7 +149,7 @@ export async function restoreBackup(backup, mode) {
 export function backupFileName() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `小説エディター_全体_${ymd}.json`;
+  return `TUZURI_全体_${ymd}.json`;
 }
 
 // ---------- エピソード専用ファイル ----------

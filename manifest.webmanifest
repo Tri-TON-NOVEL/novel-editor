@@ -1,7 +1,7 @@
 {
-  "name": "小説エディター",
-  "short_name": "小説エディター",
-  "description": "小説家になろう・アルファポリス向けの小説エディター",
+  "name": "TUZURI",
+  "short_name": "TUZURI",
+  "description": "TUZURI（Tale Utility for Zoning, Updating, Revising, and Integrating）：小説家になろう・アルファポリス向けの小説エディター",
   "lang": "ja",
   "start_url": "./",
   "scope": "./",
@@ -9,8 +9,9 @@
   "background_color": "#f6f4ef",
   "theme_color": "#2f5d50",
   "icons": [
-    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml" },
-    { "src": "icons/icon-180.png", "sizes": "180x180", "type": "image/png" },
-    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png" }
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-1024.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
   ]
 }

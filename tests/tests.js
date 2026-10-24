@@ -83,6 +83,27 @@ group('Phase 1：保存 → 読込の往復', () => {
   eq(back.chapters.map((c) => c.title), p.chapters.map((c) => c.title), '章が一致');
 });
 
+group('6.0：稿の割り当て・サイト別の時刻・エピソードの活動報告を保持', () => {
+  const src = oldV2();
+  src.episodes[0] = {
+    id: 'e1', drafts: { narou: { title: 'な', body: 'なろう本文' }, alpha: { title: 'ア', body: 'アルファ本文' } },
+    plot: '共通プロット', freeMemo: '共通メモ',
+    editionIds: { narou: 'n3', alpha: 'a1' },
+    siteUpdatedAt: { narou: '2026-10-24T01:00:00.000Z', alpha: '2026-10-23T01:00:00.000Z' },
+    report: { x: 'X投稿', narouTitle: '報告タイトル', narouBody: '報告本文', updatedAt: '2026-10-24T02:00:00.000Z' },
+  };
+  src.reportsMigrated = true;
+  const p = F.normalize(src);
+  eq(p.episodes[0].editionIds, { narou: 'n3', alpha: 'a1' }, 'サイトごとの今の稿');
+  eq(p.episodes[0].siteUpdatedAt.narou, '2026-10-24T01:00:00.000Z', 'サイト別の最後に書いた時刻');
+  eq(p.episodes[0].report.narouBody, '報告本文', 'エピソードの活動報告');
+  eq([p.episodes[0].plot, p.episodes[0].freeMemo], ['共通プロット', '共通メモ'], 'プロット・フリーメモはエピソードに1つ');
+  const back = F.parse(F.serialize({ ...p, id: 'x', links: {} }), '作品.json');
+  eq(back.episodes[0].editionIds, p.episodes[0].editionIds, '保存 → 読込で稿の割り当てが残る');
+  eq(back.episodes[0].report, p.episodes[0].report, '保存 → 読込で活動報告が残る');
+  eq(back.reportsMigrated, true, '活動報告の移し替え済みの印が残る');
+});
+
 group('Phase 1：v1 とテキストの読込', () => {
   const v1 = F.parse(JSON.stringify({ format: 'novel-editor', title: 'T', body: '本文', plot: 'P' }), 'a.json');
   eq([v1.title, v1.episodes[0].drafts.narou.body, v1.episodes[0].plot], ['T', '本文', 'P'], 'v1');

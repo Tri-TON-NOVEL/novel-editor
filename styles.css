@@ -89,7 +89,10 @@ button:disabled { opacity: .5; cursor: default; }
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.brand { font-weight: 700; color: var(--accent); }
+.brand { font-weight: 700; color: var(--accent); letter-spacing: .06em; }
+.about-acronym { margin: 0; font-size: 15px; letter-spacing: .02em; }
+.about-acronym strong { color: var(--accent); font-size: 1.15em; }
+[data-spanel="about"] p { margin: 0; line-height: 1.7; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .status { margin-left: auto; color: var(--muted); font-size: 13px; }
 .actions .history { padding: 6px 10px; }
@@ -381,6 +384,15 @@ body.resizing { cursor: col-resize; user-select: none; }
 .pane-side .field.grow { min-height: 80px; }
 
 /* 入力欄・ボタンの表示切り替え（設定 → 表示／ボタン） */
+/* 本文・プロット・フリーメモの折りたたみ */
+.fold-btn { border: 0; background: transparent; min-height: 30px; min-width: 30px; padding: 0 4px; font-size: 14px; color: var(--muted); cursor: pointer; }
+.fold-btn:hover { color: var(--text); }
+.fold-info { font-size: 12px; color: var(--muted); }
+.field.folded > :not(.field-head) { display: none !important; }
+.field.folded { flex: 0 0 auto !important; min-height: 0 !important; }
+/* 全て選択 */
+.selall-btn { white-space: nowrap; min-height: 32px; }
+
 /* 「表示」で隠した部品 */
 .ui-off { display: none !important; }
 /* 章・エピソード：「リスト」はプルダウンだけ */
@@ -598,7 +610,15 @@ body[data-site="narou"] .alpha-only { display: none !important; }
 .url-grid label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .url-grid .hint { grid-column: 1 / -1; }
 
-/* 活動報告 */
+/* 活動報告（エピソードの画面の「活動報告」タブ） */
+.report-pane { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: 10px; }
+.report-pane[hidden] { display: none; }
+body.report-mode #view-episode > .field[data-field="title"],
+body.report-mode #view-episode > .tabs,
+body.report-mode #view-episode > .panes,
+body.report-mode #view-episode > .max-restore,
+body.report-mode #copy-main-to-sub,
+body.report-mode .ep-version { display: none !important; }
 .report-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
 .report-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; flex: 1; min-width: 200px; max-width: 420px; }
 .report-grid {

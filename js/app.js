@@ -23,7 +23,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.23-5.13';
+const APP_VERSION = '2026.10.24-6.0.2';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -40,13 +40,13 @@ const el = {
   xText: $('x-text'),
   nrTitle: $('narou-report-title'),
   nrBody: $('narou-report-body'),
-  reportEpisode: $('report-episode'),
 };
 
 let project = null;     // 編集中の作品
 let epIndex = 0;        // 編集中のエピソード
 let view = 'episode';   // VIEWS のいずれか
-const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'report'];
+// 活動報告はエピソードの画面の中（「活動報告」タブ）。6.0 より前は独立した画面だった
+const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters'];
 let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
 let saveTimer = null;
 let dirty = false;
@@ -126,9 +126,10 @@ function listItem(title, meta, buttons, current = false) {
 function isEmptyProject(p) {
   const r = p.reports || {};
   const e = p.episodes[0];
+  const er = e.report || {};
   return !p.title && !p.synopsis && !r.x && !r.narouTitle && !r.narouBody
     && !p.chapters.some((c) => c.plot) && !p.world.items.length && !p.characters.items.length
-    && p.episodes.length === 1 && !e.plot && !e.freeMemo
+    && p.episodes.length === 1 && !e.plot && !e.freeMemo && !er.x && !er.narouTitle && !er.narouBody
     && SITE_KEYS.every((s) => DRAFT_FIELDS.every((f) => !draftOf(e, s)[f]));
 }
 
@@ -186,6 +187,52 @@ function updateCounts() {
   setCount('narou-report-title', el.nrTitle.value);
   setCount('narou-report-body', el.nrBody.value);
   setXCount();
+  renderFoldInfo();
+}
+
+// ---------- 本文・プロット・フリーメモの折りたたみ（端末ごと：prefs 'fold.body' など） ----------
+// 折りたたんでも中身は消えず、自動保存も続く。見出しに文字数（空なら「（空）」）を出す
+const FOLDS = { body: () => el.body, plot: () => el.plot, memo: () => el.freeMemo };
+const isFolded = (key) => key in FOLDS && prefs.get('fold.' + key, false) === true;
+
+function setFolded(key, on) {
+  prefs.set('fold.' + key, !!on);
+  applyFolds();
+}
+
+function applyFolds() {
+  for (const key of Object.keys(FOLDS)) {
+    const box = document.querySelector(`.field[data-field="${key}"]`);
+    const folded = isFolded(key);
+    box?.classList.toggle('folded', folded);
+    const b = document.querySelector(`[data-fold="${key}"]`);
+    if (b) { b.textContent = folded ? '▸' : '▾'; b.setAttribute('aria-expanded', String(!folded)); }
+  }
+  renderFoldInfo();
+}
+
+function renderFoldInfo() {
+  for (const [key, input] of Object.entries(FOLDS)) {
+    const info = $('fold-info-' + key);
+    if (!info) continue;
+    const n = countChars(input().value).all;
+    info.textContent = isFolded(key) ? (n ? `（折りたたみ中・${n.toLocaleString()}字）` : '（折りたたみ中・空）') : '';
+  }
+}
+
+// ---------- 全て選択（その欄の文字をすべて選ぶ） ----------
+function selectAllIn(id) {
+  const t = $(id);
+  if (!t) return;
+  if (id === 'foreword') $('foreword-box').open = true;
+  if (id === 'afterword') $('afterword-box').open = true;
+  const fold = { body: 'body', plot: 'plot', 'free-memo': 'memo' }[id];
+  if (fold && isFolded(fold)) setFolded(fold, false);
+  const pane = t.closest('[data-pane]');
+  if (pane) selectTab(pane.dataset.pane);
+  t.focus();
+  t.select();
+  t.setSelectionRange(0, t.value.length);
 }
 
 // ---------- 自動保存 ----------
@@ -227,8 +274,13 @@ let listTimer = null;
 // タイトル・前書き・本文・後書きは編集中サイトの原稿へ、プロット・フリーメモはエピソード共通へ
 function editEpisode(field, value) {
   const wasEmpty = !cur().body && !cur().title;
-  if (DRAFT_FIELDS.includes(field)) cur()[field] = value;
-  else episode()[field] = value;
+  if (DRAFT_FIELDS.includes(field)) {
+    cur()[field] = value;
+    // サイトごとの稿の「最後に書いた時刻」
+    episode().siteUpdatedAt = { ...(episode().siteUpdatedAt || {}), [editSite]: new Date().toISOString() };
+  } else {
+    episode()[field] = value;
+  }
   touchEpisode();
   refreshCurrentVersionLabel();
   if (wasEmpty !== (!cur().body && !cur().title)) renderSiteTabs(); // 「（空）」の表示を更新
@@ -249,9 +301,9 @@ const bindings = [
   [el.afterword, (v) => editEpisode('afterword', v)],
   [el.plot, (v) => editEpisode('plot', v)],
   [el.freeMemo, (v) => editEpisode('freeMemo', v)],
-  [el.xText, (v) => { project.reports.x = v; }],
-  [el.nrTitle, (v) => { project.reports.narouTitle = v; }],
-  [el.nrBody, (v) => { project.reports.narouBody = v; }],
+  [el.xText, (v) => setReport('x', v)],
+  [el.nrTitle, (v) => setReport('narouTitle', v)],
+  [el.nrBody, (v) => setReport('narouBody', v)],
 ];
 
 // ---------- 画面表示 ----------
@@ -632,12 +684,64 @@ function showEpisode() {
   el.afterword.value = d.afterword;
   el.plot.value = ep.plot;
   el.freeMemo.value = ep.freeMemo;
+  // このエピソードの活動報告
+  const r = epReport(ep);
+  el.xText.value = r.x;
+  el.nrTitle.value = r.narouTitle;
+  el.nrBody.value = r.narouBody;
+  if (reportMode) renderReportView();
   // 前書き・後書きは中身があるときだけ開いておく
   $('foreword-box').open = !!d.foreword;
   $('afterword-box').open = !!d.afterword;
   updateCounts();
   renderSiteTabs();
   renderEpisodeVersions().catch(() => {});
+}
+
+// ---------- 活動報告（エピソードごと：ep.report = { x, narouTitle, narouBody, updatedAt }） ----------
+// エピソードの画面の「活動報告」タブで開く（なろう用・アルファ用と同じ並び）。
+let reportMode = false;
+
+function epReport(ep = episode()) {
+  return { x: '', narouTitle: '', narouBody: '', ...(ep.report || {}) };
+}
+
+function setReport(key, value) {
+  const ep = episode();
+  ep.report = { ...epReport(ep), [key]: value, updatedAt: new Date().toISOString() };
+  touchEpisode(ep);
+}
+
+function setReportMode(on) {
+  reportMode = !!on && uiPref('show.report');
+  document.body.classList.toggle('report-mode', reportMode);
+  $('report-pane').hidden = !reportMode;
+  $('report-tab').setAttribute('aria-selected', String(reportMode));
+  if (reportMode && maximized) restoreMaximized();
+  renderSiteTabs();
+  if (reportMode) renderReportView();
+}
+
+// 6.0 より前の、作品に1つだった活動報告を、エピソードの活動報告へ移す（移す先を選んでもらう。元の内容は作品にも残す）
+let reportMigrationAsked = null;
+async function migrateProjectReports() {
+  const p = project;
+  const r = p.reports || {};
+  if (p.reportsMigrated || reportMigrationAsked === p.id) return;
+  if (!(r.x || r.narouTitle || r.narouBody)) { p.reportsMigrated = true; quietSave(); return; }
+  reportMigrationAsked = p.id; // 「あとで」を選んだら、作品を開き直すまで聞かない
+  const last = p.episodes.length - 1;
+  const ans = await choose('活動報告は、エピソードごとに保存するようになりました。\nこの作品の今までの活動報告（X の投稿文・なろう活動報告）を、どのエピソードの活動報告にしますか？',
+    [{ value: 'move', label: 'このエピソードに移す', primary: true }],
+    { cancel: 'あとで', select: { label: '移す先のエピソード', options: p.episodes.map((e, i) => ({ value: String(i), label: `${i + 1}. ${episodeName(e, p.site)}` })), value: String(last) } });
+  if (!ans || project !== p) return;
+  const ep = p.episodes[Number(ans.value)] || p.episodes[last];
+  const now = epReport(ep);
+  ep.report = { x: now.x || r.x || '', narouTitle: now.narouTitle || r.narouTitle || '', narouBody: now.narouBody || r.narouBody || '', updatedAt: new Date().toISOString() };
+  p.reportsMigrated = true;
+  changed();
+  if (ep === episode()) showEpisode();
+  toast(`今までの活動報告を「${episodeName(ep, p.site)}」の活動報告に移しました`);
 }
 
 // 編集中の原稿（なろう用／アルファ用）に合わせて、使える機能（ボタン・前書き・後書き）を切り替える
@@ -657,7 +761,7 @@ function renderSiteTabs() {
     const filled = d.body || d.title ? '' : '（空）';
     b.replaceChildren(document.createTextNode(`${SITES[s].short}用${filled}`));
     if (s === project.site) b.append(Object.assign(document.createElement('span'), { className: 'main-mark', textContent: 'メイン' }));
-    b.setAttribute('aria-selected', String(s === editSite));
+    b.setAttribute('aria-selected', String(s === editSite && !reportMode));
   });
   const copyBtn = $('copy-main-to-sub');
   copyBtn.replaceChildren(
@@ -667,6 +771,7 @@ function renderSiteTabs() {
 }
 
 function setEditSite(site) {
+  if (reportMode) setReportMode(false); // 活動報告からなろう用・アルファ用へ戻る
   if (!SITE_KEYS.includes(site) || site === editSite) return;
   editSite = site;
   applySite();
@@ -677,7 +782,6 @@ function setView(next) {
   view = next;
   for (const v of VIEWS) $('view-' + v).hidden = v !== view;
   document.querySelectorAll('.nav-item').forEach((b) => b.classList.toggle('active', b.dataset.view === view));
-  if (view === 'report') renderReportView();
   if (view === 'outline') outline.render();
   if (view === 'world') worldTable.render();
   if (view === 'characters') characterTable.render();
@@ -704,9 +808,6 @@ function showProject(p, handle = null) {
   $('work-ncode').value = project.narouNcode || '';
   $('work-alpha-id').value = project.alphaWorkId || '';
   renderWorkCodes();
-  el.xText.value = project.reports.x;
-  el.nrTitle.value = project.reports.narouTitle;
-  el.nrBody.value = project.reports.narouBody;
   // 前回開いていたエピソード（ID で覚える。旧版は位置で覚えていた）
   const last = prefs.get('ep:' + project.id, 0);
   epIndex = typeof last === 'string'
@@ -723,6 +824,8 @@ function showProject(p, handle = null) {
   showEpisode();
   setView('episode');
   updateStatus();
+  // 以前の版の、作品に1つだった活動報告があれば、エピソードへ移す（画面が出そろってから聞く）
+  setTimeout(() => migrateProjectReports().catch(fail), 800);
 }
 
 async function switchTo(p, handle = null) {
@@ -921,7 +1024,7 @@ async function chooseDestination(kind) {
   return r;
 }
 
-// ファイルの種類：json（小説エディターのファイル）／txt（プレーンテキスト）
+// ファイルの種類：json（TUZURI のファイル）／txt（プレーンテキスト）
 const FILE_KINDS = {
   json: { ext: '.json', mime: 'application/json', types: WORK_TYPES },
   txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
@@ -1234,8 +1337,9 @@ async function epOpen({ force = false } = {}) {
   const data = parseEpisodeFile(src.text);
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
-  if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
-  await raiseEpisodeVersion(ep); // 開く前の内容は前の番号の版に残る
+  if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、両サイトとも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
+  // 開く前の原稿は前の番号の稿に残し、両サイトとも新しい稿に開く
+  for (const site of SITE_KEYS) await raiseEdition(ep, site);
   applyEpisodeSnapshot(ep, data.episode);
   touchEpisode(ep);
   changed();
@@ -1253,9 +1357,10 @@ async function importText() {
   const text = src.file ? decodeText(await src.file.arrayBuffer()).text : src.text;
   const body = text.replace(/\r\n?/g, '\n');
   const d = cur();
-  if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容はエピソードの版に残します）`, { ok: '上書きする' }))) return;
-  if (d.body) await raiseEpisodeVersion(); // 読み込む前の内容は前の番号の版に残る
+  if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容は、前の番号の稿に残します）`, { ok: '上書きする' }))) return;
+  if (d.body) await raiseEdition(episode(), editSite); // 読み込む前の内容は前の番号の稿に残る
   d.body = body;
+  episode().siteUpdatedAt = { ...(episode().siteUpdatedAt || {}), [editSite]: new Date().toISOString() };
   touchEpisode();
   changed();
   showEpisode();
@@ -1295,13 +1400,15 @@ function mergeWarnings(into, list) {
   }
 }
 
+// メイン（の今の稿）→ サブへのコピー。対象は開いているエピソードだけ。
+// mode：'new' サブ側に新しい稿を作ってコピー（今の稿は残る）／'overwrite' サブ側の今の稿に上書き
 function buildCopyPlan() {
   const form = $('site-copy-form');
   const from = project.site;
   const to = subSite();
-  const all = form.elements.scope.value === 'all';
+  const mode = form.elements.mode.value === 'overwrite' ? 'overwrite' : 'new';
   const fields = COPY_FIELDS.map(([f]) => f).filter((f) => form.elements['f-' + f]?.checked && siteSupports(to, f));
-  const eps = all ? project.episodes : [episode()];
+  const eps = [episode()];
   const changes = [];
   const warnings = [];
   for (const ep of eps) {
@@ -1314,14 +1421,20 @@ function buildCopyPlan() {
       if (conv.text !== before) changes.push({ ep, f, text: conv.text, before });
     }
   }
-  return { from, to, all, fields, eps, changes, warnings };
+  return { from, to, mode, fields, eps, changes, warnings };
 }
 
-function openSiteCopy() {
+async function openSiteCopy() {
   const from = project.site;
   const to = subSite();
-  $('site-copy-title').textContent = `${SITES[from].short}（メイン）→ ${SITES[to].short}（サブ）にコピー`;
-  $('site-copy-desc').textContent = `メインの原稿を${SITES[to].label}の書き方に変換して、サブ側へ写します。メイン側は変わりません。`;
+  const ep = episode();
+  const [src, dest] = [await ensureEdition(ep, from), await ensureEdition(ep, to)];
+  const next = `第${nextEditionNo(dest.list)}稿`;
+  $('site-copy-title').textContent = `${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
+  $('site-copy-desc').textContent = `「${episodeName(ep)}」の、メインの今の稿（${src.cur.name}）を${SITES[to].label}の書き方に変換して、サブ側へ写します。メイン側は変わりません。`;
+  $('site-copy-mode-new').textContent = `新しい稿（${SITES[to].short}用の${next}）として追加（おすすめ。今の${dest.cur.name}はそのまま残ります）`;
+  $('site-copy-mode-over').textContent = `${SITES[to].short}用の今の稿（${dest.cur.name}）に上書き`;
+  $('site-copy-form').dataset.overName = dest.cur.name;
   const box = $('site-copy-fields');
   box.querySelectorAll('label').forEach((n) => n.remove());
   for (const [f, label] of COPY_FIELDS) {
@@ -1331,7 +1444,7 @@ function openSiteCopy() {
     l.append(input, ` ${label}${ok ? '' : '（コピー先に欄がないため対象外）'}`);
     box.append(l);
   }
-  $('site-copy-form').elements.scope.value = 'episode';
+  $('site-copy-form').elements.mode.value = 'new';
   updateSiteCopy();
   $('site-copy-dialog').showModal();
 }
@@ -1339,19 +1452,18 @@ function openSiteCopy() {
 function updateSiteCopy() {
   const plan = buildCopyPlan();
   const label = Object.fromEntries(COPY_FIELDS);
-  // 上書きになるもの
-  const over = plan.changes.filter((c) => c.before);
+  // 上書きになるもの（「今の稿に上書き」のときだけ）
+  const over = plan.mode === 'overwrite' ? plan.changes.filter((c) => c.before) : [];
   const ow = $('site-copy-overwrite');
   ow.hidden = !over.length;
   if (over.length) {
     const ul = document.createElement('ul');
-    for (const c of over.slice(0, 8)) {
+    for (const c of over) {
       ul.append(Object.assign(document.createElement('li'), {
-        textContent: `${plan.all ? episodeName(c.ep) + '：' : ''}${label[c.f]}　今 ${countChars(c.before).all.toLocaleString()}字 → ${countChars(c.text).all.toLocaleString()}字`,
+        textContent: `${label[c.f]}　今 ${countChars(c.before).all.toLocaleString()}字 → ${countChars(c.text).all.toLocaleString()}字`,
       }));
     }
-    if (over.length > 8) ul.append(Object.assign(document.createElement('li'), { textContent: `ほか ${over.length - 8}件` }));
-    ow.replaceChildren(Object.assign(document.createElement('strong'), { textContent: `⚠ コピー先（${SITES[plan.to].short}用）にすでに内容があります。上書きされます（${over.length}件）` }), ul);
+    ow.replaceChildren(Object.assign(document.createElement('strong'), { textContent: `⚠ ${SITES[plan.to].short}用の今の稿（${$('site-copy-form').dataset.overName || ''}）の内容が上書きされます（${over.length}件。元に戻せません）` }), ul);
   }
   // 変換の警告
   const wb = $('site-copy-warnings');
@@ -1370,7 +1482,9 @@ function updateSiteCopy() {
   $('site-copy-preview').value = body ? body.text : '（本文の変更はありません）';
   const ok = $('site-copy-ok');
   ok.disabled = !plan.changes.length;
-  ok.textContent = !plan.changes.length ? 'コピーする内容がありません' : over.length ? `上書きしてコピー（${plan.changes.length}件）` : `コピーする（${plan.changes.length}件）`;
+  ok.textContent = !plan.changes.length ? 'コピーする内容がありません'
+    : over.length ? `上書きしてコピー（${plan.changes.length}件）`
+      : plan.mode === 'new' ? `新しい稿にコピー（${plan.changes.length}件）` : `コピーする（${plan.changes.length}件）`;
   ok.classList.toggle('danger-solid', !!over.length);
   ok.classList.toggle('primary', !over.length);
 }
@@ -1378,42 +1492,37 @@ function updateSiteCopy() {
 async function runSiteCopy() {
   const plan = buildCopyPlan();
   if (!plan.changes.length) return;
-  const over = plan.changes.filter((c) => c.before);
+  const ep = plan.eps[0];
   const toName = SITES[plan.to].short;
-  if (plan.all && !(await ask(`【作品全体】${new Set(plan.changes.map((c) => c.ep)).size}話の ${toName}用の原稿を書き換えます。よろしいですか？`, { danger: true }))) return;
-  // 上書きする前の状態を残す（元に戻せるように）
-  if (over.length) {
-    if (plan.all) await saveVersion(`${toName}用へのコピー前（自動）`, `${new Date().toLocaleString('ja-JP')} にメインから${toName}用へ全エピソードをコピーする前の状態`);
-    else await raiseEpisodeVersion(plan.eps[0]); // コピー前の内容は前の番号の版に残る
-  }
-  for (const c of plan.changes) {
-    c.ep.drafts[plan.to][c.f] = c.text;
-    touchEpisode(c.ep);
-  }
+  const over = plan.mode === 'overwrite' ? plan.changes.filter((c) => c.before) : [];
+  const { cur: dest } = await ensureEdition(ep, plan.to);
+  if (over.length && !(await ask(`${toName}用の今の稿（${dest.name}）の内容を、メインからのコピーで上書きします。\n上書きした内容は元に戻せません（残したいときは「新しい稿として追加」を選んでください）。よろしいですか？`, { ok: '上書きする', danger: true }))) return;
+  // 新しい稿として追加：サブ側の今の稿はそのまま残し、次の番号の稿にコピーする
+  let target = dest;
+  if (plan.mode === 'new') target = (await raiseEdition(ep, plan.to)).to;
+  for (const c of plan.changes) c.ep.drafts[plan.to][c.f] = c.text;
+  ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [plan.to]: new Date().toISOString() };
+  touchEpisode(ep);
   changed();
   editSite = plan.to;
   applySite();
   showEpisode();
   renderEpisodeList();
-  toast(`${toName}用の原稿へ ${plan.changes.length}件コピーしました${over.length ? '（上書き前の状態は版に残しました）' : ''}`);
+  toast(plan.mode === 'new'
+    ? `${toName}用の新しい稿（${target.name}）にコピーしました（${dest.name}はそのまま残っています）`
+    : `${toName}用の今の稿（${dest.name}）に上書きしてコピーしました`);
 }
 
-// ---------- 版 ----------
-// 版は2種類。どちらも versions ストアに入れ、kind で分ける。
-//   エピソードの版（kind: 'episode'）… エピソードごとの編集の版。エピソード欄の「版」から上げる・戻す
+// ---------- 稿と版 ----------
+// どちらも versions ストアに入れ、kind で分ける。
+//   エピソードの稿（kind: 'episode'、site: 'narou'|'alpha'）… なろう用・アルファ用で別々に持つ、エピソードの原稿の稿
+//   以前の版（kind: 'episode-legacy'）… 6.0 より前の「両サイトの原稿＋プロット・フリーメモ」をまとめた版。稿に分けた元として残す
 //   作品全体のバックアップ版（kind なし／'project'）… 設定の「バックアップ」タブ。自動でも残る
 
 const newVersionId = () => (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random());
-const isEpisodeVersion = (v) => v.kind === 'episode';
+const isEpisodeVersion = (v) => v.kind === 'episode' || v.kind === 'episode-legacy';
 
-// --- エピソードの版 ---
-
-// 版に残すもの：両サイトの原稿と、プロット・フリーメモ（章の所属は残さない）
-function episodeSnapshot(ep) {
-  return { drafts: structuredClone(ep.drafts), plot: ep.plot, freeMemo: ep.freeMemo };
-}
-
-// 版の中身をエピソードへ戻す（旧形式の版 { title, foreword, body, afterword, plot } にも対応）
+// エピソードファイルの中身（両サイトの原稿・プロット・フリーメモ）をエピソードへ入れる（旧形式 { title, foreword, body, afterword, plot } にも対応）
 function applyEpisodeSnapshot(ep, data, site = project.site) {
   if (data.drafts) {
     ep.drafts = { ...ep.drafts, ...structuredClone(data.drafts) };
@@ -1424,150 +1533,217 @@ function applyEpisodeSnapshot(ep, data, site = project.site) {
   if ('freeMemo' in data) ep.freeMemo = data.freeMemo;
 }
 
-async function episodeVersions(episodeId = episode().id) {
+// --- エピソードの稿（なろう用・アルファ用で別々） ---
+// 稿に入るのは、そのサイトの原稿（タイトル・前書き・本文・後書き）だけ。プロット・フリーメモはエピソードに1つ（全稿・両サイト共通）。
+// 編集している内容は、サイトごとに、いつもどれか1つの稿（ep.editionIds[site]）。書いた内容はその稿のもの。
+// 別の稿を選ぶと、今の稿に今の内容をしまってから、選んだ稿の内容を出す（何も消えない）。もう一方のサイトは変わらない。
+// 「稿を上げる」は、今の稿をしまって、同じ内容で次の番号の稿（第N+1稿）を作り、それを編集する。
+
+const EDITION_FIELDS = ['title', 'foreword', 'body', 'afterword'];
+
+function editionData(src) {
+  return Object.fromEntries(EDITION_FIELDS.map((f) => [f, String(src?.[f] ?? '')]));
+}
+
+function editionSnapshot(ep, site) {
+  return editionData(draftOf(ep, site));
+}
+
+function applyEdition(ep, site, data) {
+  ep.drafts[site] = { ...format.emptyDraft(), ...editionData(data) };
+}
+
+// エピソードの稿・以前の版すべて（両サイト）
+async function allEpisodeVersions(episodeId) {
   return (await versions.list(project.id)).filter((v) => isEpisodeVersion(v) && v.episodeId === episodeId);
 }
 
-async function saveEpisodeVersion(name, ep = episode()) {
-  await flush();
+async function saveEdition(ep, site, name, data = editionSnapshot(ep, site)) {
   const now = new Date().toISOString();
   const v = {
-    id: newVersionId(),
-    kind: 'episode',
-    projectId: project.id,
-    episodeId: ep.id,
-    name,
-    memo: '',
-    createdAt: now,
-    updatedAt: now,
-    chars: countChars(mainDraft(ep).body).all,
-    data: episodeSnapshot(ep),
+    id: newVersionId(), kind: 'episode', site, projectId: project.id, episodeId: ep.id,
+    name, memo: '', createdAt: now, updatedAt: now, chars: countChars(data.body).all, data: editionData(data),
   };
   await versions.put(v);
   return v;
 }
 
-// ---- 版の考え方 ----
-// 編集している内容は、いつもどれか1つの版（ep.versionId）。書いた内容はその版のもの。
-// 別の版を選ぶと、今の版に今の内容をしまってから、選んだ版の内容を出す（何も消えない）。
-// 「版を上げる」は、今の版をしまって、同じ内容で次の番号の版（第N+1版）を作り、それを編集する。
-const versionNo = (v) => Number(/^第(\d+)版$/.exec(v?.name || '')?.[1] || 0);
-const versionTime = (v) => v.updatedAt || v.createdAt;
-const nextVersionNo = (list) => Math.max(0, ...list.map(versionNo)) + 1;
-
-// 今の版を確かめる。まだなければ（以前の版で作ったエピソードなど）、今の内容を次の番号の版にする
-const ensuringVersion = new Map();
-function ensureEpisodeVersion(ep = episode()) {
-  if (!ensuringVersion.has(ep.id)) {
-    ensuringVersion.set(ep.id, (async () => {
-      const list = await episodeVersions(ep.id);
-      let cur = list.find((v) => v.id === ep.versionId);
-      if (!cur) {
-        cur = await saveEpisodeVersion(`第${nextVersionNo(list)}版`, ep);
-        list.unshift(cur);
-        ep.versionId = cur.id;
-        // 版の割り当てだけなので、作品の更新日時は変えずに端末へ保存する
-        dirty = true;
-        clearTimeout(saveTimer);
-        saveTimer = setTimeout(flush, AUTOSAVE_MS);
-      }
-      return { list, cur };
-    })().finally(() => ensuringVersion.delete(ep.id)));
-  }
-  return ensuringVersion.get(ep.id);
+// 稿の割り当てだけを変えたとき：作品の更新日時は変えずに端末へ保存する
+function quietSave() {
+  dirty = true;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, AUTOSAVE_MS);
 }
 
-// 今の版に、今の内容をしまう
-async function storeCurrentVersion(ep, cur) {
-  const data = episodeSnapshot(ep);
-  if (JSON.stringify(cur.data) === JSON.stringify(data)) return cur;
-  const v = { ...cur, data, chars: countChars(mainDraft(ep).body).all, updatedAt: ep.updatedAt || new Date().toISOString() };
+// 6.0 より前の版（両サイトの原稿＋プロット・フリーメモを1つに持つ）を、サイト別の稿に分ける。
+// 元の版は 'episode-legacy' として残す（消さない）。編集していた版（ep.versionId）は、両サイトの今の稿になる。
+const migratingEditions = new Map();
+function migrateLegacyEditions(ep) {
+  if (!migratingEditions.has(ep.id)) {
+    migratingEditions.set(ep.id, (async () => {
+      const legacy = (await allEpisodeVersions(ep.id)).filter((v) => v.kind === 'episode' && !v.site);
+      if (!legacy.length) {
+        if (ep.versionId) { delete ep.versionId; quietSave(); }
+        return;
+      }
+      const made = new Map();
+      for (const v of legacy) {
+        const name = String(v.name || '').replace(/^第(\d+)版$/, '第$1稿');
+        const ids = {};
+        for (const site of SITE_KEYS) {
+          // 両サイトの原稿を持つ版と、さらに古い1サイトだけの版（メイン投稿サイトの原稿）
+          const src = v.data?.drafts ? v.data.drafts[site] : (site === project.site ? v.data : null);
+          const data = editionData(src);
+          const e = { ...v, id: newVersionId(), kind: 'episode', site, name, chars: countChars(data.body).all, data, legacyId: v.id };
+          await versions.put(e);
+          ids[site] = e.id;
+        }
+        made.set(v.id, ids);
+        await versions.put({ ...v, kind: 'episode-legacy' });
+      }
+      if (ep.versionId && made.has(ep.versionId)) ep.editionIds = { ...made.get(ep.versionId), ...(ep.editionIds || {}) };
+      delete ep.versionId;
+      quietSave();
+    })().finally(() => migratingEditions.delete(ep.id)));
+  }
+  return migratingEditions.get(ep.id);
+}
+
+const editionNo = (v) => Number(/^第(\d+)[稿版]$/.exec(v?.name || '')?.[1] || 0);
+const versionTime = (v) => v.updatedAt || v.createdAt;
+const nextEditionNo = (list) => Math.max(0, ...list.map(editionNo)) + 1;
+// 番号の大きい順（番号のないものは新しい順で後ろ）
+const sortEditions = (list) => [...list].sort((a, b) => editionNo(b) - editionNo(a) || String(versionTime(b)).localeCompare(String(versionTime(a))));
+
+// そのサイトの稿の一覧と、今の稿。今の稿がなければ（以前の版で作ったエピソードなど）、今の内容を次の番号の稿にする
+const ensuringEdition = new Map();
+function ensureEdition(ep, site = editSite) {
+  const key = ep.id + '|' + site;
+  if (!ensuringEdition.has(key)) {
+    ensuringEdition.set(key, (async () => {
+      await migrateLegacyEditions(ep);
+      const list = (await allEpisodeVersions(ep.id)).filter((v) => v.kind === 'episode' && v.site === site);
+      let cur = list.find((v) => v.id === ep.editionIds?.[site]);
+      if (!cur) {
+        cur = await saveEdition(ep, site, `第${nextEditionNo(list)}稿`);
+        list.unshift(cur);
+        ep.editionIds = { ...(ep.editionIds || {}), [site]: cur.id };
+        quietSave();
+      }
+      return { list, cur };
+    })().finally(() => ensuringEdition.delete(key)));
+  }
+  return ensuringEdition.get(key);
+}
+
+// 今の稿に、今の内容をしまう
+async function storeEdition(ep, site, cur) {
+  const data = editionSnapshot(ep, site);
+  if (JSON.stringify(editionData(cur.data)) === JSON.stringify(data)) return cur;
+  const v = { ...cur, data, chars: countChars(data.body).all, updatedAt: ep.siteUpdatedAt?.[site] || new Date().toISOString() };
   await versions.put(v);
   return v;
 }
 
-// 版を上げる（前の版は今の内容のまま残り、同じ内容の新しい番号の版を編集する）
-async function raiseEpisodeVersion(ep = episode()) {
+// 稿を上げる（前の稿は今の内容のまま残り、同じ内容の新しい番号の稿を編集する）。もう一方のサイトは変えない
+async function raiseEdition(ep = episode(), site = editSite) {
   await flush();
-  const { list, cur } = await ensureEpisodeVersion(ep);
-  await storeCurrentVersion(ep, cur);
-  const v = await saveEpisodeVersion(`第${nextVersionNo(list)}版`, ep);
-  ep.versionId = v.id;
+  const { list, cur } = await ensureEdition(ep, site);
+  await storeEdition(ep, site, cur);
+  const v = await saveEdition(ep, site, `第${nextEditionNo(list)}稿`);
+  ep.editionIds = { ...(ep.editionIds || {}), [site]: v.id };
   changed();
   return { from: cur, to: v };
 }
 
 const versionLabel = (name, time, chars) => `${name}　${fmtTime(time)}　${Number(chars || 0).toLocaleString()}字`;
+// 今の稿の時刻：その稿を最後に書いた時刻
+const editionNowTime = (ep, site, v) => [ep.siteUpdatedAt?.[site], versionTime(v)].filter(Boolean).sort().pop();
 
-// 版の一覧（「第○版　時刻　文字数」）。編集している版を選んだ状態にする
+// 稿の一覧（「第○稿　時刻　文字数」）。編集中のサイトの稿だけを出し、編集している稿を選んだ状態にする
 let versionRenderSeq = 0;
 async function renderEpisodeVersions() {
   const sel = $('ep-version');
   const ep = episode();
+  const site = editSite;
   const seq = ++versionRenderSeq;
-  const { list, cur } = await ensureEpisodeVersion(ep);
-  if (seq !== versionRenderSeq || ep !== episode()) return; // あとから呼ばれた描画を優先する
-  const sorted = [...list].sort((a, b) => versionNo(b) - versionNo(a) || String(versionTime(b)).localeCompare(String(versionTime(a))));
-  sel.replaceChildren(...sorted.map((v) => (v.id === cur.id
-    ? new Option(versionLabel(v.name, [ep.updatedAt, versionTime(v)].filter(Boolean).sort().pop(), countChars(mainDraft(ep).body).all), v.id)
+  const { list, cur } = await ensureEdition(ep, site);
+  if (seq !== versionRenderSeq || ep !== episode() || site !== editSite) return; // あとから呼ばれた描画を優先する
+  sel.replaceChildren(...sortEditions(list).map((v) => (v.id === cur.id
+    ? new Option(versionLabel(v.name, editionNowTime(ep, site, v), countChars(draftOf(ep, site).body).all), v.id)
     : new Option(versionLabel(v.name, versionTime(v), v.chars), v.id))));
   sel.value = cur.id;
+  sel.setAttribute('aria-label', `${SITES[site].short}用の稿`);
 }
 
-// 書いているあいだ、編集している版の「時刻・文字数」を新しくする
+// 書いているあいだ、編集している稿の「時刻・文字数」を新しくする
 let versionLabelTimer = null;
 function refreshCurrentVersionLabel() {
   clearTimeout(versionLabelTimer);
   versionLabelTimer = setTimeout(() => {
     const ep = episode();
     const opt = $('ep-version').selectedOptions[0];
-    if (!opt || opt.value !== ep.versionId) return;
-    opt.textContent = versionLabel(opt.textContent.split('　')[0], ep.updatedAt, countChars(mainDraft(ep).body).all);
+    if (!opt || opt.value !== ep.editionIds?.[editSite]) return;
+    opt.textContent = versionLabel(opt.textContent.split('　')[0], ep.siteUpdatedAt?.[editSite] || ep.updatedAt, countChars(draftOf(ep, editSite).body).all);
   }, 1000);
 }
 
-// 一覧で版を選んだら、今の版に今の内容をしまってから、その版の内容に切り替える
+// 一覧で稿を選んだら、今の稿に今の内容をしまってから、その稿の内容に切り替える（編集中のサイトだけ）
 async function switchEpisodeVersion(id) {
   const ep = episode();
-  const { list, cur } = await ensureEpisodeVersion(ep);
+  const site = editSite;
+  const { list, cur } = await ensureEdition(ep, site);
   const v = list.find((x) => x.id === id);
   if (!v || v.id === cur.id) return;
-  await storeCurrentVersion(ep, cur);
-  applyEpisodeSnapshot(ep, v.data);
-  ep.versionId = v.id;
-  ep.updatedAt = versionTime(v); // その版の内容を最後に書いた時刻
+  await storeEdition(ep, site, cur);
+  applyEdition(ep, site, v.data);
+  ep.editionIds = { ...(ep.editionIds || {}), [site]: v.id };
+  ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [site]: versionTime(v) }; // その稿を最後に書いた時刻
   changed();
   showEpisode();
-  toast(`「${episodeName(ep)}」を ${v.name} に切り替えました（${cur.name}は残っています）`);
+  renderEpisodeList();
+  toast(`${SITES[site].short}用を ${v.name} に切り替えました（${cur.name}は残っています）`);
 }
 
-// 「この版を削除」：今表示している版を削除し、残っている一番新しい版を表示する
+// 「この稿を削除」：編集中のサイトの、今表示している稿を削除する。もう一方のサイトの稿は変えない。
+// 残っている稿があれば一番新しい稿を、なければ空の「第1稿」を表示する（プロット・フリーメモはそのまま）
 async function deleteEpisodeVersion() {
   const ep = episode();
-  const { list, cur } = await ensureEpisodeVersion(ep);
-  const rest = list.filter((v) => v.id !== cur.id)
-    .sort((a, b) => versionNo(b) - versionNo(a) || String(versionTime(b)).localeCompare(String(versionTime(a))));
-  if (!rest.length) { toast(`${cur.name}しかないので削除できません（版は最低1つ必要です）`); return; }
-  const next = rest[0];
-  if (!(await ask(`今表示している「${cur.name}」を削除しますか？\n削除した版は元に戻せません。削除すると「${next.name}」を表示します。`, { ok: '削除する', danger: true }))) return;
+  const site = editSite;
+  const other = SITE_KEYS.find((s) => s !== site);
+  const { list, cur } = await ensureEdition(ep, site);
+  const rest = sortEditions(list.filter((v) => v.id !== cur.id));
+  const chars = countChars(draftOf(ep, site).body).all;
+  const after = rest.length
+    ? `削除すると「${rest[0].name}」を表示します。`
+    : `${SITES[site].short}用の稿はこれだけなので、削除すると空の「第1稿」になります（タイトル・前書き・本文・後書きが空になります。プロット・フリーメモはそのままです）。`;
+  if (!(await ask(`${SITES[site].label}用の「${cur.name}」（本文 ${chars.toLocaleString()}字）を削除しますか？\n${after}\n${SITES[other].short}用の稿は変わりません。削除した稿は元に戻せません。`, { ok: '削除する', danger: true }))) return;
   await versions.remove(cur.id);
-  applyEpisodeSnapshot(ep, next.data);
-  ep.versionId = next.id;
-  ep.updatedAt = versionTime(next);
+  let next = rest[0];
+  if (next) {
+    applyEdition(ep, site, next.data);
+  } else {
+    applyEdition(ep, site, format.emptyDraft());
+    next = await saveEdition(ep, site, '第1稿');
+  }
+  ep.editionIds = { ...(ep.editionIds || {}), [site]: next.id };
+  ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [site]: versionTime(next) };
   changed();
   showEpisode();
-  toast(`「${cur.name}」を削除して、「${next.name}」を表示しました`);
+  renderEpisodeList();
+  toast(rest.length ? `「${cur.name}」を削除して、「${next.name}」を表示しました` : `「${cur.name}」を削除しました（${SITES[site].short}用は空の第1稿になりました）`);
 }
 
 async function episodeVersionUp() {
   const ep = episode();
-  const { from, to } = await raiseEpisodeVersion(ep);
+  const site = editSite;
+  const { from, to } = await raiseEdition(ep, site);
   await renderEpisodeVersions();
-  toast(`${to.name}にしました（${from.name}は今の内容のまま残っています）`);
+  toast(`${SITES[site].short}用を ${to.name}にしました（${from.name}は今の内容のまま残っています）`);
 }
 
 async function removeEpisodeVersions(episodeId) {
-  for (const v of await episodeVersions(episodeId)) await versions.remove(v.id);
+  for (const v of await allEpisodeVersions(episodeId)) await versions.remove(v.id);
 }
 
 // --- 作品全体のバックアップ版 ---
@@ -1669,11 +1845,13 @@ async function openVersion(id) {
 }
 
 async function restoreVersion(v) {
-  // エピソードの版は、その版に切り替えるだけ（今の版は今の内容のまま残る）
+  // エピソードの稿は、その稿に切り替えるだけ（今の稿は今の内容のまま残る）
   if (isEpisodeVersion(v)) {
     const index = project.episodes.findIndex((e) => e.id === v.episodeId);
     if (index < 0) { toast('このエピソードは削除されています', true); return; }
+    if (!v.site) { toast('以前の形式の版です（両サイトの稿に分けてあります）', true); return; }
     selectEpisode(index);
+    if (v.site !== editSite) setEditSite(v.site);
     await switchEpisodeVersion(v.id);
     return;
   }
@@ -2123,7 +2301,7 @@ async function exportPreSync() {
   if (!saved) { toast('同期の前の状態はありません'); return; }
   const d = new Date(saved.createdAt);
   const p = (n) => String(n).padStart(2, '0');
-  const r = await localFile.saveAs(saved.text, `小説エディター_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
+  const r = await localFile.saveAs(saved.text, `TUZURI_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
   if (r) toast('同期の前の状態を書き出しました（「ファイル」→ 全体の「開く」で戻せます）');
 }
 
@@ -2233,9 +2411,9 @@ const copySources = {
   afterword: () => ['後書き', convert(editSite, cur().afterword)],
   'free-memo': () => ['フリーメモ', episode().freeMemo],
   plot: () => ['プロット', episode().plot],
-  'x-text': () => ['X の投稿文', project.reports.x],
-  'narou-report-title': () => ['活動報告のタイトル', project.reports.narouTitle],
-  'narou-report-body': () => ['活動報告の本文', project.reports.narouBody],
+  'x-text': () => ['X の投稿文', epReport().x],
+  'narou-report-title': () => ['活動報告のタイトル', epReport().narouTitle],
+  'narou-report-body': () => ['活動報告の本文', epReport().narouBody],
 };
 
 async function writeClipboard(text) {
@@ -2564,12 +2742,9 @@ function renderTemplateSelects() {
   }
 }
 
+// 活動報告タブ：今のエピソードの活動報告（ひな型の話数・タイトル・URL も今のエピソード）
 function renderReportView() {
-  const sel = el.reportEpisode;
-  const keep = sel.value === '' ? project.episodes.length - 1 : Number(sel.value);
-  sel.replaceChildren();
-  project.episodes.forEach((e, i) => sel.append(new Option(episodeName(e), String(i))));
-  sel.value = String(Math.min(keep, project.episodes.length - 1));
+  $('report-ep-name').textContent = `第${epIndex + 1}話「${episodeName(episode(), project.site)}」`;
   renderTemplateSelects();
   updateCounts();
 }
@@ -2584,7 +2759,7 @@ async function applyTemplate(kind) {
     toast(`ひな型「${t.name}」を差し込みました`);
     return;
   }
-  const index = Number(el.reportEpisode.value) || 0;
+  const index = epIndex; // 今のエピソード
   if (kind === 'x') {
     if (el.xText.value && !(await ask('今の投稿文をひな型で置き換えますか？'))) return;
     el.xText.value = fillTemplate(t.body, project, index);
@@ -2865,7 +3040,7 @@ const SIMPLE_PRESET = {
   'copy.ep-title': false, 'copy.foreword': false, 'copy.afterword': false, 'copy.free-memo': false, 'copy.main-to-sub': false,
   'max.title': false, 'max.foreword': false, 'max.afterword': false,
   'editor.new': false, 'editor.links': false,
-  'novel.report': false, 'novel.workcodes': false,
+  'show.report': false, 'novel.workcodes': false,
   'count.novel-title': false, 'count.ep-title': false, 'count.foreword': false, 'count.afterword': false, 'count.plot': false, 'count.free-memo': false,
   episodes: 'list',
 };
@@ -2879,7 +3054,12 @@ function uiProfiles() {
     all = { simple: { ...detail, ...SIMPLE_PRESET }, detail };
     prefs.set('uiProfiles', all);
   }
-  return { simple: {}, detail: {}, ...all };
+  const out = { simple: {}, detail: {}, ...all };
+  // 6.0 より前の「目次の活動報告」を隠していた表示は、「活動報告タブ」も隠す
+  for (const k of Object.keys(UI_PROFILES)) {
+    if (out[k]['show.report'] === undefined && out[k]['novel.report'] === false) out[k] = { ...out[k], 'show.report': false };
+  }
+  return out;
 }
 
 function uiActive() {
@@ -2932,17 +3112,20 @@ const UI_TARGETS = {
   'novel.outline': () => document.querySelector('.nav-item[data-view="outline"]'),
   'novel.world': () => document.querySelector('.nav-item[data-view="world"]'),
   'novel.characters': () => document.querySelector('.nav-item[data-view="characters"]'),
-  'novel.report': () => document.querySelector('.nav-item[data-view="report"]'),
   'novel.workcodes': () => $('work-codes'),
+  'show.report': () => $('report-tab'),
   ...Object.fromEntries(['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'x', 'narou-report-title', 'narou-report-body']
     .map((k) => ['count.' + k, () => $('count-' + k)])),
+  ...Object.fromEntries(['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'x-text', 'narou-report-title', 'narou-report-body']
+    .map((k) => ['selall.' + k, () => document.querySelector(`[data-selall="${k}"]`)])),
 };
 
 function applyUiPrefs() {
   for (const [key, target] of Object.entries(UI_TARGETS)) target()?.classList.toggle('ui-off', !uiPref(key));
   // 隠した画面を開いていたら、エピソードの画面へ
-  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', report: 'novel.report' }[view];
+  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters' }[view];
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
+  if (reportMode && !uiPref('show.report')) setReportMode(false);
   document.body.classList.toggle('ep-list-mode', uiValue('episodes', 'full') === 'list');
   const cls = document.body.classList;
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
@@ -3003,6 +3186,7 @@ function fitVisualViewport() {
 
 function maximizeField(field) {
   if (maximized) restoreMaximized();
+  if (isFolded(field)) setFolded(field, false); // 折りたたんだ欄は開いてから最大化する
   let box = document.querySelector(`.mx[data-field="${field}"]`);
   if (!box) return;
   // 前書き・後書きは開いてから中身を最大化する
@@ -3249,6 +3433,7 @@ const actions = {
   'add-chapter': addChapterFromList,
   'ep-version-up': episodeVersionUp,
   'ep-version-delete': deleteEpisodeVersion,
+  'open-report': () => setReportMode(true),
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,
   'open-import': () => importScreen.open(),
@@ -3508,6 +3693,14 @@ function bindEvents() {
   document.querySelectorAll('[name="ui-active"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) setUiActive(r.value); }));
   document.querySelectorAll('[data-uiprof]').forEach((b) => b.addEventListener('click', () => renderUiProfileEditor(b.dataset.uiprof)));
   $('ep-pick').addEventListener('change', (e) => selectEpisode(Number(e.target.value)));
+  // 全て選択（押してもフォーカスを奪わないよう、押した時点では何もしない）
+  document.querySelectorAll('[data-selall]').forEach((b) => {
+    b.addEventListener('pointerdown', (e) => e.preventDefault());
+    b.addEventListener('click', () => selectAllIn(b.dataset.selall));
+  });
+  // 本文・プロット・フリーメモの折りたたみ
+  document.querySelectorAll('[data-fold]').forEach((b) => b.addEventListener('click', () => setFolded(b.dataset.fold, !isFolded(b.dataset.fold))));
+  applyFolds();
   $('iphone-max-mode').addEventListener('change', saveIphoneMaxSettings);
   $('iphone-max-px').addEventListener('change', saveIphoneMaxSettings);
   // 別のタブで同じ作品が保存されたら知らせる

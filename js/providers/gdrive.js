@@ -206,7 +206,7 @@ function saveFolderId() {
   return chosenFolder()?.id || 'root';
 }
 
-// mime：中身の種類（小説エディターのファイルは application/json、テキストは text/plain）
+// mime：中身の種類（TUZURI のファイルは application/json、テキストは text/plain）
 function multipart(metadata, text, mime = 'application/json') {
   const boundary = 'novel-editor-' + Math.random().toString(36).slice(2);
   const body =
