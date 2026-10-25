@@ -36,7 +36,7 @@ async function ensureWritable(handle) {
 export const localFile = {
   canOverwrite: hasFsa,
 
-  // kind: 'json'（TUZURI のファイル）／'txt'（テキスト）／'any'
+  // kind: 'json'（AYATUZURI のファイル）／'txt'（テキスト）／'any'
   // 戻り値: { name, text, handle, file } / キャンセル時は null（file は文字コードを判定し直したいとき用）
   async open(kind = 'any') {
     const accepts = {
@@ -47,7 +47,7 @@ export const localFile = {
     if (hasFsa) {
       let handle;
       try {
-        [handle] = await window.showOpenFilePicker({ types: [{ description: kind === 'txt' ? 'テキスト' : 'TUZURI のファイル', accept: accepts }] });
+        [handle] = await window.showOpenFilePicker({ types: [{ description: kind === 'txt' ? 'テキスト' : 'あや綴りのファイル', accept: accepts }] });
       } catch (e) {
         if (isAbort(e)) return null;
         throw e;

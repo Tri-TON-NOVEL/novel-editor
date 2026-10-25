@@ -4,7 +4,7 @@
 //
 // project = {
 //   id（端末ローカル）, workId（作品の識別子。端末をまたいでも同じ）,
-//   title, site: 'narou' | 'alpha'（メイン投稿サイト）, narouUrl, alphaUrl, synopsis（あらすじ）,
+//   title, site: 'narou' | 'alpha'（メイン投稿サイト）, narouUrl, alphaUrl, synopsis（あらすじ）, projectMemo（作品全体のメモ）,
 //   chapters: [{ id, title, plot, order }],                       章（全体プロットの章と同じもの）
 //   episodes: [{
 //     id, chapterId（null＝未分類）, order,
@@ -72,6 +72,7 @@ export function newProject(content = {}) {
     narouNcode: '',   // なろうの Nコード（例 n1234ab）
     alphaWorkId: '',  // アルファポリスの作品ID
     synopsis: '',
+    projectMemo: '',
     episodes: [newEpisode({ chapterId: first.id })],
     chapters: [first],
     world: { categories: categories('世界観', '用語', '地名・組織'), items: [] },
@@ -144,6 +145,7 @@ export function normalize(p) {
   const project = { ...base, ...p, reports: { ...base.reports, ...(p.reports || {}) }, links: { ...(p.links || {}) } };
   if (!SITE_KEYS.includes(project.site)) project.site = 'narou';
   if (!project.workId) project.workId = makeId();
+  project.projectMemo = String(p.projectMemo ?? '');
 
   // 章（並びは配列の順。order は保存時に振り直す）
   const chapterSrc = Array.isArray(p.chapters) && p.chapters.length

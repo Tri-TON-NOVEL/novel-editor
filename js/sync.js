@@ -22,7 +22,7 @@
 //   読み込むときは作品ごとにまとめる（loadAndMerge）。両方で書き換えた作品だけ、どちらを使うか聞く。
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
 import { meta, prefs, db, versions } from './db.js';
-import { makeBackup, parseBackup, mergeSharedPrefs } from './backup.js';
+import { makeBackup, parseBackup, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
 import { normalize } from './format.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
@@ -76,6 +76,7 @@ let dirty = !!prefs.get('sync.dirty', false);
 let checked = false;   // 起動時の確認が済んだか
 let lastRun = 0;
 let running = false;
+let autoBuilder = null;
 let listener = () => {};
 let newerHandler = () => {};
 
@@ -87,9 +88,11 @@ export function getState() { return state; }
 export function getError() { return lastError; }
 export function isChecked() { return checked; }
 export function isDirty() { return dirty; }
+export function isRunning() { return running; }
 
-export async function init({ provider }) {
+export async function init({ provider, makeAutoBackup = null }) {
   drive = provider || null;
+  autoBuilder = makeAutoBackup;
   setInterval(tick, CHECK_MS);
   await refresh();
 }
@@ -176,7 +179,7 @@ function target() {
         await w.write(text);
         await w.close();
       },
-      async remove(id) { await dir.removeEntry(id).catch(() => {}); },
+      async remove(id) { await dir.removeEntry(id); },
     };
   }
   if (mode() === 'cloud' && drive) {
@@ -206,7 +209,9 @@ export function parseName(name) {
   if (!m) return null;
   const s = m[2];
   const at = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15));
-  return { prefix: m[1], at };
+  let owner = m[1].replace(/__$/, '');
+  if (owner.startsWith('AYATUZURI__')) owner = owner.split('__').at(-1) || 'AYATUZURI';
+  return { prefix: owner, at };
 }
 
 // 保存先のバックアップの一覧（新しい順）。[{ id, name, prefix, at, mine }]
@@ -229,6 +234,12 @@ export async function read(entry) {
   return target().read(entry.id);
 }
 
+export async function remove(entry) {
+  const t = target();
+  if (!t) throw new Error('バックアップの保存先が使えません');
+  await t.remove(entry.id);
+}
+
 // ---------- 保存 ----------
 
 // 書き換えた印（編集のたびに呼ぶ）
@@ -238,11 +249,12 @@ export function markDirty() {
   prefs.set('sync.dirty', true);
 }
 
-export async function backupNow({ force = false } = {}) {
+export async function backupNow({ force = false, build = null } = {}) {
   const t = target();
   if (!t || running) return false;
   if (!checked && !force) return false;
   running = true;
+  listener();
   try {
     // 保存する前に、他の端末がもっと新しいバックアップを保存していないか確かめる（両方の端末を開いたまま書いているとき）。
     // あれば保存せず、アプリに知らせて確認してもらう（先に保存すると、他の端末の更新が隠れてしまうため）
@@ -252,8 +264,9 @@ export async function backupNow({ force = false } = {}) {
       newerHandler();
       return false;
     }
-    const { text } = await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
-    const name = `${prefix()}${stamp()}.json`;
+    const made = build ? await build() : autoBuilder ? await autoBuilder() : await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
+    const text = made.text;
+    const name = made.name || `${prefix()}${stamp()}.json`;
     await t.write(name, text);
     dirty = false;
     prefs.set('sync.dirty', false);
@@ -279,6 +292,7 @@ export async function backupNow({ force = false } = {}) {
     return false;
   } finally {
     running = false;
+    listener();
   }
 }
 
@@ -351,6 +365,11 @@ export async function loadAndMerge(entry, onConflict, opts = {}) {
  * 戻り値: { added, updated, kept, addedList, updatedList, keptList }（List は [{ id, title }]）／null（やめた）
  */
 export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null } = {}) {
+  if (isPack(text)) {
+    const result = await restorePack(parsePack(text), { environmentMode: 'merge' });
+    markLoaded(name);
+    return result;
+  }
   const backup = parseBackup(text);
   const last = lastBackup();
   // この端末で書き換えたか：前回同期した時刻（この端末の時計）とくらべる（端末どうしの時計のずれに左右されないように）

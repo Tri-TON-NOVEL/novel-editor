@@ -3,21 +3,21 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>文綴り</title>
-<meta name="description" content="物語を綴り、作品を束ねる、小説家になろう・アルファポリス向けの小説エディター">
+<title>あや綴り</title>
+<meta name="description" content="文（あや）と文（あや）で綾（あや）を成す。小説家になろう・アルファポリス向けの小説エディター">
 <meta name="theme-color" content="#2f5d50">
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="文綴り">
+<meta name="apple-mobile-web-app-title" content="あや綴り">
 <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 <header class="toolbar">
   <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
-  <div class="brand" title="物語を綴り、作品を束ねる、小説家になろう・アルファポリス向けの小説エディター">文綴り</div>
+  <div class="brand" title="文（あや）と文（あや）で綾（あや）を成す。">あや綴り</div>
   <nav class="actions">
     <button type="button" data-action="library">作品一覧</button>
     <button type="button" data-action="new-project">新しい作品</button>
@@ -26,7 +26,8 @@
       <div class="menu-list">
         <div class="menu-head">全体（すべての作品）</div>
         <button type="button" data-action="all-open">開く…</button>
-        <button type="button" data-action="all-save-as">名前を付けて保存…</button>
+        <button type="button" data-action="backup-pack-create">バックアップパックを作成…</button>
+        <button type="button" data-action="backup-pack-open">バックアップパックを確認・読み込む…</button>
         <div class="menu-head">エピソード（今開いているもの）</div>
         <button type="button" data-action="ep-open">開く…</button>
         <button type="button" data-action="ep-save-as">名前を付けて保存…</button>
@@ -44,8 +45,8 @@
     <button type="button" data-action="settings">設定</button>
     <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶<span class="label"> 戻す</span></button>
     <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
-    <!-- 保存：今の内容を、全端末で共有する自動バックアップに残す（Ctrl+S／⌘S）。一番右に、少し離して置く -->
-    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="今の内容を自動バックアップに保存（Ctrl+S／⌘S）">保存</button>
+    <!-- 保存：表示中のエピソードをサーバへバックアップする（Ctrl+S／⌘S） -->
+    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="表示中のエピソードをサーバへバックアップ（Ctrl+S／⌘S）">保存</button>
   </nav>
   <div class="status" id="status" aria-live="polite"></div>
   <button type="button" class="warn" id="sync-attention" data-action="sync-attention" hidden></button>
@@ -94,8 +95,9 @@
     <nav class="nav">
       <button type="button" class="nav-item" data-view="synopsis">あらすじ</button>
       <button type="button" class="nav-item" data-view="outline">全体プロット</button>
-      <button type="button" class="nav-item" data-view="world">設定</button>
+      <button type="button" class="nav-item" data-view="world">世界観・用語</button>
       <button type="button" class="nav-item" data-view="characters">登場人物</button>
+      <button type="button" class="nav-item" data-view="project-memo">メモ</button>
       <div class="nav-head">
         <span>章・エピソード</span>
         <span class="nav-add">
@@ -308,6 +310,7 @@
             </div>
             <textarea id="plot" spellcheck="false" placeholder="このエピソードのプロット"></textarea>
           </section>
+          <div class="plot-memo-splitter" id="plot-memo-splitter" role="separator" aria-orientation="horizontal" aria-label="プロットとフリーメモの高さを変える（ダブルクリックで元に戻す）" title="ドラッグで高さを変更／ダブルクリックで元に戻す"></div>
           <section class="field mx grow" data-field="memo">
             <div class="field-head">
               <button type="button" class="fold-btn" data-fold="memo" aria-expanded="true" title="フリーメモを折りたたむ／開く">▾</button>
@@ -350,7 +353,7 @@
 
     <!-- 設定（分類つきの表） -->
     <section class="view scroll" id="view-world" hidden>
-      <h1 class="view-title">設定</h1>
+      <h1 class="view-title">世界観・用語</h1>
       <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。国・種族・組織などをここに書いておくと、登場人物の「所属」に選べます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="world-tables"></div>
     </section>
@@ -358,8 +361,22 @@
     <!-- 登場人物（分類つきの表） -->
     <section class="view scroll" id="view-characters" hidden>
       <h1 class="view-title">登場人物</h1>
-      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。「所属」には「設定」の項目（国・種族・組織など）をいくつでも選べます。名前を変えた同じ人物は「同一人物」でつなげます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
+      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。「所属」には「世界観・用語」の項目（国・種族・組織など）をいくつでも選べます。名前を変えた同じ人物は「同一人物」でつなげます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="character-tables"></div>
+    </section>
+
+    <!-- 作品全体のメモ -->
+    <section class="view" id="view-project-memo" hidden>
+      <section class="field grow">
+        <div class="field-head">
+          <label for="project-memo" class="view-title">メモ</label>
+          <span class="count" id="count-project-memo"></span>
+          <span class="spacer"></span>
+          <button type="button" class="tool selall-btn" data-selall="project-memo">全て選択</button>
+          <button type="button" class="copy" data-copy="project-memo">コピー</button>
+        </div>
+        <textarea id="project-memo" spellcheck="false" placeholder="作品全体についてのメモ（エピソードごとのフリーメモとは別です）"></textarea>
+      </section>
     </section>
   </main>
 </div>
@@ -369,6 +386,93 @@
     <h2>作品一覧 <small>（この端末に自動保存されている作品）</small></h2>
     <ul class="list" id="library-list"></ul>
     <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
+<dialog id="backup-pack-dialog" class="wide-dialog">
+  <form method="dialog" class="dialog" id="backup-pack-form">
+    <h2>バックアップパックを作成</h2>
+    <p class="hint">選んだ内容を一つのファイルにまとめます。上位の内容には下位の内容が含まれるため、重複して保存しません。</p>
+    <fieldset class="checks">
+      <legend>環境</legend>
+      <label><input type="checkbox" name="environment"> 環境設定を含める</label>
+    </fieldset>
+    <fieldset>
+      <legend>小説データ</legend>
+      <div class="radio-row pack-scope">
+        <label><input type="radio" name="scope" value="all"> 全小説</label>
+        <label><input type="radio" name="scope" value="project" checked> 選択した小説を丸ごと</label>
+        <label><input type="radio" name="scope" value="custom"> 必要な内容を選ぶ</label>
+        <label><input type="radio" name="scope" value="none"> 小説データを含めない</label>
+      </div>
+      <label id="backup-pack-project-row">対象作品
+        <select name="project"></select>
+      </label>
+      <div id="backup-pack-custom" hidden>
+        <label class="check"><input type="checkbox" name="materials" checked> 作品資料（あらすじ・全体プロット・世界観／用語・登場人物・メモ）</label>
+        <div class="button-row">
+          <button type="button" class="tool" id="backup-pack-all-episodes">エピソードを全て選択</button>
+          <button type="button" class="tool" id="backup-pack-no-episodes">全て解除</button>
+        </div>
+        <div class="pack-episode-list" id="backup-pack-episodes"></div>
+      </div>
+    </fieldset>
+    <p class="validation-message" id="backup-pack-validation"></p>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="save" class="primary" id="backup-pack-save">一つのファイルに保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="backup-inspect-dialog" class="wide-dialog">
+  <form method="dialog" class="dialog" id="backup-inspect-form">
+    <h2>バックアップ内容の確認</h2>
+    <div class="backup-summary" id="backup-inspect-summary"></div>
+    <div class="backup-inspect-grid">
+      <div class="backup-tree" id="backup-inspect-tree"></div>
+      <pre class="backup-detail" id="backup-inspect-detail">項目を選ぶと詳細を表示します。</pre>
+    </div>
+    <p class="validation-message" id="backup-inspect-warning"></p>
+    <div class="dialog-foot wrap">
+      <button type="button" value="cancel">閉じる</button>
+      <button value="restore-new" id="backup-restore-new">新しい作品として読み込む</button>
+      <button value="restore" class="primary" id="backup-restore">選択した内容を読み込む</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="sync-target-dialog" class="wide-dialog">
+  <form method="dialog" class="dialog" id="sync-target-form">
+    <h2>自動保存するエピソードを選ぶ</h2>
+    <p class="hint">選んだエピソードを、指定間隔ごとに一つのバックアップパックへ保存します。各エピソードには両サイトの全稿、プロット、フリーメモ、活動報告を含めます。</p>
+    <div class="button-row">
+      <button type="button" class="tool" id="sync-target-all">全て選択</button>
+      <button type="button" class="tool" id="sync-target-none">全て解除</button>
+    </div>
+    <div class="target-list" id="sync-target-list"></div>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">キャンセル</button>
+      <button value="save" class="primary">保存</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="backup-manage-dialog" class="wide-dialog">
+  <form method="dialog" class="dialog" id="backup-manage-form">
+    <h2>バックアップファイルの管理</h2>
+    <p class="hint" id="backup-manage-hint"></p>
+    <div class="button-row">
+      <button type="button" class="tool" id="backup-manage-refresh">一覧を更新</button>
+      <button type="button" class="tool" id="backup-manage-all">全て選択</button>
+      <button type="button" class="tool" id="backup-manage-none">全て解除</button>
+    </div>
+    <div class="backup-file-list" id="backup-file-list"></div>
+    <div class="dialog-foot wrap">
+      <button type="button" value="cancel">閉じる</button>
+      <button type="button" class="danger" id="backup-files-delete">選択したファイルを削除</button>
+      <button type="button" class="primary" id="backup-file-inspect">内容を確認</button>
+    </div>
   </form>
 </dialog>
 
@@ -553,27 +657,27 @@
 
 <dialog id="version-save-dialog">
   <form method="dialog" class="dialog" id="version-save-form">
-    <h2>作品全体を保存</h2>
-    <p class="hint">今の作品全体（全エピソード・プロット・設定・登場人物など）を、この名前で残します。</p>
+    <h2>復元ポイントを作成</h2>
+    <p class="hint">今の作品全体（全エピソード・プロット・世界観・用語・登場人物など）を、この名前で復元ポイントとして残します。</p>
     <label class="stack">名前 <input name="name" type="text" autocomplete="off" required></label>
     <label class="stack">メモ（任意） <textarea name="memo" rows="3" spellcheck="false" placeholder="例：第2章を大幅に書き直す前"></textarea></label>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
-      <button value="ok" class="primary">保存</button>
+      <button value="ok" class="primary">復元ポイントを作成</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="version-dialog">
   <form method="dialog" class="dialog" id="version-form">
-    <h2 id="version-title">版</h2>
+    <h2 id="version-title">変更履歴・復元ポイント</h2>
     <dl class="version-info" id="version-info"></dl>
-    <p class="hint">「この版に戻す」を押すと、戻す直前の状態も自動で版として残るので、あとから元に戻せます。</p>
+    <p class="hint">「この状態に戻す」を押すと、戻す直前の状態も変更履歴に残るので、あとから元に戻せます。</p>
     <div class="dialog-foot wrap">
       <button type="button" value="cancel">閉じる</button>
       <button value="delete" class="danger">削除</button>
       <button value="copy" id="version-copy">別の作品として開く</button>
-      <button value="restore" class="primary">この版に戻す</button>
+      <button value="restore" class="primary">この状態に戻す</button>
     </div>
   </form>
 </dialog>
@@ -638,11 +742,11 @@
     <h2>設定</h2>
     <div class="settings-tabs" role="tablist">
       <button type="button" role="tab" data-stab="display">表示</button>
+      <button type="button" role="tab" data-stab="cloud">クラウド</button>
       <button type="button" role="tab" data-stab="file">ファイル</button>
       <button type="button" role="tab" data-stab="sites">投稿サイト</button>
       <button type="button" role="tab" data-stab="links">リンク</button>
-      <button type="button" role="tab" data-stab="backup">自動バックアップ</button>
-      <button type="button" role="tab" data-stab="cloud">クラウド</button>
+      <button type="button" role="tab" data-stab="backup">バックアップ</button>
       <button type="button" role="tab" data-stab="import">インポート（なろう・アルファ）</button>
       <button type="button" role="tab" data-stab="about">このアプリについて</button>
     </div>
@@ -655,12 +759,8 @@
         <label><input type="radio" name="ui-active" value="simple"> 簡易</label>
         <label><input type="radio" name="ui-active" value="detail"> 詳細</label>
       </div>
-      <p class="hint">「簡易」「詳細」の2つの表示を下のタブで決めておき、ここで切り替えます。切り替えるとすぐに反映されます。</p>
+      <p class="hint">「簡易」「詳細」を選ぶと、実際の画面と下の設定項目が同時に切り替わります。選んだ表示の内容を、そのまま下で設定できます。</p>
     </fieldset>
-    <div class="ui-prof-tabs" role="tablist" aria-label="編集する表示">
-      <button type="button" role="tab" data-uiprof="simple">簡易</button>
-      <button type="button" role="tab" data-uiprof="detail">詳細</button>
-    </div>
     <p class="hint ui-prof-note" id="ui-prof-note"></p>
     <div class="ui-prof-body">
     <fieldset>
@@ -692,8 +792,9 @@
       <legend>小説全体（目次）</legend>
       <label><input type="checkbox" data-ui="novel.synopsis"> あらすじ</label>
       <label><input type="checkbox" data-ui="novel.outline"> 全体プロット</label>
-      <label><input type="checkbox" data-ui="novel.world"> 設定</label>
+      <label><input type="checkbox" data-ui="novel.world"> 世界観・用語</label>
       <label><input type="checkbox" data-ui="novel.characters"> 登場人物</label>
+      <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
       <label><input type="checkbox" data-ui="novel.workcodes"> 投稿サイトとの対応</label>
     </fieldset>
     <fieldset>
@@ -725,6 +826,7 @@
       <label><input type="checkbox" data-ui="count.plot"> プロット</label>
       <label><input type="checkbox" data-ui="count.free-memo"> フリーメモ</label>
       <label><input type="checkbox" data-ui="count.synopsis"> あらすじ</label>
+      <label><input type="checkbox" data-ui="count.project-memo"> 作品のメモ</label>
       <label><input type="checkbox" data-ui="count.x"> X の投稿文</label>
       <label><input type="checkbox" data-ui="count.narou-report-title"> 活動報告のタイトル</label>
       <label><input type="checkbox" data-ui="count.narou-report-body"> 活動報告の本文</label>
@@ -737,6 +839,7 @@
       <label><input type="checkbox" data-ui="selall.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="selall.plot"> プロット</label>
       <label><input type="checkbox" data-ui="selall.free-memo"> フリーメモ</label>
+      <label><input type="checkbox" data-ui="selall.project-memo"> 作品のメモ</label>
       <label><input type="checkbox" data-ui="selall.x-text"> X の投稿文</label>
       <label><input type="checkbox" data-ui="selall.narou-report-title"> 活動報告のタイトル</label>
       <label><input type="checkbox" data-ui="selall.narou-report-body"> 活動報告の本文</label>
@@ -795,8 +898,28 @@
         </select>
       </label>
       <p class="hint" id="file-destination-hint"></p>
-      <p class="hint">クラウドは「クラウド」タブで選んだもの（Google ドライブか OneDrive）です。「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（クラウドの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
+      <p class="hint">クラウドは「クラウド」タブの「利用できるクラウド」で選んだものです。「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（クラウドの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。
         変えるとすぐに反映されます。</p>
+    </fieldset>
+
+    </div>
+
+    <!-- クラウド：ファイルとバックアップで共通する基本設定だけ -->
+    <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
+    <p class="hint">ここでは、この端末で利用できるクラウドと接続IDだけを設定します。ファイルとバックアップの保存先は、それぞれのタブで選びます。</p>
+    <fieldset id="cloud-choice">
+      <legend>利用できるクラウド</legend>
+      <label>クラウド
+        <select id="cloud-provider">
+          <option value="none">なし</option>
+          <option value="gdrive">Google ドライブ</option>
+          <option value="onedrive">OneDrive</option>
+        </select>
+      </label>
+      <p class="hint">「なし」を選ぶとクラウドを使いません。Google DriveまたはOneDriveを選ぶと、「ファイル」と「バックアップ」のクラウド保存で共通して利用します。切り替えると画面を読み直します。</p>
+    </fieldset>
+    <fieldset id="provider-settings">
+      <legend>ドライブの接続の設定</legend>
     </fieldset>
     </div>
 
@@ -831,19 +954,18 @@
 
     <!-- バックアップ -->
     <div class="settings-panel" data-spanel="backup" role="tabpanel" hidden>
-    <p class="hint">この端末の中には、設定しなくても、いつも自動で保存しています（書いた内容と、下の「作品のバックアップ版」）。下の「自動バックアップ」は、端末の外（フォルダ・ネットワークドライブ・Google ドライブ・OneDrive）への保存です。</p>
+    <p class="hint">この端末には常に最新状態を保存します。「変更履歴と復元ポイント」は端末内、「サーバへの自動バックアップ」は端末外に保存します。</p>
     <fieldset>
-      <legend>この作品のバックアップ版（作品全体）</legend>
-      <p class="hint">作品全体（全エピソード・プロット・設定など）をまるごと残したものです。書いている間は10分ごと、画面を閉じるときにも自動で残ります（最新30件）。</p>
+      <legend>変更履歴と復元ポイント</legend>
+      <p class="hint">作品全体（全エピソード・プロット・世界観・用語など）の過去状態を端末内に残します。書いている間は10分ごと、画面を閉じるときにも自動で残ります（自動履歴は最新30件）。手動の復元ポイントは自動削除しません。</p>
       <div class="button-row">
-        <button type="button" data-action="project-version-save">＋ 今の作品全体を保存…</button>
+        <button type="button" data-action="project-version-save">＋ 復元ポイントを作成…</button>
       </div>
       <ul class="list" id="project-versions"></ul>
     </fieldset>
     <fieldset id="sync-settings">
-      <legend>自動バックアップ（全作品・ひな型・設定／端末どうしの同期）</legend>
-      <p class="hint">書いた内容に変更があったときだけ、保存間隔ごとと、画面を閉じる・別のアプリに切り替えるときに、全作品をまとめて新しいファイルとして保存します。
-        起動したときは保存先を調べ、他の端末のほうが新しければ、読み込むかを聞きます（作品ごとに新しいほうを使います）。</p>
+      <legend>サーバへの自動バックアップ</legend>
+      <p class="hint">選択したエピソードを、保存間隔ごとと画面を閉じるときに一つのバックアップパックとして保存します。上段の「保存」は、表示中のエピソードだけを直ちに保存します。</p>
       <label>保存先（この端末）
         <select id="sync-mode">
           <option value="off">使わない</option>
@@ -858,9 +980,10 @@
       </div>
       <p id="sync-status"></p>
       <div class="button-row">
-        <button type="button" id="sync-now">今すぐバックアップ</button>
+        <button type="button" id="sync-targets">保存するエピソードを選ぶ…</button>
         <button type="button" id="sync-check">他の端末の更新を確認…</button>
         <button type="button" id="sync-restore">バックアップから戻す…</button>
+        <button type="button" id="sync-manage">バックアップファイルを管理…</button>
       </div>
       <div class="autobackup-options">
         <label>ファイル名の先頭（プレフィックス）
@@ -879,7 +1002,7 @@
           <input name="autoBackupKeep" type="number" min="10" max="2000" step="10" inputmode="numeric">
         </label>
       </div>
-      <p class="hint">ファイル名は「プレフィックス＋日時」です（例：iPad_20261022T001500Z.json）。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
+      <p class="hint">ファイル名にはAYATUZURI、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
         設定は変えるとすぐに反映されます。</p>
       <div class="button-row" id="sync-presync-row" hidden>
         <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>
@@ -903,7 +1026,8 @@
     <!-- このアプリについて -->
     <div class="settings-panel" data-spanel="about" role="tabpanel" hidden>
     <fieldset>
-      <legend>文綴り（ふみつづり）</legend>
+      <legend>あや綴り</legend>
+       <p class="about-catch">文（あや）と文（あや）で綾（あや）を成す。</p>
        <p class="hint">小説家になろう・アルファポリス向けの小説執筆エディターです。使い方は README を参照してください。</p>
       <p id="app-version"></p>
     </fieldset>
@@ -917,27 +1041,6 @@
         <li>本アプリは「小説家になろう」「アルファポリス」、および Google・Apple・Microsoft などの各サービスとは関係がなく、それらの公式・公認のものではありません。各サービスの利用は、それぞれの規約に従ってください。</li>
         <li>本アプリを使う場合は、上記に同意したものとします。</li>
       </ul>
-    </fieldset>
-    </div>
-
-    <!-- クラウド -->
-    <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
-    <fieldset id="cloud-choice">
-      <legend>使うクラウド（この端末）</legend>
-      <label>クラウド
-        <select id="cloud-provider">
-          <option value="gdrive">Google ドライブ</option>
-          <option value="onedrive">OneDrive</option>
-        </select>
-      </label>
-      <p class="hint">「ファイル」の保存・開くと、自動バックアップ（「クラウド」方式）で使うクラウドです。切り替えると画面を読み直します。それぞれのログイン・フォルダの設定は別々に残るので、戻せば元のとおりに使えます。</p>
-    </fieldset>
-    <fieldset id="cloud-actions">
-      <legend id="cloud-actions-legend">ログインと保存先フォルダ</legend>
-      <div id="cloud-action-list"></div>
-    </fieldset>
-    <fieldset id="provider-settings">
-      <legend>クラウド接続の設定</legend>
     </fieldset>
     </div>
 

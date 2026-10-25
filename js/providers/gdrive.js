@@ -206,7 +206,7 @@ function saveFolderId() {
   return chosenFolder()?.id || 'root';
 }
 
-// mime：中身の種類（TUZURI のファイルは application/json、テキストは text/plain）
+// mime：中身の種類（AYATUZURI のファイルは application/json、テキストは text/plain）
 function multipart(metadata, text, mime = 'application/json') {
   const boundary = 'novel-editor-' + Math.random().toString(36).slice(2);
   const body =
@@ -386,7 +386,10 @@ export const gdrive = {
       return (await res.json()).id;
     },
     async remove(id) {
-      await api(`${API}/files/${encodeURIComponent(id)}`, { method: 'DELETE' }).catch(() => {});
+      // 手動管理でも自動整理でも、誤操作から戻せるよう完全削除ではなくゴミ箱へ移す
+      await api(`${API}/files/${encodeURIComponent(id)}?fields=id,trashed`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }),
+      });
     },
   },
 };

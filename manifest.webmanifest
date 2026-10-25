@@ -1,7 +1,7 @@
 {
-  "name": "TUZURI",
-  "short_name": "TUZURI",
-  "description": "TUZURI（Tale Utility for Zoning, Updating, Revising, and Integrating）：小説家になろう・アルファポリス向けの小説エディター",
+  "name": "あや綴り",
+  "short_name": "あや綴り",
+  "description": "文（あや）と文（あや）で綾（あや）を成す。小説家になろう・アルファポリス向けの小説エディター",
   "lang": "ja",
   "start_url": "./",
   "scope": "./",

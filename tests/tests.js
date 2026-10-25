@@ -2,6 +2,7 @@
 import * as F from '../js/format.js';
 import * as N from '../js/notation.js';
 import * as I from '../js/importer.js';
+import * as B from '../js/backup.js';
 
 const results = [];
 const groups = [];
@@ -81,6 +82,27 @@ group('Phase 1：保存 → 読込の往復', () => {
   eq(back.episodes.map((e) => e.drafts), p.episodes.map((e) => e.drafts), '原稿が一致');
   eq(back.workId, p.workId, 'workId が一致');
   eq(back.chapters.map((c) => c.title), p.chapters.map((c) => c.title), '章が一致');
+});
+
+group('7.0：作品全体のメモを保存・読込', () => {
+  const p = F.newProject({ title: '作品', projectMemo: '作品全体の覚え書き' });
+  const back = F.parse(F.serialize(p), '作品.json');
+  eq(back.projectMemo, '作品全体の覚え書き');
+});
+
+group('7.0：バックアップパックの内容確認', () => {
+  const p = F.newProject({ title: '作品A' });
+  const ep = p.episodes[0];
+  ep.drafts.narou.title = '第一話';
+  const pack = {
+    format: B.PACK_FORMAT, version: B.PACK_VERSION, createdAt: '2026-10-24T00:00:00.000Z', reason: 'manual-pack',
+    environment: { prefs: {}, devicePrefs: {} },
+    items: [{ key: `episode:${p.workId}:${ep.id}`, type: 'episode', project: { workId: p.workId, title: p.title }, episode: ep, versions: [] }],
+  };
+  const parsed = B.parseAnyBackup(JSON.stringify(pack));
+  const summary = B.packSummary(parsed);
+  eq([summary.environment, summary.projects.length, summary.episodes], [true, 1, 1]);
+  throws(() => B.parseAnyBackup('{"format":"unknown"}'), /バックアップ/);
 });
 
 group('6.0：稿の割り当て・サイト別の時刻・エピソードの活動報告を保持', () => {

@@ -428,7 +428,7 @@ export const onedrive = {
       return (await upload(byPath(folder, name), text, 'application/json', 'replace')).id;
     },
     async remove(id) {
-      await api(byId(id), { method: 'DELETE' }).catch(() => {});
+      await api(byId(id), { method: 'DELETE' });
     },
   },
 };

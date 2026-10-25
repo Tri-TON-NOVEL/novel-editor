@@ -11,7 +11,9 @@ import { onedrive } from './onedrive.js';
 
 export const providers = [gdrive, onedrive];
 
-// 今使うクラウド（既定は Google ドライブ。以前の版はこれだけだった）
+// 今使うクラウド。「なし」のときは null。未設定の旧版は Google ドライブを引き継ぐ。
 export function activeProvider() {
-  return providers.find((p) => p.id === prefs.get('cloud.provider', 'gdrive')) || providers[0];
+  const id = prefs.get('cloud.provider', 'gdrive');
+  if (id === 'none') return null;
+  return providers.find((p) => p.id === id) || providers[0];
 }
