@@ -7,7 +7,7 @@
 <meta name="description" content="文（あや）と文（あや）で綾（あや）を成す。小説家になろう・アルファポリス向けの小説エディター">
 <meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
-<link rel="manifest" href="manifest.webmanifest?v=76">
+<link rel="manifest" href="manifest.webmanifest?v=77">
 <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -226,25 +226,25 @@
               <span class="site-badge" id="site-badge"></span>
             </div>
             <div class="editor-tools" role="toolbar" aria-label="入力補助">
-              <button type="button" class="tool" data-insert="ruby" title="選択した文字にルビを振る">ルビ</button>
-              <button type="button" class="tool" data-insert="dots" title="選択した文字に傍点を付ける">傍点</button>
-              <button type="button" class="tool narou-only" data-insert="image" title="みてみんの画像から挿絵を入れる">挿絵</button>
-              <details class="menu">
+              <button type="button" class="tool" data-insert="ruby" data-max-tool="ruby" title="選択した文字にルビを振る">ルビ</button>
+              <button type="button" class="tool" data-insert="dots" data-max-tool="dots" title="選択した文字に傍点を付ける">傍点</button>
+              <button type="button" class="tool narou-only" data-insert="image" data-max-tool="image" title="みてみんの画像から挿絵を入れる">挿絵</button>
+              <details class="menu" data-max-tool="symbols">
                 <summary class="tool">記号</summary>
                 <div class="menu-list symbol-list" id="symbol-list"></div>
               </details>
-              <button type="button" class="tool" data-action="auto-indent" title="段落の先頭に全角スペースを入れる">字下げ</button>
-              <button type="button" class="tool" data-action="replace" title="文字列をまとめて置き換える">置換</button>
-              <details class="menu" id="image-menu">
+              <button type="button" class="tool" data-action="auto-indent" data-max-tool="indent" title="段落の先頭に全角スペースを入れる">字下げ</button>
+              <button type="button" class="tool" data-action="replace" data-max-tool="replace" title="文字列をまとめて置き換える">置換</button>
+              <details class="menu" id="image-menu" data-max-tool="image-list">
                 <summary class="tool" title="本文にある画像の一覧（押すとみてみんのページが開きます）">画像 <span class="badge" id="image-count">0</span></summary>
                 <div class="menu-list image-list" id="image-list"></div>
               </details>
               <span class="spacer"></span>
               <button type="button" class="tool max-btn" data-max="body" aria-label="本文を最大化" title="最大化">⤢</button>
-              <button type="button" class="tool selall-btn" data-selall="body">全て選択</button>
-              <button type="button" class="copy" data-copy="body">コピー</button>
-              <button type="button" class="tool jump-btn" data-jump="body" data-to="top" title="本文の一番上へ" aria-label="本文の一番上へ">↑</button>
-              <button type="button" class="tool jump-btn" data-jump="body" data-to="bottom" title="本文の一番下へ" aria-label="本文の一番下へ">↓</button>
+              <button type="button" class="tool selall-btn" data-selall="body" data-max-tool="select-all">全て選択</button>
+              <button type="button" class="copy" data-copy="body" data-max-tool="copy">コピー</button>
+              <button type="button" class="tool jump-btn" data-jump="body" data-to="top" data-max-tool="jump-top" title="本文の一番上へ" aria-label="本文の一番上へ">↑</button>
+              <button type="button" class="tool jump-btn" data-jump="body" data-to="bottom" data-max-tool="jump-bottom" title="本文の一番下へ" aria-label="本文の一番下へ">↓</button>
             </div>
             <textarea id="body" spellcheck="false" placeholder="本文"></textarea>
           </section>
@@ -856,8 +856,19 @@
     </fieldset>
     <fieldset class="checks">
       <legend>本文の最大化中</legend>
-      <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
-      <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
+      <label><input type="checkbox" data-ui="max.tools"> ボタン領域を表示（一括）</label>
+      <label><input type="checkbox" data-ui="max.tool.ruby"> ルビ</label>
+      <label><input type="checkbox" data-ui="max.tool.dots"> 傍点</label>
+      <label><input type="checkbox" data-ui="max.tool.image"> 挿絵</label>
+      <label><input type="checkbox" data-ui="max.tool.symbols"> 記号</label>
+      <label><input type="checkbox" data-ui="max.tool.indent"> 字下げ</label>
+      <label><input type="checkbox" data-ui="max.tool.replace"> 置換</label>
+      <label><input type="checkbox" data-ui="max.tool.image-list"> 画像一覧</label>
+      <label><input type="checkbox" data-ui="max.tool.select-all"> 全て選択</label>
+      <label><input type="checkbox" data-ui="max.tool.copy"> コピー</label>
+      <label><input type="checkbox" data-ui="max.tool.jump-top"> 本文の一番上へ</label>
+      <label><input type="checkbox" data-ui="max.tool.jump-bottom"> 本文の一番下へ</label>
+      <p class="hint">一括表示をオンにしたうえで、最大化中に必要なボタンだけを選べます。ボタンを減らすと、本文入力欄をより広く使えます。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>その他</legend>
