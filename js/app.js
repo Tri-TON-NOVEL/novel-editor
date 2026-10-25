@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.1.0';
+const APP_VERSION = '2026.10.25-7.2.0';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -578,7 +578,12 @@ function renderEpisodeList() {
     return;
   }
   const collapsed = collapsedSet();
-  for (const g of episodeGroups()) {
+  const groups = episodeGroups();
+  // 章あり＋降順では、章の中だけでなく章自体も逆順にする。未分類は常に最後に置く。
+  const uncategorized = groups.find((g) => !g.chapter);
+  const chapterGroups = groups.filter((g) => g.chapter);
+  if (epSort.dir === 'desc') chapterGroups.reverse();
+  for (const g of [...chapterGroups, uncategorized].filter(Boolean)) {
     const key = g.chapter ? g.chapter.id : UNCAT;
     // 未分類は、中身があるときか、章が1つもないときに出す
     if (!g.chapter && !g.indexes.length && project.chapters.length) continue;
@@ -1498,7 +1503,7 @@ async function epOpen({ force = false } = {}) {
   const src = await openFrom('エピソードを開く', { force });
   if (!src) return;
   if (!isEpisodeFile(src.text)) {
-    toast(isBackup(src.text) ? '全体のファイルです。「ファイル」→ 全体の「開く」で開いてください' : 'エピソードのファイルではありません', true);
+    toast(isBackup(src.text) ? '全体のバックアップです。「設定」→「バックアップ」→「バックアップファイルの管理」から読み込んでください' : 'エピソードのファイルではありません', true);
     return;
   }
   const data = parseEpisodeFile(src.text);
@@ -1944,9 +1949,17 @@ async function saveVersion(name, memo = '', auto = false) {
   return v;
 }
 
-// 自動で残す：書いている間は10分ごと、画面を閉じる・切り替えるときにも（作品ごとに最新30件）
+// 自動で残す：書いている間は10分ごと、画面を閉じる・切り替えるときにも
 const AUTO_VERSION_MS = 10 * 60_000;
-const AUTO_VERSION_KEEP = 30;
+const DEFAULT_AUTO_VERSION_KEEP = 30;
+function autoVersionKeep() {
+  return Math.min(500, Math.max(1, Number(prefs.get('projectVersionKeep', DEFAULT_AUTO_VERSION_KEEP)) || DEFAULT_AUTO_VERSION_KEEP));
+}
+
+async function trimAutoVersions(projectId = project.id) {
+  const autos = (await versions.list(projectId)).filter((v) => !isEpisodeVersion(v) && v.auto);
+  for (const old of autos.slice(autoVersionKeep())) await versions.remove(old.id);
+}
 let autoDirty = false;
 let lastAutoVersionAt = Date.now();
 
@@ -1956,8 +1969,7 @@ async function autoVersion(minInterval = AUTO_VERSION_MS) {
   lastAutoVersionAt = Date.now();
   const time = new Date().toLocaleString('ja-JP', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
   await saveVersion(`自動保存 ${time}`, '', true);
-  const autos = (await projectVersions()).filter((v) => v.auto);
-  for (const old of autos.slice(AUTO_VERSION_KEEP)) await versions.remove(old.id);
+  await trimAutoVersions();
 }
 
 async function openVersionSave() {
@@ -1977,7 +1989,10 @@ async function renderProjectVersions() {
   if (!all.length) { list.append(li('empty', 'まだありません')); return; }
   for (const v of all) {
     const meta = `${new Date(v.createdAt).toLocaleString('ja-JP')} ・ ${v.episodes}話 ・ ${v.chars.toLocaleString()}字${v.auto ? ' ・ 自動' : ''}`;
-    list.append(listItem(v.name, meta, [button('開く', () => openVersion(v.id))]));
+    list.append(listItem(v.name, meta, [
+      button('開く', () => openVersion(v.id)),
+      button('削除', () => deleteVersion(v).catch(fail), 'danger'),
+    ]));
   }
 }
 
@@ -2622,7 +2637,7 @@ async function exportPreSync() {
   const d = new Date(saved.createdAt);
   const p = (n) => String(n).padStart(2, '0');
   const r = await localFile.saveAs(saved.text, `あや綴り_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
-  if (r) toast('同期の前の状態を書き出しました（「ファイル」→ 全体の「開く」で戻せます）');
+  if (r) toast('同期の前の状態を書き出しました（「設定」→「バックアップ」→「バックアップファイルの管理」から戻せます）');
 }
 
 // ---------- クラウド（設定の「クラウド」タブ） ----------
@@ -2654,6 +2669,24 @@ async function changeCloudProvider(id) {
 function renderCloudActions() {
   const p = activeProvider();
   $('cloud-provider').value = p?.id || 'none';
+  const login = $('cloud-login');
+  const configured = !!p?.isConfigured?.();
+  login.disabled = !configured;
+  login.textContent = p ? `${p.label}にログイン` : 'ログイン';
+  $('cloud-login-state').textContent = !p ? '利用するクラウドを選んでください。'
+    : !configured ? '先に接続IDを設定してください。'
+      : p.isSignedIn?.() ? 'ログイン済みです。必要ならログインし直せます。' : 'ログインしていません。';
+}
+
+async function loginCloud() {
+  const p = activeProvider();
+  if (!p) { toast('利用するクラウドを選んでください', true); return; }
+  if (!p.isConfigured?.()) { toast('先にドライブの接続IDを設定してください', true); return; }
+  await flush();
+  await p.signIn();
+  renderCloudActions();
+  renderSyncState();
+  if (p.isSignedIn?.()) toast(`${p.label}にログインしました`);
 }
 
 // 保存先フォルダ（端末ごとの設定）
@@ -3585,6 +3618,7 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   renderUiProfileEditor(uiActive()); // 開いたときは、今使っている表示を編集する
   form.autoBackupInterval.value = String(sync.intervalMin());
   form.autoBackupKeep.value = String(sync.keepCount());
+  form.projectVersionKeep.value = String(autoVersionKeep());
   renderFileDestination();
   renderIphoneMaxSettings();
   $('sync-prefix').value = prefs.get('sync.prefix', '') || '';
@@ -3678,6 +3712,14 @@ function bindSettingsInputs() {
     prefs.set('autoBackupKeep', n);
     renderSyncState();
   });
+  form.projectVersionKeep.addEventListener('change', async () => {
+    const n = Math.min(500, Math.max(1, Number(form.projectVersionKeep.value) || DEFAULT_AUTO_VERSION_KEEP));
+    form.projectVersionKeep.value = String(n);
+    prefs.set('projectVersionKeep', n);
+    await trimAutoVersions();
+    await renderProjectVersions();
+    toast(`自動履歴を作品ごとに最新${n}件まで残します`);
+  });
   $('sync-prefix').addEventListener('change', (e) => {
     const v = sync.cleanPrefix(e.target.value.trim());
     e.target.value = v;
@@ -3686,6 +3728,7 @@ function bindSettingsInputs() {
   });
   // 使うクラウド（Google ドライブ／OneDrive）
   $('cloud-provider').addEventListener('change', (e) => changeCloudProvider(e.target.value).catch(fail));
+  $('cloud-login').addEventListener('click', () => loginCloud().catch(fail));
   $('file-destination').addEventListener('change', (e) => { if (driveProvider()) prefs.set(DEST_KEY, e.target.value); });
   form.querySelectorAll('[name^="acc."]').forEach((input) => input.addEventListener('input', commitAccounts));
 }

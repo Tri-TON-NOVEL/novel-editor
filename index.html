@@ -7,7 +7,7 @@
 <meta name="description" content="文（あや）と文（あや）で綾（あや）を成す。小説家になろう・アルファポリス向けの小説エディター">
 <meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
-<link rel="manifest" href="manifest.webmanifest?v=74">
+<link rel="manifest" href="manifest.webmanifest?v=75">
 <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -25,15 +25,13 @@
       <div class="menu-list">
         <button type="button" data-action="library">作品一覧…</button>
         <button type="button" data-action="new-project">新しい作品…</button>
-        <div class="menu-head">全体（すべての作品）</div>
-        <button type="button" data-action="all-open">開く…</button>
-        <div class="menu-head">エピソード（今開いているもの）</div>
+        <div class="menu-head">エピソード（編集エリア全体）</div>
         <button type="button" data-action="ep-open">開く…</button>
         <button type="button" data-action="ep-save-as">名前を付けて保存…</button>
         <div class="menu-head">インポート（プレーンテキスト）</div>
-        <button type="button" data-action="import-text">今のエピソードの本文へ…</button>
+        <button type="button" data-action="import-text">エピソードエリアへ…</button>
         <div class="menu-head">エクスポート（プレーンテキスト）</div>
-        <button type="button" data-action="export-episode">このエピソード…</button>
+        <button type="button" data-action="export-episode">エピソードから…</button>
         <button type="button" data-action="export-all">全エピソード…</button>
       </div>
     </details>
@@ -918,6 +916,10 @@
     <fieldset id="provider-settings">
       <legend>ドライブの接続の設定</legend>
     </fieldset>
+    <div class="button-row">
+      <button type="button" id="cloud-login">ログイン</button>
+      <span class="hint" id="cloud-login-state"></span>
+    </div>
     </div>
 
     <!-- 投稿サイト -->
@@ -954,7 +956,11 @@
     <p class="hint">この端末には常に最新状態を保存します。「変更履歴と復元ポイント」は端末内、「サーバへの自動バックアップ」は端末外に保存します。</p>
     <fieldset>
       <legend>変更履歴と復元ポイント</legend>
-      <p class="hint">作品全体（全エピソード・プロット・世界観・用語など）の過去状態を端末内に残します。書いている間は10分ごと、画面を閉じるときにも自動で残ります（自動履歴は最新30件）。手動の復元ポイントは自動削除しません。</p>
+      <p class="hint">作品全体（全エピソード・プロット・世界観・用語など）の過去状態は、ローカル（この端末内）に自動的に保存されます。ここでは、その端末内の履歴から以前の状態へ復元できます。書いている間は10分ごと、画面を閉じるときにも自動で残ります。手動の復元ポイントは自動削除しません。</p>
+      <label>自動履歴の保存数
+        <input type="number" name="projectVersionKeep" min="1" max="500" step="1" value="30">
+      </label>
+      <p class="hint">自動保存された変更履歴だけを、作品ごとに設定件数まで残します。件数を減らすと、古い自動履歴から削除します。</p>
       <div class="button-row">
         <button type="button" data-action="project-version-save">＋ 復元ポイントを作成…</button>
       </div>
