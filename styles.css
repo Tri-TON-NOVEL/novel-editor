@@ -460,7 +460,6 @@ body.maximizing.max-custom-height::after { content: ""; position: fixed; inset: 
 .maximized .max-btn { display: none !important; }
 .maximized[data-max-label]::before { content: attr(data-max-label); font-weight: 700; }
 .maximized .field-head { padding-right: 150px; } /* 「元に戻す」ボタンと重ならないように */
-body.maximizing.hide-max-tools .maximized .editor-tools { display: none !important; }
 body.maximizing .maximized [data-max-tool].max-tool-off { display: none !important; }
 .max-restore {
   position: fixed;

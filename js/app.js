@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.3.0';
+const APP_VERSION = '2026.10.25-7.3.1';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3477,7 +3477,6 @@ function applyUiPrefs() {
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
   for (const k of ['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'main-to-sub']) cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
-  cls.toggle('hide-max-tools', !uiPref('max.tools'));
   document.querySelectorAll('[data-max-tool]').forEach((tool) => {
     tool.classList.toggle('max-tool-off', !uiPref(`max.tool.${tool.dataset.maxTool}`));
   });
