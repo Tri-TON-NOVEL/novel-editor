@@ -795,12 +795,16 @@ dialog.fullscreen {
 .import-grid label, .imp-preset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .import-foot { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: auto; padding-top: 8px; border-top: 1px solid var(--border); }
 .import-foot .spacer { flex: 1; }
+.import-foot > [data-imp-go]:first-child, .import-foot > #imp-rules-back { margin-right: auto; }
+.import-foot > .primary:last-child { margin-left: auto; }
 .imp-info { border: 1px solid var(--border); border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.7; white-space: pre-line; }
 .imp-info.warn { border-color: var(--danger); }
 .imp-resume { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border: 2px solid var(--accent); border-radius: 8px; }
 .imp-resume span { flex: 1; min-width: 200px; font-size: 13px; }
 .imp-error { color: var(--danger); font-size: 13px; font-weight: 700; }
 .imp-rules { display: flex; flex-direction: column; gap: 8px; }
+.imp-step-title { margin: 0; font-size: 17px; }
+.imp-editor-head { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px; margin-bottom: 8px; }
 .imp-preset { display: flex; flex-wrap: wrap; align-items: end; gap: 8px; }
 .imp-preset label { flex: 1; min-width: 220px; max-width: 420px; }
 .imp-rule-grid { display: grid; gap: 6px; }
@@ -817,6 +821,11 @@ dialog.fullscreen {
 .imp-title-list-source textarea, .imp-title-list-editor textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: 14px/1.55 Consolas, "Cascadia Mono", Menlo, "Courier New", monospace; }
 .imp-title-list-source .hint { grid-column: 1 / -1; }
 .imp-title-list-editor textarea.invalid { border: 2px solid var(--danger); }
+.imp-template-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-bottom: 8px; }
+.imp-template-separator { width: 1px; height: 28px; background: var(--border); margin: 0 2px; }
+.regex-help { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; }
+.regex-help dt { margin: 0; }
+.regex-help dd { margin: 0; }
 .import-rules-help { line-height: 1.7; }
 .import-rules-help section { border-top: 1px solid var(--border); padding-top: 10px; }
 .import-rules-help h3 { margin: 0 0 6px; font-size: 16px; }

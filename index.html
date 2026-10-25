@@ -7,7 +7,7 @@
 <meta name="description" content="文（あや）と文（あや）で綾（あや）を綴る。小説家になろう・アルファポリス向けの小説エディター">
 <meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
-<link rel="manifest" href="manifest.webmanifest?v=84">
+<link rel="manifest" href="manifest.webmanifest?v=88">
 <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -528,10 +528,10 @@
       <h2 id="import-title">TXT インポート</h2>
       <ol class="import-steps" aria-label="手順">
         <li data-step-label="1">1 ファイル</li>
-        <li data-step-label="2">2 区切り</li>
-        <li data-step-label="3">3 プレビュー</li>
+        <li data-step-label="2" id="imp-step-label-titles">2 タイトル一覧</li>
+        <li data-step-label="3" id="imp-step-label-rules">3 書式設定</li>
+        <li data-step-label="4" id="imp-step-label-preview">4 プレビュー</li>
       </ol>
-      <button type="button" id="imp-rules-help" class="tool">ルール説明</button>
       <span class="spacer"></span>
       <button type="button" id="imp-close">閉じる</button>
     </header>
@@ -544,13 +544,13 @@
         <button type="button" id="imp-resume-discard">破棄する</button>
       </div>
       <div class="import-grid">
-        <label>取り込む原稿（投稿サイト）
+        <label>TXTの種類
           <select id="imp-site">
-            <option value="narou">小説家になろう用</option>
-            <option value="alpha">アルファポリス用</option>
+            <option value="narou">書式あり（なろう系）</option>
+            <option value="alpha">書式なし（アルファ系）</option>
           </select>
         </label>
-        <label>読み込み書式
+        <label>書式
           <select id="imp-preset"></select>
         </label>
         <label>取り込み先
@@ -563,7 +563,18 @@
           <select id="imp-encoding"></select>
         </label>
       </div>
-      <div id="imp-title-list-source" class="imp-title-list-source" hidden>
+      <p class="hint">「書式あり」はなろう用原稿へ、「書式なし」はアルファ用原稿へ取り込みます（もう一方の原稿・プロット・フリーメモは変わりません）。確定するまで作品は一切変更しません。</p>
+      <div id="imp-decode-info" class="imp-info" hidden></div>
+      <footer class="import-foot">
+        <span class="spacer"></span>
+        <button type="button" id="imp-to-2" class="primary" disabled>次へ</button>
+      </footer>
+    </section>
+
+    <!-- 2. 書式なし（アルファ系）のタイトル一覧 -->
+    <section class="import-step" data-istep="2" hidden>
+      <h3 class="imp-step-title">タイトル一覧</h3>
+      <div id="imp-title-list-source" class="imp-title-list-source">
         <label>タイトル一覧ファイル
           <input type="file" id="imp-title-list-file" accept=".txt,text/plain">
         </label>
@@ -572,15 +583,15 @@
         </label>
         <p class="hint">原稿TXTとは別に、章名・エピソード名・掲載日時・文字数などが並んだタイトル一覧が必要です。ファイルを選ぶと貼り付け欄へ読み込みます。</p>
       </div>
-      <p class="hint">取り込むのは選んだサイト側の原稿だけです（もう一方の原稿・プロット・フリーメモは変わりません）。確定するまで作品は一切変更しません。</p>
-      <div id="imp-decode-info" class="imp-info" hidden></div>
       <footer class="import-foot">
-        <button type="button" id="imp-to-2" class="primary" disabled>次へ：区切りの確認</button>
+        <button type="button" data-imp-go="1">戻る</button>
+        <span class="spacer"></span>
+        <button type="button" id="imp-title-to-rules" class="primary" disabled>次へ：書式設定</button>
       </footer>
     </section>
 
-    <!-- 2. 区切り -->
-    <section class="import-step" data-istep="2" hidden>
+    <!-- 3. 書式設定 -->
+    <section class="import-step" data-istep="3" hidden>
       <div class="imp-rules">
         <div class="imp-preset">
           <label>書式
@@ -589,10 +600,14 @@
           <button type="button" id="imp-format-new" class="tool">新しい書式を作成…</button>
           <button type="button" id="imp-preset-save" class="tool">名前を付けて保存…</button>
           <button type="button" id="imp-preset-overwrite" class="tool">上書き保存</button>
-          <button type="button" id="imp-preset-default" class="tool" title="次にインポートを開いたとき、最初からこの条件にします">この条件を既定にする</button>
+          <button type="button" id="imp-preset-default" class="tool" title="次にインポートを開いたとき、最初からこの書式にします">この書式を既定にする</button>
           <button type="button" id="imp-preset-delete" class="tool danger">保存した書式を削除</button>
         </div>
         <div id="imp-rules-editor">
+          <div class="imp-editor-head">
+            <strong>書式あり（なろう系）</strong>
+            <button type="button" id="imp-narou-help" class="tool">書式ありのルール説明</button>
+          </div>
           <div class="imp-rule-grid" id="imp-rule-grid"></div>
           <details class="imp-cleanup" id="imp-cleanup-box" open>
             <summary>見出し（【…】など）の扱い</summary>
@@ -600,6 +615,27 @@
           </details>
         </div>
         <div id="imp-title-list-editor" class="imp-title-list-editor" hidden>
+          <div class="imp-editor-head">
+            <strong>書式なし（アルファ系）のタイトル一覧設定</strong>
+            <button type="button" id="imp-alpha-help" class="tool">書式なしのルール説明</button>
+          </div>
+          <div class="imp-template-tools" aria-label="書式を組み立てるボタン">
+            <button type="button" id="imp-template-basic" class="tool">基本形を作る</button>
+            <span class="imp-template-separator"></span>
+            <button type="button" class="tool" data-template-line="#よみとばし">#よみとばし</button>
+            <button type="button" class="tool" data-template-line="改行">改行</button>
+            <button type="button" class="tool" data-template-line="空白">空白</button>
+            <button type="button" class="tool" data-template-line="コメント //">コメント //</button>
+            <span class="imp-template-separator"></span>
+            <button type="button" class="tool" data-template-line="#エピソード">#エピソード</button>
+            <button type="button" class="tool" data-template-line="#章">#章</button>
+            <button type="button" class="tool" data-template-line="章タイトル">章タイトル</button>
+            <button type="button" class="tool" data-template-line="エピソードタイトル">エピソードタイトル</button>
+            <button type="button" class="tool" data-template-line="テキスト">テキスト</button>
+            <span class="imp-template-separator"></span>
+            <button type="button" id="imp-template-delete-line" class="tool">選択行を削除</button>
+            <button type="button" id="imp-template-clear" class="tool danger">全部消す</button>
+          </div>
           <label>タイトル一覧の書式
             <textarea id="imp-title-list-template" rows="12" spellcheck="false"></textarea>
           </label>
@@ -621,20 +657,20 @@
         </div>
       </div>
       <footer class="import-foot" id="imp-step2-foot">
-        <button type="button" data-imp-go="1">戻る</button>
+        <button type="button" id="imp-rules-back">戻る</button>
         <span class="spacer"></span>
-        <button type="button" data-imp-go="3" class="primary">次へ：プレビュー</button>
+        <button type="button" data-imp-go="4" class="primary">次へ：プレビュー</button>
       </footer>
     </section>
 
-    <!-- 3. プレビュー -->
-    <section class="import-step" data-istep="3" hidden>
+    <!-- 4. プレビュー -->
+    <section class="import-step" data-istep="4" hidden>
       <div class="imp-summary" id="imp-summary"></div>
       <div class="table-wrap imp-preview-wrap">
         <table class="imp-preview" id="imp-preview"></table>
       </div>
       <footer class="import-foot">
-        <button type="button" data-imp-go="2">戻る</button>
+        <button type="button" data-imp-go="3">戻る</button>
         <span class="spacer"></span>
         <span id="imp-commit-summary" class="hint"></span>
         <button type="button" id="imp-commit" class="primary">取り込む</button>
@@ -643,40 +679,66 @@
   </div>
 </dialog>
 
-<dialog id="import-rules-help-dialog" class="wide-dialog" aria-labelledby="import-rules-help-title">
+<dialog id="import-narou-help-dialog" class="wide-dialog" aria-labelledby="import-narou-help-title">
   <form method="dialog" class="dialog import-rules-help">
-    <h2 id="import-rules-help-title">TXTインポートの区切りルール</h2>
-
+    <h2 id="import-narou-help-title">書式あり（なろう系）：区切りルールの説明</h2>
     <section>
-      <h3>まずは読み込み書式を選びます</h3>
-      <p>「読み込み書式」から、読み込むTXTに合うものを選びます。最初から用意されている書式は削除できません。</p>
+      <h3>最初から用意されている条件</h3>
+      <p>小説家になろうからダウンロードしたTXTの「エピソード○開始」という線を話の開始、「【第○章】」を章の開始として検出します。作品情報やリアクションなどの見出しも除外します。</p>
       <dl>
-        <dt>なろう：ダウンロードTXT</dt>
-        <dd>「エピソード○開始」の線と「【第○章】」を使う、小説家になろうのダウンロードTXT向けです。作品情報などの見出しも自動で除外します。</dd>
-        <dt>アルファポリス・タイトル一覧</dt>
-        <dd>原稿TXTと、作品ページからコピーしたタイトル一覧を照合して、章とエピソードを分けます。</dd>
+        <dt>完全一致</dt><dd>行全体が指定文字と同じ場合だけ検出します。</dd>
+        <dt>前方一致</dt><dd>指定文字から始まる行を検出します。</dd>
+        <dt>正規表現</dt><dd>数字や空白の違いをまとめて表すための書き方です。前後に「/」は付けません。</dd>
       </dl>
     </section>
-
     <section>
-      <h3>各項目の意味</h3>
+      <h3>正規表現で使われている記号</h3>
+      <dl class="regex-help">
+        <dt><code>^</code></dt><dd>行の先頭を表します。</dd>
+        <dt><code>$</code></dt><dd>行の末尾を表します。</dd>
+        <dt><code>\s</code></dt><dd>半角スペースやタブなどの空白です。</dd>
+        <dt><code>\u3000</code></dt><dd>全角スペースです。</dd>
+        <dt><code>[…]</code></dt><dd>括弧内のどれか1文字を表します。</dd>
+        <dt><code>*</code></dt><dd>直前の条件が0回以上続くことを表します。</dd>
+        <dt><code>+</code></dt><dd>直前の条件が1回以上続くことを表します。</dd>
+        <dt><code>{3,}</code></dt><dd>直前の文字が3回以上続くことを表します。</dd>
+        <dt><code>|</code></dt><dd>左右どちらかの条件を表します。</dd>
+        <dt><code>\</code></dt><dd>次の文字を正規表現の記号として扱うための印です。</dd>
+      </dl>
+      <p><code>^[\s\u3000]*</code>は「行頭に半角・全角空白があってもよい」、<code>[0-9０-９]+</code>は「半角または全角の数字が1文字以上」という意味です。</p>
+    </section>
+    <section>
+      <h3>変更した条件を保存する</h3>
+      <p>条件を変更した場合は「名前を付けて保存…」を押します。保存した書式はリストから読み出し、上書き保存や削除ができます。最初から用意されている書式は削除できません。</p>
+    </section>
+    <footer class="dialog-foot"><button value="close" class="primary">閉じる</button></footer>
+  </form>
+</dialog>
+
+<dialog id="import-alpha-help-dialog" class="wide-dialog" aria-labelledby="import-alpha-help-title">
+  <form method="dialog" class="dialog import-rules-help">
+    <h2 id="import-alpha-help-title">書式なし（アルファ系）：タイトル一覧ルールの説明</h2>
+    <section>
+      <h3>原稿TXTとタイトル一覧を使います</h3>
+      <p>原稿TXTとは別に、アルファポリスの作品ページからコピーしたタイトル一覧を読み込みます。一覧から章名とエピソード名を取り出し、原稿TXT内の同じタイトルを上から順に照合して分割します。</p>
+    </section>
+    <section>
+      <h3>ボタンで書式を組み立てます</h3>
+      <p>「基本形を作る」で標準形を入力できます。各ボタンを押すと、書式欄のカーソル位置へその行を追加します。</p>
       <dl>
-        <dt>章の区切り・話の区切り</dt>
-        <dd>チェックを入れた条件だけを使います。文字列には、章や話の始まりを見分ける条件を入力します。</dd>
-        <dt>行頭／行内</dt>
-        <dd>「行頭」は行の先頭から探します。「行内」は文章の途中も探すため、本文を誤って区切る可能性があります。通常は「行頭」を使います。</dd>
-        <dt>完全一致</dt>
-        <dd>行全体が入力した文字と同じ場合だけ区切ります。</dd>
-        <dt>前方一致</dt>
-        <dd>行が入力した文字から始まっていれば区切ります。例：「◆」で始まる行。</dd>
-        <dt>正規表現</dt>
-        <dd>数字や表記の違いをまとめて指定する方法です。前後に「/」は付けません。最初から用意されている書式を選べば、自分で書かなくても利用できます。</dd>
+        <dt><code>#よみとばし</code></dt><dd>空行・空白・コメントなど、無視するものの指定を開始します。</dd>
+        <dt><code>改行</code></dt><dd>空行を読み飛ばします。</dd>
+        <dt><code>空白</code></dt><dd>行頭・行末の半角／全角空白と、空白だけの行を読み飛ばします。</dd>
+        <dt><code>コメント //</code></dt><dd>書式内の//以降と、タイトル一覧内で//から始まる行を読み飛ばします。</dd>
+        <dt><code>#エピソード</code></dt><dd>通常のエピソード1件分の並び方を開始します。</dd>
+        <dt><code>#章</code></dt><dd>章の最初にあるエピソード1件分の並び方を開始します。</dd>
+        <dt><code>章タイトル</code></dt><dd>その位置の1行を章名として取得します。</dd>
+        <dt><code>エピソードタイトル</code></dt><dd>その位置の1行をエピソード名として取得します。</dd>
+        <dt><code>テキスト</code></dt><dd>閲覧数、掲載日時、文字数などの不要な1行を読み飛ばします。</dd>
       </dl>
     </section>
-
     <section>
-      <h3>タイトル一覧で分ける書式</h3>
-      <p>「#よみとばし」で無視するものを指定し、「#エピソード」と「#章」でそれぞれの並び方を定義します。「テキスト」は不要な1行を読み飛ばします。</p>
+      <h3>アルファポリスの基本形</h3>
       <pre>#よみとばし
 改行
 空白
@@ -684,42 +746,19 @@
 
 #エピソード
 エピソードタイトル
-テキスト // 閲覧数
-テキスト // 掲載日時
-テキスト // 文字数
+テキスト
+テキスト
+テキスト
 
 #章
 章タイトル
 エピソードタイトル
-テキスト // 閲覧数
-テキスト // 掲載日時
-テキスト // 文字数</pre>
-      <p>「改行」は空行、「空白」は行頭・行末の半角／全角空白と空白だけの行を無視します。「コメント //」を指定すると、書式内の // 以降と、タイトル一覧内で // から始まる行を読み飛ばします。タイトル一覧へ印を書き加える必要はありません。</p>
+テキスト
+テキスト
+テキスト</pre>
+      <p>作成した書式は「名前を付けて保存…」で保存し、書式リストから読み出せます。保存した書式は環境設定のバックアップにも含まれます。</p>
     </section>
-
-    <section>
-      <h3>区切り行をタイトルにする方法</h3>
-      <ul>
-        <li><strong>区切り行をタイトルに：</strong>「第1話　旅立ち」の行を、そのままタイトルにします。</li>
-        <li><strong>区切り行を除き次の行をタイトルに：</strong>区切り線の次の行にタイトルが書かれている形式で使います。</li>
-        <li><strong>区切り行と次の行をつなげてタイトルに：</strong>章番号と章名が別々の行にある場合などに使います。</li>
-      </ul>
-    </section>
-
-    <section>
-      <h3>検出結果を確認・修正します</h3>
-      <ol>
-        <li>「この条件で自動検出」を押します。</li>
-        <li>右側の一覧で、章と話の数や順序を確認します。</li>
-        <li>誤っている行は、全文の左にある印を押して「話 → 章 → 解除」と切り替えます。</li>
-        <li>「次へ：プレビュー」で、タイトルと本文の分かれ方を確認してから取り込みます。</li>
-      </ol>
-      <p>条件を調整した場合は「今の条件を保存…」で名前を付けて保存できます。保存した条件だけが削除できます。</p>
-    </section>
-
-    <footer class="dialog-foot">
-      <button value="close" class="primary">閉じる</button>
-    </footer>
+    <footer class="dialog-foot"><button value="close" class="primary">閉じる</button></footer>
   </form>
 </dialog>
 
@@ -1129,11 +1168,10 @@
     <div class="settings-panel" data-spanel="import" role="tabpanel" hidden>
     <fieldset>
       <legend>TXT の一括インポート</legend>
-      <p class="hint">小説家になろう・アルファポリスの TXT を、章・話に分けて取り込みます。「区切り条件で分ける」と「タイトル一覧で分ける」の2方式があり、作成した書式は名前を付けて保存できます。手で直してからプレビューで確認して確定します。
+      <p class="hint">TXT を、章・話に分けて取り込みます。「書式あり（なろう系）」と「書式なし（アルファ系）」の2方式があり、作成した書式は名前を付けて保存できます。手で直してからプレビューで確認して確定します。
         UTF-8（BOM の有無）と Shift_JIS（CP932）に対応しています。途中の作業は自動で残り、あとから再開できます。</p>
       <div class="button-row">
         <button type="button" data-action="open-import" class="primary">TXT をインポート…</button>
-        <button type="button" data-action="open-import-formats">読み込み書式を設定…</button>
       </div>
     </fieldset>
     <p class="hint">プレーンテキストの読み込み・書き出しは「ファイル」メニューにあります。</p>

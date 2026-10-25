@@ -65,7 +65,6 @@ export function initImport(ctx) {
       encoding: 'auto', site: preset.format.site || 'narou', target: 'new',
       presetId: preset.id, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: '', titleListFileName: '',
-      configureOnly: false,
       auto: new Map(), manual: new Map(),
       result: null, rows: [], workTitle: '', useHead: true, step: 1, siteInfo: null, mismatches: [],
     };
@@ -164,12 +163,19 @@ export function initImport(ctx) {
   function fillPresets() {
     const def = defaultPreset().id;
     const mark = (id) => (id === def ? '（既定）' : '');
-    const savedFormats = userFormats().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    const builtInFormats = I.PRESETS.filter((p) => (p.type || 'rules') === state.type);
+    const savedFormats = userFormats()
+      .filter((p) => (p.type || 'rules') === state.type)
+      .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
     for (const sel of [$('imp-preset'), $('imp-preset-edit')]) {
       sel.replaceChildren(
-        ...I.PRESETS.map((p) => new Option(p.name + mark('b:' + p.id), 'b:' + p.id)),
+        ...builtInFormats.map((p) => new Option(p.name + mark('b:' + p.id), 'b:' + p.id)),
         ...savedFormats.map((p) => new Option(p.name + mark('u:' + p.id), 'u:' + p.id)));
-      if (![...sel.options].some((o) => o.value === state.presetId)) sel.append(new Option('（いまの書式）', state.presetId));
+      const current = formatOf(state.presetId);
+      if (![...sel.options].some((o) => o.value === state.presetId)
+        && (!current || (current.type || 'rules') === state.type)) {
+        sel.append(new Option('（いまの書式）', state.presetId));
+      }
       sel.value = state.presetId;
     }
     const custom = state.presetId.startsWith('u:');
@@ -195,6 +201,10 @@ export function initImport(ctx) {
   function showTitleListSource() {
     const on = state.type === 'title-list';
     $('imp-title-list-source').hidden = !on;
+    $('imp-step-label-titles').hidden = !on;
+    $('imp-step-label-rules').textContent = on ? '3 書式設定' : '2 区切り設定';
+    $('imp-step-label-preview').textContent = on ? '4 プレビュー' : '3 プレビュー';
+    $('imp-to-2').textContent = on ? '次へ：タイトル一覧' : '次へ：区切り設定';
     $('imp-detect').textContent = on ? 'タイトル一覧と照合' : 'この条件で自動検出';
     $('imp-pending').textContent = on
       ? '書式を変えました。全文に反映するには「タイトル一覧と照合」を押してください（プレビューへ進むときにも反映されます）'
@@ -203,7 +213,8 @@ export function initImport(ctx) {
   }
 
   function updateNextButton() {
-    $('imp-to-2').disabled = !state.text || (state.type === 'title-list' && !state.titleListText.trim());
+    $('imp-to-2').disabled = !state.text;
+    $('imp-title-to-rules').disabled = !state.titleListText.trim();
   }
 
   function renderRuleForm() {
@@ -787,14 +798,15 @@ export function initImport(ctx) {
 
   async function go(step, { detect: doDetect = false } = {}) {
     if (step >= 2 && !state.text) { ctx.toast('先に TXT ファイルを選んでください'); return; }
-    if (step >= 2 && state.type === 'title-list' && !state.titleListText.trim()) { ctx.toast('タイトル一覧のファイルを選ぶか、一覧を貼り付けてください'); return; }
-    if (step === 2) {
+    if (step === 2 && state.type !== 'title-list') step = 3;
+    if (step >= 3 && state.type === 'title-list' && !state.titleListText.trim()) { ctx.toast('タイトル一覧のファイルを選ぶか、一覧を貼り付けてください'); return; }
+    if (step === 3) {
       fillPresets();
       renderRuleForm();
       if (doDetect || !state.auto.size) detect({ confirmFirst: false });
       else renderMarks();
     }
-    if (step === 3) {
+    if (step === 4) {
       if (!$('imp-pending').hidden && !(await detect({ confirmFirst: false }))) return;
       if (!validateRules()) { ctx.toast('区切りの条件に誤りがあります', true); return; }
       state.result = buildResult();
@@ -837,23 +849,6 @@ export function initImport(ctx) {
     history.pushState({ novelEditorImport: true }, '');
   }
 
-  async function openFormats() {
-    state = fresh();
-    state.configureOnly = true;
-    fillPresets();
-    $('import-title').textContent = '読み込み書式の設定';
-    $('import-dialog').classList.add('format-settings');
-    document.querySelector('.import-steps').hidden = true;
-    $('imp-rule-actions').hidden = true;
-    $('imp-split').hidden = true;
-    $('imp-step2-foot').hidden = true;
-    $('imp-manual-hint').hidden = true;
-    renderRuleForm();
-    document.querySelectorAll('[data-istep]').forEach((s) => { s.hidden = Number(s.dataset.istep) !== 2; });
-    dlg.showModal();
-    history.pushState({ novelEditorImport: true }, '');
-  }
-
   function close(fromCommit = false) {
     if (!dlg.open) return;
     dlg.close();
@@ -866,7 +861,15 @@ export function initImport(ctx) {
   $('imp-close').addEventListener('click', () => close());
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
   window.addEventListener('popstate', () => { if (dlg.open) { dlg.close(); } });
-  $('imp-site').addEventListener('change', (e) => { state.site = e.target.value; saveSession(); });
+  $('imp-site').addEventListener('change', (e) => {
+    state.site = e.target.value;
+    const type = state.site === 'alpha' ? 'title-list' : 'rules';
+    const format = I.PRESETS.find((p) => (p.type || 'rules') === type);
+    if (format) applyFormat(format, 'b:' + format.id);
+    fillPresets();
+    renderRuleForm();
+    saveSession();
+  });
   $('imp-target').addEventListener('change', (e) => { state.target = e.target.value; saveSession(); });
   $('imp-encoding').addEventListener('change', (e) => { state.encoding = e.target.value; decodeAndShow(); });
   $('imp-file').addEventListener('change', async (e) => {
@@ -900,7 +903,9 @@ export function initImport(ctx) {
     markPending();
     saveSession();
   });
-  $('imp-to-2').addEventListener('click', () => go(2, { detect: true }).catch(ctx.fail));
+  $('imp-to-2').addEventListener('click', () => go(2, { detect: state.type !== 'title-list' }).catch(ctx.fail));
+  $('imp-title-to-rules').addEventListener('click', () => go(3, { detect: true }).catch(ctx.fail));
+  $('imp-rules-back').addEventListener('click', () => go(state.type === 'title-list' ? 2 : 1).catch(ctx.fail));
   $('imp-resume-btn').addEventListener('click', () => resume().catch(ctx.fail));
   $('imp-resume-discard').addEventListener('click', async () => {
     if (!(await ask('前回のインポート作業を破棄しますか？（作品には影響しません）'))) return;
@@ -909,7 +914,47 @@ export function initImport(ctx) {
   });
   document.querySelectorAll('[data-imp-go]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.impGo)).catch(ctx.fail)));
   $('imp-detect').addEventListener('click', () => detect());
-  $('imp-rules-help').addEventListener('click', () => $('import-rules-help-dialog').showModal());
+  $('imp-narou-help').addEventListener('click', () => $('import-narou-help-dialog').showModal());
+  $('imp-alpha-help').addEventListener('click', () => $('import-alpha-help-dialog').showModal());
+
+  function setTemplateValue(value, caret = null) {
+    const input = $('imp-title-list-template');
+    input.value = value;
+    if (caret !== null) input.setSelectionRange(caret, caret);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.focus();
+  }
+
+  function insertTemplateLine(line) {
+    const input = $('imp-title-list-template');
+    const start = input.selectionStart ?? input.value.length;
+    const end = input.selectionEnd ?? start;
+    const before = input.value.slice(0, start);
+    const after = input.value.slice(end);
+    const add = (before && !before.endsWith('\n') ? '\n' : '') + line + (after && !after.startsWith('\n') ? '\n' : '');
+    setTemplateValue(before + add + after, before.length + add.length);
+  }
+
+  document.querySelectorAll('[data-template-line]').forEach((button) => {
+    button.addEventListener('click', () => insertTemplateLine(button.dataset.templateLine));
+  });
+  $('imp-template-basic').addEventListener('click', async () => {
+    const current = $('imp-title-list-template').value.trim();
+    if (current && current !== I.ALPHA_TITLE_LIST_TEMPLATE.trim()
+      && !(await ask('現在の書式を、アルファポリスの基本形に置き換えますか？', { ok: '置き換える' }))) return;
+    setTemplateValue(I.ALPHA_TITLE_LIST_TEMPLATE);
+  });
+  $('imp-template-delete-line').addEventListener('click', () => {
+    const input = $('imp-title-list-template');
+    const start = input.value.lastIndexOf('\n', Math.max(0, input.selectionStart - 1)) + 1;
+    let end = input.value.indexOf('\n', input.selectionEnd);
+    if (end < 0) end = input.value.length; else end += 1;
+    setTemplateValue(input.value.slice(0, start) + input.value.slice(end), start);
+  });
+  $('imp-template-clear').addEventListener('click', async () => {
+    if ($('imp-title-list-template').value && !(await ask('タイトル一覧の書式をすべて消しますか？'))) return;
+    setTemplateValue('');
+  });
   const changeFormat = (e) => {
     const format = formatOf(e.target.value);
     if (!format) return;
@@ -951,12 +996,14 @@ export function initImport(ctx) {
 
   $('imp-format-new').addEventListener('click', async () => {
     const type = await choose('どの方法でTXTを分けますか？', [
-      { value: 'rules', label: '区切り条件で分ける', primary: true },
-      { value: 'title-list', label: 'タイトル一覧で分ける' },
+      { value: 'rules', label: '書式あり（なろう系）', primary: true },
+      { value: 'title-list', label: '書式なし（アルファ系）' },
     ]);
     if (!type) return;
     state.presetId = 'draft:' + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
     state.type = type;
+    state.site = type === 'title-list' ? 'alpha' : 'narou';
+    $('imp-site').value = state.site;
     state.rules = completeRules({
       chapter: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },
       episode: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },
@@ -1017,5 +1064,5 @@ export function initImport(ctx) {
   });
   $('imp-commit').addEventListener('click', () => commit());
 
-  return { open, openFormats };
+  return { open };
 }
