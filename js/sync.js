@@ -15,7 +15,7 @@
 //   sync.last  … 最後に同期した（自分で保存した、または読み込んだ）バックアップ { name, at }
 //   sync.dirty … 最後のバックアップのあとに書き換えたか
 //   sync.mine  … この端末が保存したファイル名（新しい順）。残す件数を超えたら、この中の古いものだけ消す
-//   sync.seen  … 「読み込まない」と答えた他の端末のバックアップ（次に起動したとき同じことを聞かない）
+//   sync.seen / sync.seenAt … 確認済みの最新バックアップ（過去版を意図して選んだ後、既存の新しい版を再通知しない）
 //
 // 起動したとき：保存先でいちばん新しいバックアップを、sync.last とくらべる（findNewer）。
 //   同じ → 何もしない。他の端末のほうが新しい → 読み込むかを聞く（画面はアプリ側）。
@@ -332,13 +332,19 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   } catch { /* 読めないときは従来どおり日時で判定する */ }
   const lastAt = last ? parseName(last.name)?.at || Date.parse(last.at) : 0;
   if (newest.at <= lastAt) return null;
+  const seenAt = Number(prefs.get('sync.seenAt', 0)) || 0;
+  if (!ignoreSeen && newest.at <= seenAt) return null;
   if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
   return { entry: newest, localChanged: dirty };
 }
 
 // 確認が済んだ（読み込んだ、読み込まないと答えた、新しいものがなかった）
 export function markChecked(seenEntry = null) {
-  if (seenEntry) prefs.set('sync.seen', seenEntry.name);
+  if (seenEntry) {
+    prefs.set('sync.seen', seenEntry.name);
+    const at = Number(seenEntry.at) || parseName(seenEntry.name || '')?.at || 0;
+    if (at) prefs.set('sync.seenAt', Math.max(Number(prefs.get('sync.seenAt', 0)) || 0, at));
+  }
   checked = true;
   listener();
 }

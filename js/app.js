@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.2.0';
+const APP_VERSION = '2026.10.25-7.2.1';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1026,6 +1026,7 @@ function driveProvider() {
   return p?.isConfigured() && p.save ? p : null;
 }
 const cloudName = () => activeProvider()?.label || 'クラウド';
+const cloudDestinationLabel = () => `${cloudName()}（クラウドで設定したドライブ）`;
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 async function chooseDestination(kind) {
@@ -1034,7 +1035,7 @@ async function chooseDestination(kind) {
   const pref = oldCloud(prefs.get(DEST_KEY, 'ask'));
   if (pref !== 'ask') return pref;
   const last = oldCloud(prefs.get('file.lastDestination', 'local'));
-  const drive = { value: 'cloud', label: p.label, primary: last === 'cloud' };
+  const drive = { value: 'cloud', label: cloudDestinationLabel(), primary: last === 'cloud' };
   const local = { value: 'local', label: 'この端末・その他（iCloud など）', primary: last !== 'cloud' };
   // 前回使ったほうを右端（目立つボタン）に置く
   const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'cloud' ? [local, drive] : [drive, local]);
@@ -1337,7 +1338,7 @@ async function allOpen({ force = false } = {}) {
 
 // ---------- 選択式バックアップパック ----------
 
-let inspectedBackup = null; // { pack, name }
+let inspectedBackup = null; // { pack, name, acknowledge }。acknowledge は選択時点で一覧にあった最新バックアップ
 
 function episodeDisplayName(p, ep, i) {
   return `${i + 1}. ${episodeName(ep, p.site)}（${countChars(draftOf(ep, p.site).body).all.toLocaleString()}字・${fmtTime(ep.updatedAt)}）`;
@@ -1434,8 +1435,8 @@ function itemDetail(item) {
     '', '本文の冒頭', preview || '（本文なし）'].join('\n');
 }
 
-function renderBackupInspection(pack, name = '') {
-  inspectedBackup = { pack, name };
+function renderBackupInspection(pack, name = '', { acknowledge = null } = {}) {
+  inspectedBackup = { pack, name, acknowledge };
   const s = packSummary(pack);
   const reason = { 'manual-pack': '手動バックアップパック', 'manual-episode': '上段の保存', 'auto-episode': 'サーバへの自動バックアップ', 'legacy-full': '旧形式の全体バックアップ' }[pack.reason] || pack.reason || '不明';
   $('backup-inspect-summary').textContent = `${name ? `ファイル：${name}\n` : ''}作成日時：${fmtTime(pack.createdAt)}\n作成方法：${reason}\n端末：${pack.device?.prefix || '不明'}\n内容：${s.environment ? '環境設定・' : ''}${s.projects.length}作品・${s.episodes}選択エピソード`;
@@ -1460,8 +1461,8 @@ function renderBackupInspection(pack, name = '') {
   $('backup-inspect-dialog').showModal();
 }
 
-async function inspectBackupText(text, name = '') {
-  try { renderBackupInspection(parseAnyBackup(text), name); }
+async function inspectBackupText(text, name = '', options = {}) {
+  try { renderBackupInspection(parseAnyBackup(text), name, options); }
   catch (e) { await inform(`バックアップを確認できませんでした。\n${e.message}`); }
 }
 
@@ -1479,6 +1480,9 @@ async function restoreInspected(asNew = false) {
   await flush();
   const result = await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
   if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
+  // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
+  // これ以降に作成されたバックアップだけを、次回から「他の端末の更新」として通知する。
+  if (inspectedBackup.acknowledge) sync.markChecked(inspectedBackup.acknowledge);
   syncPending = null;
   $('backup-inspect-dialog').close();
   const open = result.updatedList[0] || result.addedList[0];
@@ -2071,8 +2075,12 @@ async function deleteVersion(v) {
 const BACKUP_REMIND_DAYS = 7;
 
 let pendingBackup = null;
-function openRestoreDialog(text, name = '') {
+let pendingBackupName = '';
+let pendingBackupAcknowledge = null;
+function openRestoreDialog(text, name = '', { acknowledge = null } = {}) {
   pendingBackup = parseBackup(text);
+  pendingBackupName = name;
+  pendingBackupAcknowledge = acknowledge;
   const when = pendingBackup.createdAt ? new Date(pendingBackup.createdAt).toLocaleString('ja-JP') : '不明';
   const titles = pendingBackup.projects.map((p) => p.title || '（無題）');
   $('restore-info').textContent =
@@ -2085,9 +2093,15 @@ async function runRestore(mode) {
   if (mode === 'replace' && !(await ask('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？'))) return;
   await flush();
   const backup = pendingBackup;
+  const loadedName = pendingBackupName;
+  const acknowledge = pendingBackupAcknowledge;
   const before = new Set((await db.all()).map((p) => p.id));
   await restoreBackup(backup, mode);
   pendingBackup = null;
+  pendingBackupName = '';
+  pendingBackupAcknowledge = null;
+  if (loadedName && sync.parseName(loadedName)) sync.markLoaded(loadedName);
+  if (acknowledge) sync.markChecked(acknowledge);
   sync.markDirty(); // 戻した内容を、次の自動バックアップに入れる
   const items = (backup.projects || []).filter((p) => p?.id).map((p) => ({ id: p.id, title: p.title || '無題' }));
   if (mode === 'replace') {
@@ -2186,11 +2200,14 @@ function saveSyncTargets() {
 }
 
 let managedBackupFiles = [];
+let managedBackupLatest = null;
 async function loadBackupManager() {
   const box = $('backup-file-list');
   box.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: '一覧を読み込んでいます…' }));
+  managedBackupLatest = null;
   try { managedBackupFiles = await sync.listAll(); }
   catch (e) { box.textContent = `一覧を読み込めませんでした：${e.message}`; return; }
+  managedBackupLatest = managedBackupFiles[0] || null;
   // ファイル名ではなく中の管理情報から、利用者向けの別名と種類を作る。
   // エピソード → 作品 → 作品資料 → 環境の順、同じ種類では新しい順。
   const inspected = await Promise.all(managedBackupFiles.slice(0, 300).map(async (f) => {
@@ -2247,7 +2264,7 @@ async function inspectManagedBackup() {
   if (files.length !== 1) { toast('内容を確認するファイルを一つ選んでください', true); return; }
   const text = files[0].pack ? JSON.stringify(files[0].pack) : await sync.read(files[0]);
   $('backup-manage-dialog').close();
-  await inspectBackupText(text, files[0].name);
+  await inspectBackupText(text, files[0].name, { acknowledge: managedBackupLatest });
 }
 
 async function deleteManagedBackups() {
@@ -2292,7 +2309,7 @@ function renderSyncState() {
 
   const sel = $('sync-mode');
   const cloudOpt = sel.querySelector('option[value="cloud"]');
-  cloudOpt.textContent = `${cloudLabel}（「ファイル」タブで選んだもの）`;
+  cloudOpt.textContent = `${cloudLabel}（クラウドで設定したドライブ）`;
   sel.value = m;
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
   cloudOpt.disabled = !cloud?.isConfigured() && m !== 'cloud';
@@ -2302,8 +2319,8 @@ function renderSyncState() {
     : m === 'folder'
       ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。PC のネットワークドライブ（NAS など）や、OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（クラウド方式）と同期するときは、パソコン版のアプリの同期フォルダの中の、iPhone・iPad と同じフォルダを選んでください。'
       : sync.folderSupported
-        ? `iPhone・iPad と同期するときは「${cloudLabel}」がおすすめです（「ファイル」タブで選んで、ID を入れると使えます）。`
-        : `この端末では「${cloudLabel}」を選べます（「ファイル」タブで選んで、ID を入れると使えます）。`;
+        ? `iPhone・iPad と同期するときは「${cloudLabel}」がおすすめです（「クラウド」タブで選んで、接続IDを入れると使えます）。`
+        : `この端末では「${cloudLabel}」を選べます（「クラウド」タブで選んで、接続IDを入れると使えます）。`;
 
   // バックアップ先のフォルダ（フォルダ方式：端末のフォルダ／クラウド方式：クラウドのフォルダ）
   const backupInfo = m === 'cloud' ? cloud?.backupFolderInfo?.() : null;
@@ -2319,7 +2336,7 @@ function renderSyncState() {
   const err = sync.getError() ? `\n⚠ 前回の保存に失敗しました：${sync.getError()}` : '';
   const text = st === 'off' ? '止まっています。保存先を選ぶと始まります。'
     : st === 'need-folder' ? '⚠ バックアップ先のフォルダを選んでください（「フォルダを選ぶ」）。選ぶまでは保存しません。'
-    : st === 'unsupported' ? (m === 'folder' ? `このブラウザではフォルダを使えません。「${cloudLabel}」を選んでください。` : `${cloudLabel}を使うには、「ファイル」タブで ID を入れてください。`)
+    : st === 'unsupported' ? (m === 'folder' ? `このブラウザではフォルダを使えません。「${cloudLabel}」を選んでください。` : `${cloudLabel}を使うには、「クラウド」タブで接続IDを入れてください。`)
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
         : st === 'need-login' ? `⚠ ${cloudLabel}へのログインが必要です。上のボタン（または下の「${cloudLabel}にログイン」）を押してください。`
           : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
@@ -2408,11 +2425,11 @@ function reportAndReload(head, { addedList = [], updatedList = [], keptList = []
 
 // explicit：一覧やファイルから人が選んだとき（選んだファイルの内容を使う）。起動時の自動の確認では false（作品ごとに新しいほう）
 // newest：そのときいちばん新しいバックアップの名前。古いものをあえて選んだときは、次の起動で最新を勧めないよう「確認済み」にする
-async function mergeFrom(entry, { explicit = false, newest = '' } = {}) {
+async function mergeFrom(entry, { explicit = false, newest = null } = {}) {
   await flush();
   const opts = explicit ? { explicit: true, onOlder: (list) => askReplaceNewer(entry.name, list) } : {};
   const res = await sync.loadAndMerge(entry, askSyncConflict, opts);
-  if (res && explicit && newest && newest !== entry.name) prefs.set('sync.seen', newest);
+  if (res && explicit && newest && newest.name !== entry.name) sync.markChecked(newest);
   afterMerge(res, entry.name);
 }
 
@@ -2422,10 +2439,10 @@ async function mergeFrom(entry, { explicit = false, newest = '' } = {}) {
  *   「上書き」… 今開いている小説を、選んだ小説の内容（タイトルから全部）で置き換える。置き換える前の内容は、作品のバックアップ版に残す
  *   「新小説」… 選んだ小説を、新しい小説として追加して開く
  *   「キャンセル」… 何もしない
- * newest：そのときいちばん新しいバックアップの名前。古いものをあえて選んだときは、次の起動で最新を勧めない
+ * newest：そのときいちばん新しいバックアップ。一覧にある過去版をあえて選んだときは、既存の最新までを確認済みにする
  * 戻り値：読み込んだら true（キャンセルは false）
  */
-async function loadBackupAs(text, name, { newest = '' } = {}) {
+async function loadBackupAs(text, name, { newest = null } = {}) {
   const backup = parseBackup(text);
   const novels = (backup.projects || []).filter((p) => p?.id).map((p) => normalize(p));
   const env = environmentSummary(backup);
@@ -2461,14 +2478,14 @@ async function loadBackupAs(text, name, { newest = '' } = {}) {
     showProject(p);
     syncPending = null;
     sync.markLoaded(name);
-    if (newest && newest !== name) prefs.set('sync.seen', newest);
+    if (newest && newest.name !== name) sync.markChecked(newest);
     await inform(`いま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています）`);
   } else {
     const p = normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now });
     await switchTo(p);
     syncPending = null;
     sync.markLoaded(name);
-    if (newest && newest !== name) prefs.set('sync.seen', newest);
+    if (newest && newest.name !== name) sync.markChecked(newest);
     await inform(`「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
   }
   return true;
@@ -2500,7 +2517,7 @@ async function syncFromFile(mode) {
   if (!isBackup(src.text) && !isNewPack) { toast('あや綴りのバックアップファイルではありません', true); return false; }
   if (isNewPack) { await inspectBackupText(src.text, src.name); return true; }
   if (mode === 'restore') { openRestoreDialog(src.text, src.name); return true; }
-  const newest = (await sync.listAll().catch(() => []))[0]?.name;
+  const newest = (await sync.listAll().catch(() => []))[0] || null;
   return loadBackupAs(src.text, src.name, { newest });
 }
 
@@ -2611,18 +2628,18 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
           if ((() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; } })()) {
             decide();
             dialog.close();
-            await inspectBackupText(text, f.name);
+            await inspectBackupText(text, f.name, { acknowledge: files[0] });
             return;
           }
-          if (!(await loadBackupAs(text, f.name, { newest: files[0].name }))) return;
+          if (!(await loadBackupAs(text, f.name, { newest: files[0] }))) return;
           decide();
           dialog.close();
         }, f === files[0] ? 'primary' : '')
         : button('選ぶ', async () => {
           const text = await sync.read(f);
           $('sync-restore-dialog').close();
-          if ((() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; } })()) await inspectBackupText(text, f.name);
-          else openRestoreDialog(text, f.name);
+          if ((() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; } })()) await inspectBackupText(text, f.name, { acknowledge: files[0] });
+          else openRestoreDialog(text, f.name, { acknowledge: files[0] });
         });
       list.append(listItem(f.name, tags.join('・'), [act]));
     }
@@ -3662,11 +3679,11 @@ function renderFileDestination() {
   const dest = $('file-destination');
   const hasDrive = !!driveProvider();
   const cloudOpt = dest.querySelector('option[value="cloud"]');
-  cloudOpt.textContent = `${cloudName()}だけを使う`;
+  cloudOpt.textContent = `${cloudDestinationLabel()}だけを使う`;
   dest.querySelector('option[value="ask"]').disabled = !hasDrive;
   cloudOpt.disabled = !hasDrive;
   dest.value = hasDrive ? oldCloud(prefs.get(DEST_KEY, 'ask')) : 'local';
-  $('file-destination-hint').textContent = hasDrive ? `クラウドは今「${cloudName()}」です。`
+  $('file-destination-hint').textContent = hasDrive ? `クラウド保存先：${cloudDestinationLabel()}です。`
     : `利用できるクラウドがないか、接続IDが未設定です（「クラウド」タブで設定できます）。今は「この端末・その他」を使います。`;
 }
 
