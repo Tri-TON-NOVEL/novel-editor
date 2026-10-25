@@ -1066,7 +1066,7 @@ function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', work
     $('drive-name').value = name;
     $('drive-name-row').hidden = mode !== 'save';
     $('drive-ok').hidden = mode === 'open';
-    $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : 'このフォルダに保存';
+    $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : '保存';
     $('drive-local').hidden = mode === 'folder';
     $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
     $('drive-hint').textContent = p.browseHint || '';
