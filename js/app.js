@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.3.3';
+const APP_VERSION = '2026.10.25-7.3.5';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3841,6 +3841,7 @@ const actions = {
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,
   'open-import': () => importScreen.open(),
+  'open-import-formats': () => importScreen.openFormats(),
   'toggle-sort-dir': () => setEpisodeSort({ dir: epSort.dir === 'asc' ? 'desc' : 'asc' }),
   'project-version-save': openVersionSave,
   'manage-templates': () => { renderTemplateList(); $('templates-dialog').showModal(); },

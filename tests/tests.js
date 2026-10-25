@@ -254,9 +254,12 @@ const sampleNarou = [
   '第10話 決戦', '　十話の本文',
 ];
 
-group('Phase 7：なろう形式（章・話・前書き・後書き）', () => {
-  const preset = I.PRESETS.find((p) => p.id === 'narou');
-  const rules = { ...preset.rules, separator: { ...preset.rules.separator, enabled: true } };
+group('Phase 7：任意の区切り条件（章・話・前書き・後書き）', () => {
+  const rules = {
+    chapter: { enabled: true, pattern: '^[\\s\\u3000]*第[一二三四五六七八九十]+章', position: 'start', method: 'regex', title: 'include' },
+    episode: { enabled: true, pattern: '^[\\s\\u3000]*第[0-9０-９]+話', position: 'start', method: 'regex', title: 'include' },
+    separator: { enabled: true, pattern: '^[\\s\\u3000]*[＊*◇◆☆★]{3,}[\\s\\u3000]*$', position: 'start', method: 'regex' },
+  };
   const marks = I.detectMarks(sampleNarou, rules);
   eq([...marks.entries()], [[3, 'chapter'], [5, 'episode'], [15, 'episode'], [18, 'chapter'], [20, 'episode']], '自動検出');
   const r = I.buildEpisodes(sampleNarou, marks, { separator: rules.separator });
@@ -265,6 +268,28 @@ group('Phase 7：なろう形式（章・話・前書き・後書き）', () => 
   eq(r.episodes.map((e) => [e.title, e.chapter]), [['第1話 出会い', 0], ['第2話 旅立ち', 0], ['第10話 決戦', 1]], '話と章');
   eq([r.episodes[0].foreword, r.episodes[0].body, r.episodes[0].afterword], ['前書きです', '　本文一行目\n\n　本文二行目', '後書きです'], '前書き・本文・後書き（空行・字下げを保つ）');
   eq(I.summarize(r).images, 1, '画像タグの数');
+});
+
+group('標準の読み込み書式は、なろうとアルファポリスの2種類', () => {
+  eq(I.PRESETS.map((p) => p.id), ['narou-download', 'alpha-title-list']);
+  eq(I.PRESETS.map((p) => p.type), ['rules', 'title-list']);
+});
+
+group('タイトル一覧の書式と本文TXTの照合', () => {
+  const source = ['序章　混沌の胎動', '夜明け前', '本文1', '名もなき旅立ち', '本文2', '第一章　光の雪', '第4章までの登場人物と地名', '本文3'];
+  const list = [
+    '序章　混沌の胎動', '夜明け前', '13', '2025.06.22 21:03', '2,323文字',
+    '', '　', '// この行は一覧の説明',
+    '名もなき旅立ち', '10', '2025.06.23 07:05', '2,507文字',
+    '第一章　光の雪', '第4章までの登場人物と地名', '0', '2026.04.28 07:40', '1,889文字',
+  ].join('\n');
+  const template = I.ALPHA_TITLE_LIST_TEMPLATE.replace('テキスト', 'テキスト // 閲覧数');
+  const found = I.detectMarksFromTitleList(source, list, template);
+  eq([...found.marks.entries()], [[0, 'chapter'], [1, 'episode'], [3, 'episode'], [5, 'chapter'], [6, 'episode']], '題名の書き方に関係なく、一覧の順番で章と話を検出');
+  const result = I.buildEpisodes(source, found.marks);
+  eq(result.chapters.map((c) => c.title), ['序章　混沌の胎動', '第一章　光の雪']);
+  eq(result.episodes.map((e) => e.title), ['夜明け前', '名もなき旅立ち', '第4章までの登場人物と地名']);
+  throws(() => I.parseTitleListTemplate('#エピソード\n題名\n#章\n章タイトル'), /使用できません|エピソードタイトル/, '使用できる命令を制限');
 });
 
 group('Phase 8：区切り条件（前方一致・完全一致・行内・除外）', () => {
@@ -366,6 +391,9 @@ const narouInfo = [
   '【Nコード】', 'N1234AB',
   '【種別】', '連載', '【完結設定】', '連載中', '【年齢制限】', 'なし',
   '【ジャンル】', 'ハイファンタジー', '【作品に含まれる要素】', '異世界転生', '【キーワード】', '筆　転生', '',
+  '【掲載エピソード数】', '全10話', '【初回掲載日時】', '2026年1月1日', '【最終掲載日時】', '2026年10月25日',
+  '【感想受付】', '受け付ける', '【レビュー受付】', '受け付ける', '【評価受付】', '受け付ける',
+  '【開示設定】', '公開', '【評価】', '100pt', '【収益情報】', '対象外',
   '------------------------- エピソード1開始 -------------------------',
   '【エピソードタイトル】', '第1話', '【本文】', '本文',
 ];
@@ -375,7 +403,7 @@ group('作品情報の塊は既定で消す・Nコードとユーザ情報の照
   const marks = I.detectMarks(narouInfo, preset.rules);
   const mask = I.headingMask(narouInfo, preset.rules.cleanup, marks);
   const r = I.buildEpisodes(narouInfo, marks, { episodeTitle: 'exclude', mask });
-  eq(r.head.lines, ['転生したら筆だった件'], '【ユーザ情報】〜【キーワード】の塊は残らない');
+  eq(r.head.lines, ['転生したら筆だった件'], '作品情報の見出しと塊は残らない');
   eq([r.episodes[0].title, r.episodes[0].body], ['第1話', '本文']);
   const info = I.extractSiteInfo(narouInfo);
   eq([info.ncode, info.userText], ['n1234ab', 'ユーザID：12345\nユーザ名：テスト太郎'], 'TXT から読む');

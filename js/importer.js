@@ -453,6 +453,141 @@ const NUM = '0-9０-９一二三四五六七八九十百千〇零';
 // 見出し（【…】）の掃除を使わないときの値
 export const NO_CLEANUP = { enabled: false, pattern: '^[\\s\\u3000]*【[^】]+】[\\s\\u3000]*$', defaultAction: 'line', rules: [] };
 
+// ---------- タイトル一覧を使った区切り ----------
+
+export const ALPHA_TITLE_LIST_TEMPLATE = `#よみとばし
+改行
+空白
+コメント //
+
+#エピソード
+エピソードタイトル
+テキスト
+テキスト
+テキスト
+
+#章
+章タイトル
+エピソードタイトル
+テキスト
+テキスト
+テキスト`;
+
+const TITLE_LIST_HEADS = new Map([['#よみとばし', 'skip'], ['#エピソード', 'episode'], ['#章', 'chapter']]);
+const TITLE_LIST_TOKENS = new Set(['章タイトル', 'エピソードタイトル', 'テキスト']);
+
+export function parseTitleListTemplate(text) {
+  const raw = splitLines(text || '');
+  let comment = '';
+  let scanKind = null;
+  for (let i = 0; i < raw.length; i++) {
+    const line = raw[i].trim();
+    if (TITLE_LIST_HEADS.has(line)) { scanKind = TITLE_LIST_HEADS.get(line); continue; }
+    const m = scanKind === 'skip' && /^コメント\s+(\S+)$/.exec(line);
+    if (!m) continue;
+    if (comment) throw new RuleError(`${i + 1}行目：「コメント」の指定が重複しています`);
+    comment = m[1];
+  }
+  const lines = raw.map((source, i) => {
+    const trimmed = source.trim();
+    const isDirective = /^コメント\s+\S+$/.test(trimmed);
+    const body = !isDirective && comment && source.includes(comment) ? source.slice(0, source.indexOf(comment)) : source;
+    const line = body.trim();
+    return line ? { line, no: i + 1 } : null;
+  }).filter(Boolean);
+  const blocks = {};
+  const skip = { blankLines: false, whitespace: false, comment };
+  let kind = null;
+  for (const item of lines) {
+    const { line, no } = item;
+    if (TITLE_LIST_HEADS.has(line)) {
+      kind = TITLE_LIST_HEADS.get(line);
+      if (blocks[kind]) throw new RuleError(`${no}行目：${line}が重複しています`);
+      blocks[kind] = [];
+      continue;
+    }
+    if (!kind) throw new RuleError(`${no}行目：最初に「#よみとばし」「#エピソード」「#章」のいずれかを指定してください`);
+    if (kind === 'skip') {
+      if (line === '改行') skip.blankLines = true;
+      else if (line === '空白') skip.whitespace = true;
+      else if (/^コメント\s+\S+$/.test(line)) { /* 先の走査で取得済み */ }
+      else throw new RuleError(`${no}行目：「#よみとばし」では「改行」「空白」「コメント 記号」を指定できます`);
+      continue;
+    }
+    if (!TITLE_LIST_TOKENS.has(line)) throw new RuleError(`${no}行目：「${line}」は使用できません`);
+    blocks[kind].push(line);
+  }
+  if (!blocks.episode) throw new RuleError('「#エピソード」の書式がありません');
+  if (!blocks.chapter) throw new RuleError('「#章」の書式がありません');
+  const count = (a, token) => a.filter((x) => x === token).length;
+  if (count(blocks.episode, 'エピソードタイトル') !== 1 || count(blocks.episode, '章タイトル')) {
+    throw new RuleError('「#エピソード」には「エピソードタイトル」を1つだけ指定してください');
+  }
+  if (count(blocks.chapter, '章タイトル') !== 1 || count(blocks.chapter, 'エピソードタイトル') !== 1) {
+    throw new RuleError('「#章」には「章タイトル」と「エピソードタイトル」を1つずつ指定してください');
+  }
+  return { ...blocks, skip };
+}
+
+/** タイトル一覧を本文TXTと照合し、章・話の区切りを返す。 */
+export function detectMarksFromTitleList(sourceLines, listText, templateText) {
+  const blocks = parseTitleListTemplate(templateText);
+  let rows = splitLines(listText || '').map((raw, i) => ({ raw, text: blocks.skip.whitespace ? raw.trim() : raw, line: i + 1 }));
+  if (blocks.skip.comment) rows = rows.filter((row) => !row.raw.trimStart().startsWith(blocks.skip.comment));
+  if (blocks.skip.blankLines) rows = rows.filter((row) => row.raw !== '');
+  if (blocks.skip.whitespace) rows = rows.filter((row) => row.text !== '');
+  while (rows.length && !rows[0].text) rows.shift();
+  while (rows.length && !rows[rows.length - 1].text) rows.pop();
+  if (!rows.length) throw new RuleError('タイトル一覧が空です');
+  const marks = new Map();
+  const records = [];
+  let sourceFrom = 0;
+
+  const findTitle = (title, from) => {
+    const wanted = normalizeTitle(title);
+    if (!wanted) return -1;
+    for (let i = Math.max(0, from); i < sourceLines.length; i++) {
+      if (normalizeTitle(sourceLines[i]) === wanted) return i;
+    }
+    return -1;
+  };
+  const candidate = (tokens, at, type) => {
+    let cursor = at;
+    let chapterTitle = '';
+    let episodeTitle = '';
+    for (const token of tokens) {
+      const row = rows[cursor];
+      if (!row) return null;
+      if (!row.text) return null;
+      if (token === '章タイトル') chapterTitle = row.text;
+      if (token === 'エピソードタイトル') episodeTitle = row.text;
+      cursor++;
+    }
+    const chapterLine = chapterTitle ? findTitle(chapterTitle, sourceFrom) : -1;
+    const episodeLine = findTitle(episodeTitle, type === 'chapter' ? chapterLine + 1 : sourceFrom);
+    if (episodeLine < 0 || (type === 'chapter' && (chapterLine < 0 || chapterLine >= episodeLine))) return null;
+    if (type === 'chapter' && sourceLines.slice(chapterLine + 1, episodeLine).some((line) => line.trim())) return null;
+    return { type, end: cursor, chapterTitle, episodeTitle, chapterLine, episodeLine };
+  };
+
+  for (let at = 0; at < rows.length;) {
+    const chapter = candidate(blocks.chapter, at, 'chapter');
+    const episode = candidate(blocks.episode, at, 'episode');
+    // 章形式は章・話の2タイトルが本文中に順番どおり一致した場合に優先する。
+    const picked = chapter || episode;
+    if (!picked) {
+      const sample = rows[at].text.length > 40 ? rows[at].text.slice(0, 40) + '…' : rows[at].text;
+      throw new RuleError(`タイトル一覧の${rows[at].line}行目「${sample}」を本文TXTと照合できません`);
+    }
+    if (picked.type === 'chapter') marks.set(picked.chapterLine, 'chapter');
+    marks.set(picked.episodeLine, 'episode');
+    records.push(picked);
+    sourceFrom = picked.episodeLine + 1;
+    at = picked.end;
+  }
+  return { marks, records };
+}
+
 export const PRESETS = [
   {
     // なろうからダウンロードした TXT：
@@ -468,6 +603,7 @@ export const PRESETS = [
     id: 'narou-download',
     name: 'なろう：ダウンロード TXT（区切り線と【見出し】）',
     site: 'narou',
+    type: 'rules',
     rules: {
       episode: { enabled: true, pattern: '^[\\s\\u3000]*-{3,}[\\s\\u3000]*エピソード[\\s\\u3000]*[0-9０-９]+[\\s\\u3000]*開始[\\s\\u3000]*-{3,}[\\s\\u3000]*$', position: 'start', method: 'regex', title: 'exclude' },
       // 【第１章】の次の行が章の小タイトル
@@ -490,6 +626,15 @@ export const PRESETS = [
           { text: '【ジャンル】', method: 'exact', action: 'block' },
           { text: '【作品に含まれる要素】', method: 'exact', action: 'block' },
           { text: '【キーワード】', method: 'exact', action: 'block' },
+          { text: '【掲載エピソード数】', method: 'exact', action: 'block' },
+          { text: '【初回掲載日時】', method: 'exact', action: 'block' },
+          { text: '【最終掲載日時】', method: 'exact', action: 'block' },
+          { text: '【感想受付】', method: 'exact', action: 'block' },
+          { text: '【レビュー受付】', method: 'exact', action: 'block' },
+          { text: '【評価受付】', method: 'exact', action: 'block' },
+          { text: '【開示設定】', method: 'exact', action: 'block' },
+          { text: '【評価】', method: 'exact', action: 'block' },
+          { text: '【収益情報】', method: 'exact', action: 'block' },
           // ダウンロードTXT末尾の免責文と作成日時は作品本文ではないため、ここから末尾まで取り込まない
           { text: '本テキストデータの利用によって発生する如何なる案件につきましても、株式会社ヒナプロジェクト及びその関連グループは一切の責任を負いません。', method: 'prefix', action: 'block' },
           { text: '【前書き】', method: 'exact', action: 'foreword' },
@@ -499,37 +644,11 @@ export const PRESETS = [
     },
   },
   {
-    id: 'narou',
-    name: 'なろう：「第○話」「第○章」の行',
-    site: 'narou',
-    rules: {
-      episode: { enabled: true, pattern: `^[\\s\\u3000]*第[${NUM}]+話`, position: 'start', method: 'regex', title: 'include' },
-      chapter: { enabled: true, pattern: `^[\\s\\u3000]*第[${NUM}]+章`, position: 'start', method: 'regex', title: 'include' },
-      separator: { enabled: false, pattern: '^[\\s\\u3000]*[＊*◇◆☆★]{3,}[\\s\\u3000]*$', position: 'start', method: 'regex' },
-      cleanup: NO_CLEANUP,
-    },
-  },
-  {
-    id: 'alpha-mark',
-    name: 'アルファ：行頭「◆」でエピソード',
+    id: 'alpha-title-list',
+    name: 'アルファポリス・タイトル一覧',
     site: 'alpha',
-    rules: {
-      episode: { enabled: true, pattern: '◆', position: 'start', method: 'prefix', title: 'include' },
-      chapter: { enabled: false, pattern: '■', position: 'start', method: 'prefix', title: 'include' },
-      separator: { enabled: false, pattern: '', position: 'start', method: 'regex' },
-      cleanup: NO_CLEANUP,
-    },
-  },
-  {
-    id: 'episode-en',
-    name: '「Episode 1」形式',
-    site: 'alpha',
-    rules: {
-      episode: { enabled: true, pattern: '^\\s*Episode\\s*[0-9]+', position: 'start', method: 'regex', title: 'include' },
-      chapter: { enabled: false, pattern: '^\\s*Chapter\\s*[0-9]+', position: 'start', method: 'regex', title: 'include' },
-      separator: { enabled: false, pattern: '', position: 'start', method: 'regex' },
-      cleanup: NO_CLEANUP,
-    },
+    type: 'title-list',
+    template: ALPHA_TITLE_LIST_TEMPLATE,
   },
 ];
 

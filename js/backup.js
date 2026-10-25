@@ -18,7 +18,7 @@ const PORTABLE_DEVICE_PREFS = /^(file\.destination$|autoBackupInterval$|autoBack
 const portableDevicePrefs = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => DEVICE_PREFS.test(k) && PORTABLE_DEVICE_PREFS.test(k)));
 
 // まとめるときに、id ごとに合わせる一覧（同じ id は読み込んだ側）
-const LISTS_BY_ID = ['templates', 'importPresets'];
+const LISTS_BY_ID = ['templates', 'importPresets', 'importFormats'];
 
 function mergeList(remote, mine, keyOf) {
   const keys = new Set(remote.map(keyOf));
@@ -89,6 +89,7 @@ const ENV_LABELS = [
   ['links', 'リンク', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
   ['accounts', '投稿サイトのアカウント', () => ''],
   ['importPresets', 'TXT インポートの条件', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
+  ['importFormats', 'TXT インポートの書式', (v) => (Array.isArray(v) ? `${v.length}件` : '')],
   ['gdrive.clientId', 'Google ドライブのクライアントID', () => ''],
   ['onedrive.clientId', 'OneDrive のアプリケーション（クライアント）ID', () => ''],
 ];

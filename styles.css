@@ -811,6 +811,18 @@ dialog.fullscreen {
 /* 正規表現の「\」が日本語フォントで「¥」に見えないように */
 .imp-rule .imp-pattern { font-family: Consolas, "Cascadia Mono", Menlo, "Courier New", monospace; }
 .imp-rule-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.imp-title-list-source { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(280px, 2fr); gap: 10px 16px; align-items: start; }
+.imp-title-list-source[hidden] { display: none; }
+.imp-title-list-source label, .imp-title-list-editor label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.imp-title-list-source textarea, .imp-title-list-editor textarea { width: 100%; box-sizing: border-box; resize: vertical; background: var(--bg); color: var(--text); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font: 14px/1.55 Consolas, "Cascadia Mono", Menlo, "Courier New", monospace; }
+.imp-title-list-source .hint { grid-column: 1 / -1; }
+.imp-title-list-editor textarea.invalid { border: 2px solid var(--danger); }
+.import-rules-help { line-height: 1.7; }
+.import-rules-help section { border-top: 1px solid var(--border); padding-top: 10px; }
+.import-rules-help h3 { margin: 0 0 6px; font-size: 16px; }
+.import-rules-help p, .import-rules-help ul, .import-rules-help ol, .import-rules-help dl { margin: 4px 0; }
+.import-rules-help dt { margin-top: 7px; font-weight: 700; }
+.import-rules-help dd { margin-left: 1.5em; color: var(--muted); }
 label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
 .imp-split { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 10px; }
 .imp-lines { overflow: auto; border: 1px solid var(--border); border-radius: 8px; background: var(--surface); font-family: var(--font-body); font-size: 15px; }
@@ -865,6 +877,8 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
   .imp-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
   .imp-rule { grid-template-columns: 1fr 1fr; }
   .imp-rule .imp-pattern { grid-column: 1 / -1; }
+  .imp-title-list-source { grid-template-columns: 1fr; }
+  .imp-title-list-source .hint { grid-column: auto; }
 }
 #site-copy-preview { flex: none; font-family: var(--font-body); background: var(--bg); }
 .overwrite, .warnings { border-radius: 8px; padding: 10px 12px; font-size: 13px; line-height: 1.6; }

@@ -4,11 +4,11 @@
 import * as I from './importer.js';
 import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS } from './format.js';
 import { SITES, countImages } from './notation.js';
-import { ask, askText } from './dialogs.js';
+import { ask, askText, choose } from './dialogs.js';
 
 const KINDS = [
-  ['episode', '話の区切り'],
   ['chapter', '章の区切り'],
+  ['episode', '話の区切り'],
   ['separator', '前書き・後書きの区切り'],
 ];
 const MARK_LABEL = { episode: '話', chapter: '章' };
@@ -35,19 +35,37 @@ export function initImport(ctx) {
     return r;
   }
 
-  // 既定の条件（「この条件を既定にする」で選んだもの。なければ最初のプリセット）
+  function userFormats() {
+    const saved = ctx.prefs.get('importFormats', null);
+    if (Array.isArray(saved)) return saved;
+    // 以前の版で保存した区切り条件を、そのまま新しい書式リストへ移す。
+    const old = ctx.prefs.get('importPresets', []) || [];
+    const migrated = old.map((p) => ({ id: p.id, name: p.name, type: 'rules', rules: p.rules, updatedAt: p.updatedAt || '' }));
+    if (migrated.length) ctx.prefs.set('importFormats', migrated);
+    return migrated;
+  }
+
+  function formatOf(id) {
+    if (id?.startsWith('b:')) return I.PRESETS.find((p) => 'b:' + p.id === id) || null;
+    return userFormats().find((p) => 'u:' + p.id === id) || null;
+  }
+
+  // 既定の書式（なければ先頭の標準書式）
   function defaultPreset() {
     const id = ctx.prefs.get('importDefaultPreset', null);
-    const rules = id && presetRules(id);
-    return rules ? { id, rules } : { id: 'b:' + I.PRESETS[0].id, rules: I.PRESETS[0].rules };
+    const format = id && formatOf(id);
+    return format ? { id, format } : { id: 'b:' + I.PRESETS[0].id, format: I.PRESETS[0] };
   }
 
   function fresh() {
     const preset = defaultPreset();
+    const type = preset.format.type || 'rules';
     return {
       fileName: '', buffer: null, text: '', lines: [], decode: null,
-      encoding: 'auto', site: 'narou', target: 'new',
-      presetId: preset.id, rules: completeRules(preset.rules),
+      encoding: 'auto', site: preset.format.site || 'narou', target: 'new',
+      presetId: preset.id, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
+      titleListText: '', titleListFileName: '',
+      configureOnly: false,
       auto: new Map(), manual: new Map(),
       result: null, rows: [], workTitle: '', useHead: true, step: 1, siteInfo: null, mismatches: [],
     };
@@ -62,7 +80,8 @@ export function initImport(ctx) {
       ctx.meta.set('importSession', {
         savedAt: new Date().toISOString(),
         fileName: state.fileName, text: state.text, decode: state.decode && { encoding: state.decode.encoding, note: state.decode.note, bad: state.decode.bad },
-        site: state.site, target: state.target, presetId: state.presetId, rules: state.rules,
+        site: state.site, target: state.target, presetId: state.presetId, type: state.type, rules: state.rules, template: state.template,
+        titleListText: state.titleListText, titleListFileName: state.titleListFileName,
         manual: [...state.manual.entries()], step: Math.min(state.step, 2),
       }).catch(() => {});
     }, 800);
@@ -85,8 +104,14 @@ export function initImport(ctx) {
   async function resume() {
     const s = await ctx.meta.get('importSession');
     if (!s) return;
-    state = { ...fresh(), fileName: s.fileName, text: s.text, lines: I.splitLines(s.text), decode: s.decode, site: s.site, target: s.target, presetId: s.presetId, rules: completeRules(s.rules), manual: new Map(s.manual) };
+    state = { ...fresh(), fileName: s.fileName, text: s.text, lines: I.splitLines(s.text), decode: s.decode, site: s.site, target: s.target,
+      presetId: s.presetId, type: s.type || 'rules', rules: completeRules(s.rules), template: s.template || I.ALPHA_TITLE_LIST_TEMPLATE,
+      titleListText: s.titleListText || '', titleListFileName: s.titleListFileName || '', manual: new Map(s.manual) };
     $('imp-site').value = state.site;
+    fillPresets();
+    $('imp-preset').value = state.presetId;
+    $('imp-title-list-text').value = state.titleListText;
+    showTitleListSource();
     await fillTargets();
     $('imp-target').value = state.target;
     showDecodeInfo(true);
@@ -130,32 +155,67 @@ export function initImport(ctx) {
     state.auto = new Map();
     showDecodeInfo();
     buildLineRows();
-    $('imp-to-2').disabled = false;
+    updateNextButton();
     saveSession();
   }
 
   // ---------- 2. 区切り ----------
 
-  function userPresets() { return ctx.prefs.get('importPresets', []) || []; }
-
   function fillPresets() {
-    const sel = $('imp-preset');
     const def = defaultPreset().id;
     const mark = (id) => (id === def ? '（既定）' : '');
-    sel.replaceChildren(
-      ...I.PRESETS.map((p) => new Option(p.name + mark('b:' + p.id), 'b:' + p.id)),
-      ...userPresets().map((p) => new Option('保存した条件：' + p.name + mark('u:' + p.id), 'u:' + p.id)));
-    if (![...sel.options].some((o) => o.value === state.presetId)) sel.append(new Option('（いまの条件）', state.presetId));
-    sel.value = state.presetId;
-    $('imp-preset-delete').disabled = !state.presetId.startsWith('u:');
+    const savedFormats = userFormats().sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
+    for (const sel of [$('imp-preset'), $('imp-preset-edit')]) {
+      sel.replaceChildren(
+        ...I.PRESETS.map((p) => new Option(p.name + mark('b:' + p.id), 'b:' + p.id)),
+        ...savedFormats.map((p) => new Option(p.name + mark('u:' + p.id), 'u:' + p.id)));
+      if (![...sel.options].some((o) => o.value === state.presetId)) sel.append(new Option('（いまの書式）', state.presetId));
+      sel.value = state.presetId;
+    }
+    const custom = state.presetId.startsWith('u:');
+    $('imp-preset-delete').disabled = !custom;
+    $('imp-preset-overwrite').disabled = !custom;
   }
 
-  function presetRules(id) {
-    if (id.startsWith('b:')) return I.PRESETS.find((p) => 'b:' + p.id === id)?.rules;
-    return userPresets().find((p) => 'u:' + p.id === id)?.rules;
+  function applyFormat(format, id) {
+    if (!format) return;
+    state.presetId = id;
+    state.type = format.type || 'rules';
+    state.rules = completeRules(format.rules);
+    state.template = format.template || I.ALPHA_TITLE_LIST_TEMPLATE;
+    if (format.site) {
+      state.site = format.site;
+      $('imp-site').value = state.site;
+    }
+    state.auto = new Map();
+    state.manual = new Map();
+    showTitleListSource();
+  }
+
+  function showTitleListSource() {
+    const on = state.type === 'title-list';
+    $('imp-title-list-source').hidden = !on;
+    $('imp-detect').textContent = on ? 'タイトル一覧と照合' : 'この条件で自動検出';
+    $('imp-pending').textContent = on
+      ? '書式を変えました。全文に反映するには「タイトル一覧と照合」を押してください（プレビューへ進むときにも反映されます）'
+      : '条件を変えました。全文に反映するには「この条件で自動検出」を押してください（プレビューへ進むときにも反映されます）';
+    updateNextButton();
+  }
+
+  function updateNextButton() {
+    $('imp-to-2').disabled = !state.text || (state.type === 'title-list' && !state.titleListText.trim());
   }
 
   function renderRuleForm() {
+    const titleMode = state.type === 'title-list';
+    $('imp-rules-editor').hidden = titleMode;
+    $('imp-title-list-editor').hidden = !titleMode;
+    $('imp-keep-manual').closest('label').hidden = titleMode;
+    $('imp-title-list-template').value = state.template || '';
+    if (titleMode) {
+      validateRules();
+      return;
+    }
     const grid = $('imp-rule-grid');
     grid.replaceChildren();
     for (const [kind, label] of KINDS) {
@@ -256,6 +316,18 @@ export function initImport(ctx) {
 
   function validateRules() {
     const errors = [];
+    if (state.type === 'title-list') {
+      const input = $('imp-title-list-template');
+      try {
+        I.parseTitleListTemplate(state.template);
+        input.classList.remove('invalid');
+      } catch (e) {
+        input.classList.add('invalid');
+        errors.push(e.message);
+      }
+      $('imp-rule-error').textContent = errors.join('　');
+      return !errors.length;
+    }
     for (const [kind, label] of KINDS) {
       const input = document.querySelector(`.imp-rule[data-kind="${kind}"] .imp-pattern`);
       try {
@@ -291,11 +363,26 @@ export function initImport(ctx) {
 
   // 見出しの扱いによる、行ごとの扱い（消す・前書き・後書き）
   function currentMask() {
+    if (state.type === 'title-list') return [];
     try { return I.headingMask(state.lines, state.rules.cleanup, merged()); } catch { return []; }
   }
 
   async function detect({ confirmFirst = true } = {}) {
     if (!validateRules()) return false;
+    if (state.type === 'title-list') {
+      try {
+        const found = I.detectMarksFromTitleList(state.lines, state.titleListText, state.template);
+        state.auto = found.marks;
+        state.manual.clear();
+      } catch (e) {
+        $('imp-rule-error').textContent = e.message;
+        return false;
+      }
+      renderMarks();
+      markPending(false);
+      saveSession();
+      return true;
+    }
     if (!$('imp-keep-manual').checked && state.manual.size) {
       if (confirmFirst && !(await ask(`手動で指定した区切り ${state.manual.size}件を消して、検出し直しますか？`))) return false;
       state.manual.clear();
@@ -363,6 +450,9 @@ export function initImport(ctx) {
   }
 
   function buildResult() {
+    if (state.type === 'title-list') {
+      return I.buildEpisodes(state.lines, merged(), { episodeTitle: 'include', chapterTitle: 'include', mask: [] });
+    }
     const r = state.rules;
     const prefixOf = (rule) => (rule?.enabled && rule.method === 'prefix' && rule.position !== 'any' ? rule.pattern : '');
     return I.buildEpisodes(state.lines, merged(), {
@@ -697,6 +787,7 @@ export function initImport(ctx) {
 
   async function go(step, { detect: doDetect = false } = {}) {
     if (step >= 2 && !state.text) { ctx.toast('先に TXT ファイルを選んでください'); return; }
+    if (step >= 2 && state.type === 'title-list' && !state.titleListText.trim()) { ctx.toast('タイトル一覧のファイルを選ぶか、一覧を貼り付けてください'); return; }
     if (step === 2) {
       fillPresets();
       renderRuleForm();
@@ -704,6 +795,7 @@ export function initImport(ctx) {
       else renderMarks();
     }
     if (step === 3) {
+      if (!$('imp-pending').hidden && !(await detect({ confirmFirst: false }))) return;
       if (!validateRules()) { ctx.toast('区切りの条件に誤りがあります', true); return; }
       state.result = buildResult();
       if (!state.result.episodes.length) { ctx.toast('話が1つも見つかりません。区切りの条件か、手動の区切りを確認してください', true); return; }
@@ -718,19 +810,47 @@ export function initImport(ctx) {
 
   async function open() {
     state = fresh();
-    state.site = ctx.getProject()?.site || 'narou';
+    state.site = formatOf(state.presetId)?.site || ctx.getProject()?.site || 'narou';
     $('imp-site').value = state.site;
+    fillPresets();
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
+    $('imp-title-list-file').value = '';
+    $('imp-title-list-text').value = '';
+    showTitleListSource();
     $('imp-decode-info').hidden = true;
     $('imp-to-2').disabled = true;
     $('imp-lines').replaceChildren();
     rowEls = [];
+    $('import-title').textContent = 'TXT インポート';
+    $('import-dialog').classList.remove('format-settings');
+    document.querySelector('.import-steps').hidden = false;
+    $('imp-rule-actions').hidden = false;
+    $('imp-split').hidden = false;
+    $('imp-step2-foot').hidden = false;
+    $('imp-manual-hint').hidden = false;
     await fillTargets();
     await showResume();
     await go(1);
     dlg.showModal();
     // Android などの「戻る」でインポート画面を閉じる（作業は残る）
+    history.pushState({ novelEditorImport: true }, '');
+  }
+
+  async function openFormats() {
+    state = fresh();
+    state.configureOnly = true;
+    fillPresets();
+    $('import-title').textContent = '読み込み書式の設定';
+    $('import-dialog').classList.add('format-settings');
+    document.querySelector('.import-steps').hidden = true;
+    $('imp-rule-actions').hidden = true;
+    $('imp-split').hidden = true;
+    $('imp-step2-foot').hidden = true;
+    $('imp-manual-hint').hidden = true;
+    renderRuleForm();
+    document.querySelectorAll('[data-istep]').forEach((s) => { s.hidden = Number(s.dataset.istep) !== 2; });
+    dlg.showModal();
     history.pushState({ novelEditorImport: true }, '');
   }
 
@@ -757,6 +877,29 @@ export function initImport(ctx) {
     state.buffer = await file.arrayBuffer();
     decodeAndShow();
   });
+  $('imp-title-list-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 10 * 1024 * 1024) { ctx.toast('タイトル一覧ファイルが大きすぎます（10MBまで）', true); return; }
+    const decoded = I.decodeText(await file.arrayBuffer());
+    state.titleListFileName = file.name;
+    state.titleListText = decoded.text;
+    $('imp-title-list-text').value = state.titleListText;
+    updateNextButton();
+    saveSession();
+  });
+  $('imp-title-list-text').addEventListener('input', (e) => {
+    state.titleListText = e.target.value;
+    state.titleListFileName = '';
+    updateNextButton();
+    saveSession();
+  });
+  $('imp-title-list-template').addEventListener('input', (e) => {
+    state.template = e.target.value;
+    validateRules();
+    markPending();
+    saveSession();
+  });
   $('imp-to-2').addEventListener('click', () => go(2, { detect: true }).catch(ctx.fail));
   $('imp-resume-btn').addEventListener('click', () => resume().catch(ctx.fail));
   $('imp-resume-discard').addEventListener('click', async () => {
@@ -766,38 +909,86 @@ export function initImport(ctx) {
   });
   document.querySelectorAll('[data-imp-go]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.impGo)).catch(ctx.fail)));
   $('imp-detect').addEventListener('click', () => detect());
-  $('imp-preset').addEventListener('change', (e) => {
-    const rules = presetRules(e.target.value);
-    if (!rules) return;
-    state.presetId = e.target.value;
-    state.rules = completeRules(rules);
-    $('imp-preset-delete').disabled = !state.presetId.startsWith('u:');
+  $('imp-rules-help').addEventListener('click', () => $('import-rules-help-dialog').showModal());
+  const changeFormat = (e) => {
+    const format = formatOf(e.target.value);
+    if (!format) return;
+    applyFormat(format, e.target.value);
+    fillPresets();
     renderRuleForm();
-    detect({ confirmFirst: false });
-  });
+    if (state.text && (state.type !== 'title-list' || state.titleListText.trim())) detect({ confirmFirst: false });
+    saveSession();
+  };
+  $('imp-preset').addEventListener('change', changeFormat);
+  $('imp-preset-edit').addEventListener('change', changeFormat);
 
-  // 今の条件に名前を付けて保存する。戻り値：保存した条件の ID（やめたら null）
+  function formatData(id, name) {
+    return {
+      id, name, type: state.type,
+      ...(state.type === 'title-list' ? { template: state.template } : { rules: clone(state.rules) }),
+      updatedAt: new Date().toISOString(),
+    };
+  }
+
+  // 今の書式に名前を付けて保存する。戻り値：保存した書式の ID（やめたら null）
   async function saveAsPreset() {
     if (!validateRules()) return null;
-    const name = await askText('この条件（区切り・見出しの扱い）に名前を付けて保存します', '', { ok: '保存' });
+    const current = formatOf(state.presetId);
+    const name = await askText('この書式に名前を付けて保存します', state.presetId.startsWith('u:') ? current?.name || '' : '', { ok: '保存' });
     if (!name || !name.trim()) return null;
-    const list = userPresets();
-    const id = crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
-    list.push({ id, name: name.trim(), rules: clone(state.rules) });
-    ctx.prefs.set('importPresets', list);
+    const list = userFormats();
+    const same = list.find((p) => p.name === name.trim());
+    if (same && !(await ask(`同じ名前の書式「${name.trim()}」があります。上書きしますか？`, { ok: '上書き' }))) return null;
+    const id = same?.id || (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    const next = list.filter((p) => p.id !== id);
+    next.push(formatData(id, name.trim()));
+    ctx.prefs.set('importFormats', next);
     state.presetId = 'u:' + id;
     fillPresets();
-    ctx.toast(`条件「${name.trim()}」を保存しました`);
+    ctx.toast(`書式「${name.trim()}」を保存しました`);
     return state.presetId;
   }
 
+  $('imp-format-new').addEventListener('click', async () => {
+    const type = await choose('どの方法でTXTを分けますか？', [
+      { value: 'rules', label: '区切り条件で分ける', primary: true },
+      { value: 'title-list', label: 'タイトル一覧で分ける' },
+    ]);
+    if (!type) return;
+    state.presetId = 'draft:' + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
+    state.type = type;
+    state.rules = completeRules({
+      chapter: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },
+      episode: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },
+      separator: { enabled: false, pattern: '', position: 'start', method: 'prefix' },
+      cleanup: clone(I.NO_CLEANUP),
+    });
+    state.template = I.ALPHA_TITLE_LIST_TEMPLATE;
+    state.auto = new Map();
+    state.manual = new Map();
+    fillPresets();
+    showTitleListSource();
+    renderRuleForm();
+    renderMarks();
+    markPending();
+  });
   $('imp-preset-save').addEventListener('click', () => saveAsPreset().catch(ctx.fail));
+  $('imp-preset-overwrite').addEventListener('click', async () => {
+    const old = formatOf(state.presetId);
+    if (!old || !state.presetId.startsWith('u:') || !validateRules()) return;
+    const list = userFormats().filter((p) => p.id !== old.id);
+    list.push(formatData(old.id, old.name));
+    ctx.prefs.set('importFormats', list);
+    fillPresets();
+    ctx.toast(`書式「${old.name}」を上書き保存しました`);
+  });
   $('imp-preset-default').addEventListener('click', async () => {
     let id = state.presetId;
-    // 選んだ条件から変えているときは、先に名前を付けて保存してもらう
-    const saved = presetRules(id);
-    if (!saved || JSON.stringify(completeRules(saved)) !== JSON.stringify(state.rules)) {
-      if (!(await ask('条件を変えています。名前を付けて保存してから、既定にしますか？'))) return;
+    const saved = formatOf(id);
+    const currentData = state.type === 'title-list' ? state.template : completeRules(state.rules);
+    const savedData = saved && (state.type === 'title-list' ? saved.template : completeRules(saved.rules));
+    if (!saved || saved.type !== state.type || JSON.stringify(savedData) !== JSON.stringify(currentData)) {
+      if (!(await ask('書式を変更しています。名前を付けて保存してから、既定にしますか？'))) return;
       id = await saveAsPreset();
       if (!id) return;
     }
@@ -807,12 +998,14 @@ export function initImport(ctx) {
   });
   $('imp-preset-delete').addEventListener('click', async () => {
     const id = state.presetId;
-    const p = userPresets().find((x) => 'u:' + x.id === id);
-    if (!p || !(await ask(`保存した条件「${p.name}」を削除しますか？`))) return;
-    ctx.prefs.set('importPresets', userPresets().filter((x) => x.id !== p.id));
+    const p = userFormats().find((x) => 'u:' + x.id === id);
+    if (!p || !(await ask(`保存した書式「${p.name}」を削除しますか？`))) return;
+    ctx.prefs.set('importFormats', userFormats().filter((x) => x.id !== p.id));
     if (ctx.prefs.get('importDefaultPreset', null) === id) ctx.prefs.set('importDefaultPreset', null);
-    state.presetId = defaultPreset().id;
+    const def = defaultPreset();
+    applyFormat(def.format, def.id);
     fillPresets();
+    renderRuleForm();
   });
   $('imp-lines').addEventListener('click', (e) => {
     const b = e.target.closest('.ln-mark');
@@ -824,5 +1017,5 @@ export function initImport(ctx) {
   });
   $('imp-commit').addEventListener('click', () => commit());
 
-  return { open };
+  return { open, openFormats };
 }
