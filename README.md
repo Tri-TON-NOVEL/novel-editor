@@ -1,6 +1,6 @@
 # あや<ruby>綴<rp>（</rp><rt>つづ</rt><rp>）</rp></ruby>り
 
-**<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>と<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>で<ruby>綾<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>を成す。**
+**<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>と<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>で<ruby>綾<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>を綴る。**
 
 ## パソコンでも、スマートフォンでも。同じアプリで、物語を綴っていく。
 
@@ -24,8 +24,10 @@
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：7.0.0（`2026.10.24-7.0.0`）
+- **バージョン**：7.3.3（`2026.10.25-7.3.3`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
+- **簡易マニュアル（逆引き）**：[docs/簡易マニュアル_逆引き.md](docs/簡易マニュアル_逆引き.md)
+- **設定マニュアル**：[docs/設定マニュアル.md](docs/設定マニュアル.md)
 - **使い方の詳細**：[docs/使い方.md](docs/使い方.md)
 
 > [!IMPORTANT]

@@ -202,10 +202,10 @@ group('Phase 6：紛らわしい文字列は変換しない', () => {
 });
 
 group('Phase 6：画像タグ', () => {
-  const n = c('narou', 'alpha', '前<i1285249|50921>中<i1285249|50921>後');
-  eq(n.text, '前https://50921.mitemin.net/i1285249/中https://50921.mitemin.net/i1285249/後', 'なろう→アルファ：みてみんの URL（同じタグ2つとも位置を保つ）');
+  const n = c('narou', 'alpha', '前<i1234567|12345>中<i1234567|12345>後');
+  eq(n.text, '前https://12345.mitemin.net/i1234567/中https://12345.mitemin.net/i1234567/後', 'なろう→アルファ：みてみんの URL（同じタグ2つとも位置を保つ）');
   eq(types(n), ['image:2'], '画像の警告');
-  eq(c('alpha', 'narou', n.text).text, '前<i1285249|50921>中<i1285249|50921>後', 'みてみんの URL はなろうの挿絵タグに戻る（往復）');
+  eq(c('alpha', 'narou', n.text).text, '前<i1234567|12345>中<i1234567|12345>後', 'みてみんの URL はなろうの挿絵タグに戻る（往復）');
   const a = c('alpha', 'narou', 'ここ#__i_dd9a42ad__#です');
   eq(a.text, 'ここ【ここに画像を挿入：i_dd9a42ad】です', 'アルファの画像タグ→なろう');
   eq(N.countImages('<i1|2>#__i_ab__#https://3.mitemin.net/i4/'), 3, '画像の数');
@@ -215,10 +215,10 @@ group('Phase 6：画像タグ', () => {
 });
 
 group('画像の一覧（findImages）', () => {
-  const t = '一行目<i1285249|50921>\n二行目 https://50921.mitemin.net/i1149346/\n三行目#__i_dd9a42ad__#';
+  const t = '一行目<i1234567|12345>\n二行目 https://12345.mitemin.net/i1234568/\n三行目#__i_dd9a42ad__#';
   eq(N.findImages(t).map((x) => [x.kind, x.line, x.url]), [
-    ['narou', 1, 'https://50921.mitemin.net/i1285249/'],
-    ['mitemin', 2, 'https://50921.mitemin.net/i1149346/'],
+    ['narou', 1, 'https://12345.mitemin.net/i1234567/'],
+    ['mitemin', 2, 'https://12345.mitemin.net/i1234568/'],
     ['alpha', 3, ''],
   ]);
 });
@@ -322,7 +322,7 @@ const narouDownload = [
   '------------------------- エピソード1開始 -------------------------',
   '【エピソードタイトル】', '第1話　筆になった朝', '',
   '【前書き】', '初投稿です。', '',
-  '【本文】', '　朝、目が覚めた。', '', '　二段落目。<i1285249|50921>', '',
+  '【本文】', '　朝、目が覚めた。', '', '　二段落目。<i1234567|12345>', '',
   '【後書き】', 'ありがとうございます。', '',
   '【リアクション】', 'いいね　12', 'ナイス　3',
   '------------------------- エピソード2開始 -------------------------',
@@ -339,7 +339,7 @@ group('見出しの掃除：なろうのダウンロード TXT', () => {
   const r = I.buildEpisodes(narouDownload, marks, { episodeTitle: 'exclude', mask });
   eq(r.episodes.map((e) => e.title), ['第1話　筆になった朝', '第2話　旅立ち'], '【エピソードタイトル】の次の行がタイトル');
   eq([r.episodes[0].foreword, r.episodes[0].body, r.episodes[0].afterword],
-    ['初投稿です。', '　朝、目が覚めた。\n\n　二段落目。<i1285249|50921>', 'ありがとうございます。'], '前書き・本文・後書き（見出しの行は消える）');
+    ['初投稿です。', '　朝、目が覚めた。\n\n　二段落目。<i1234567|12345>', 'ありがとうございます。'], '前書き・本文・後書き（見出しの行は消える）');
   eq(r.episodes[1].body, '　紙の上を走った。', '【リアクション】以下は取り込まない');
   ok(!r.episodes.some((e) => /【|いいね|エピソード\d+開始/.test(e.title + e.body + e.foreword + e.afterword)), '見出し・リアクション・区切り線が残らない');
   eq(r.head.lines, ['転生したら筆だった件', '作者：テスト太郎'], '作品情報');
@@ -362,7 +362,7 @@ group('なろうダウンロード TXT：末尾の免責文と作成日時を取
 
 const narouInfo = [
   '転生したら筆だった件',
-  '【ユーザ情報】', 'ユーザID：50921', 'ユーザ名：テスト太郎',
+  '【ユーザ情報】', 'ユーザID：12345', 'ユーザ名：テスト太郎',
   '【Nコード】', 'N1234AB',
   '【種別】', '連載', '【完結設定】', '連載中', '【年齢制限】', 'なし',
   '【ジャンル】', 'ハイファンタジー', '【作品に含まれる要素】', '異世界転生', '【キーワード】', '筆　転生', '',
@@ -378,8 +378,8 @@ group('作品情報の塊は既定で消す・Nコードとユーザ情報の照
   eq(r.head.lines, ['転生したら筆だった件'], '【ユーザ情報】〜【キーワード】の塊は残らない');
   eq([r.episodes[0].title, r.episodes[0].body], ['第1話', '本文']);
   const info = I.extractSiteInfo(narouInfo);
-  eq([info.ncode, info.userText], ['n1234ab', 'ユーザID：50921\nユーザ名：テスト太郎'], 'TXT から読む');
-  eq(I.checkSiteInfo(info, { userId: '50921', userName: 'テスト太郎' }, 'n1234ab'), [], '一致すれば何も出ない');
+  eq([info.ncode, info.userText], ['n1234ab', 'ユーザID：12345\nユーザ名：テスト太郎'], 'TXT から読む');
+  eq(I.checkSiteInfo(info, { userId: '12345', userName: 'テスト太郎' }, 'n1234ab'), [], '一致すれば何も出ない');
   eq(I.checkSiteInfo(info, { userId: '99999' }, 'n0000zz').map((m) => m.label), ['Nコード', 'ユーザID'], '違えば項目を返す');
   eq(I.checkSiteInfo(info, {}, ''), [], '登録がなければ比べない');
   eq(I.checkSiteInfo(I.extractSiteInfo(['本文だけ']), { userId: '1' }, 'n1111aa'), [], 'TXT に情報がなければ比べない');

@@ -19,7 +19,7 @@
 //   reports: { x, narouTitle, narouBody },
 //   createdAt, updatedAt, links（端末ローカル）: { [クラウドID]: ファイルID }
 // }
-// 移行の詳細は docs/01_データ形式v3.md を参照。
+// 旧形式は、このファイル内の補完処理で現在の形式へ移行する。
 export const FORMAT = 'novel-editor';
 export const SCHEMA_VERSION = 3;
 export const SITE_KEYS = ['narou', 'alpha'];
