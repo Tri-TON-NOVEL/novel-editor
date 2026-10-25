@@ -59,7 +59,7 @@ export function folderName() { return mode() === 'cloud' ? drive?.backups.folder
 // クラウド方式で使うサービス（Google ドライブ／OneDrive）
 export function cloud() { return drive; }
 
-function deviceId() {
+export function deviceId() {
   let id = prefs.get('sync.deviceId', '');
   if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); prefs.set('sync.deviceId', id); }
   return id;
@@ -210,7 +210,8 @@ export function parseName(name) {
   const s = m[2];
   const at = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15));
   let owner = m[1].replace(/__$/, '');
-  if (owner.startsWith('AYATUZURI__')) owner = owner.split('__').at(-1) || 'AYATUZURI';
+  // 現行名と旧名の両方を読めるようにし、画面には端末名だけを出す。
+  if (owner.startsWith('あや綴り__') || owner.startsWith('AYATUZURI__')) owner = owner.split('__').at(-1) || '端末不明';
   return { prefix: owner, at };
 }
 
@@ -274,6 +275,7 @@ export async function backupNow({ force = false, build = null } = {}) {
     prefs.set('sync.last', { name, at: now, syncedAt: Date.now() });
     prefs.set('lastAutoBackupAt', now);
     prefs.set('lastBackupAt', now);
+    checked = true;
     lastRun = Date.now();
     lastError = '';
     // 残す件数を超えたら、この端末が保存した古いものから消す（他の端末のファイルには触らない）
@@ -318,6 +320,16 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   const last = lastBackup();
   if (!newest || newest.mine) return null;
   if (last && newest.name === last.name) return null;
+  // ファイル名の記録が失われても、中にある端末IDが同じなら自分のバックアップ。
+  try {
+    const data = JSON.parse(await read(newest));
+    if (data?.device?.id && data.device.id === deviceId()) {
+      const mine = [newest.name, ...prefs.get('sync.mine', []).filter((n) => n !== newest.name)];
+      prefs.set('sync.mine', mine.slice(0, keepCount()));
+      prefs.set('sync.last', { name: newest.name, at: new Date(newest.at).toISOString(), syncedAt: Date.now() });
+      return null;
+    }
+  } catch { /* 読めないときは従来どおり日時で判定する */ }
   const lastAt = last ? parseName(last.name)?.at || Date.parse(last.at) : 0;
   if (newest.at <= lastAt) return null;
   if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;

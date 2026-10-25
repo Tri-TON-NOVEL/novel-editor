@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.0.2';
+const APP_VERSION = '2026.10.25-7.1.0';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -158,12 +158,12 @@ function updateStatus() {
   renderSaveButton();
 }
 
-// 「保存」ボタン：まだサーバへのバックアップに入っていない変更があれば「保存●」
+// 「編集エピソード保存」：まだサーバへのバックアップに入っていない変更があれば印を付ける
 function renderSaveButton() {
   const b = $('sync-save-btn');
   const unsaved = sync.isDirty();
   const saving = manualServerSaving || sync.isRunning?.();
-  b.textContent = saving ? '保存中…' : unsaved ? '保存●' : '保存';
+  b.textContent = saving ? '保存中…' : unsaved ? '編集エピソード保存●' : '編集エピソード保存';
   b.disabled = !!saving;
   b.classList.toggle('saving', !!saving);
   b.classList.toggle('unsaved', unsaved);
@@ -1354,10 +1354,13 @@ async function renderPackEpisodes(projectId) {
 function updatePackForm() {
   const form = $('backup-pack-form');
   const scope = form.elements.scope.value;
-  $('backup-pack-project-row').hidden = scope === 'all' || scope === 'none';
-  $('backup-pack-custom').hidden = scope !== 'custom';
-  const has = form.elements.environment.checked || scope === 'all' || scope === 'project'
-    || (scope === 'custom' && (form.elements.materials.checked || [...$('backup-pack-episodes').querySelectorAll('input:checked')].length));
+  const includeNovel = form.elements.includeNovel.checked;
+  $('backup-pack-novel-data').disabled = !includeNovel;
+  $('backup-pack-project-row').hidden = !includeNovel || scope === 'all';
+  $('backup-pack-custom').hidden = !includeNovel || scope !== 'custom';
+  const hasNovel = includeNovel && (scope === 'all' || scope === 'project'
+    || (scope === 'custom' && (form.elements.materials.checked || [...$('backup-pack-episodes').querySelectorAll('input:checked')].length)));
+  const has = form.elements.environment.checked || hasNovel;
   $('backup-pack-save').disabled = !has;
   $('backup-pack-validation').textContent = has ? '' : '保存する内容を一つ以上選んでください。';
 }
@@ -1370,7 +1373,9 @@ async function openBackupPackCreate() {
   form.elements.project.value = project.id;
   form.elements.scope.value = 'project';
   form.elements.environment.checked = false;
+  form.elements.includeNovel.checked = true;
   form.elements.materials.checked = true;
+  form.elements.autoTargets.checked = true;
   await renderPackEpisodes(project.id);
   updatePackForm();
   $('backup-pack-dialog').showModal();
@@ -1383,7 +1388,7 @@ async function createBackupPack() {
     await storeEdition(episode(), site, state.cur);
   }
   await flush();
-  const scope = form.elements.scope.value;
+  const scope = form.elements.includeNovel.checked ? form.elements.scope.value : 'none';
   const plan = {
     environment: form.elements.environment.checked,
     scope,
@@ -1391,10 +1396,13 @@ async function createBackupPack() {
     materials: form.elements.materials.checked,
     episodeIds: [...$('backup-pack-episodes').querySelectorAll('input:checked')].map((x) => x.value),
     reason: 'manual-pack', appVersion: APP_VERSION,
-    device: { prefix: sync.prefix() },
+    device: { prefix: sync.prefix(), id: sync.deviceId() },
   };
   const made = await makePack(plan);
   const selectedProject = (await allProjects()).find((p) => p.id === plan.projectId);
+  if (scope === 'custom' && form.elements.autoTargets.checked) {
+    prefs.set('sync.episodeTargets', plan.episodeIds.length ? [{ workId: selectedProject?.workId || project.workId, episodeIds: plan.episodeIds }] : []);
+  }
   const name = packFileName(made.pack, { title: scope === 'all' || scope === 'none' ? '' : selectedProject?.title, prefix: sync.prefix() });
   const saved = await saveTextTo(made.text, name, { title: `${cloudName()}に保存（バックアップパック）`, force: true });
   if (saved) toast(savedMessage(saved, `バックアップパック（${made.itemCount}項目）`));
@@ -2122,7 +2130,7 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
     const p = projects.find((x) => x.workId === t.workId || x.id === t.projectId);
     return p ? { projectId: p.id, episodeIds: t.episodeIds || [] } : null;
   }).filter(Boolean);
-  const made = await makePack({ scope: 'targets', targets: planTargets, reason, appVersion: APP_VERSION, device: { prefix: sync.prefix() } });
+  const made = await makePack({ scope: 'targets', targets: planTargets, reason, appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
   const one = reason === 'manual-episode' ? episode() : null;
   made.name = packFileName(made.pack, {
     prefix: sync.prefix(),
@@ -2303,7 +2311,8 @@ function renderSyncState() {
             : `✅ 「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
   $('sync-status').textContent = text + lastText + err;
   const on = st === 'on';
-  for (const id of ['sync-targets', 'sync-check', 'sync-restore', 'sync-manage']) $(id).disabled = !on;
+  $('sync-check').disabled = !on;
+  $('sync-manage').disabled = false; // 端末のファイルを選ぶ機能は、サーバ未設定でも使える
   if (project) updateStatus();
 }
 
@@ -2612,7 +2621,7 @@ async function exportPreSync() {
   if (!saved) { toast('同期の前の状態はありません'); return; }
   const d = new Date(saved.createdAt);
   const p = (n) => String(n).padStart(2, '0');
-  const r = await localFile.saveAs(saved.text, `AYATUZURI_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
+  const r = await localFile.saveAs(saved.text, `あや綴り_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
   if (r) toast('同期の前の状態を書き出しました（「ファイル」→ 全体の「開く」で戻せます）');
 }
 
@@ -3419,8 +3428,49 @@ function applyUiPrefs() {
   for (const k of ['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'main-to-sub']) cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
   cls.toggle('hide-max-tools', !uiPref('max.tools'));
+  cls.toggle('hide-help-labels', !uiPref('other.hints'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ
   if (cls.contains('hide-side') && document.querySelector('[data-tab="side"][aria-selected="true"]')) selectTab('body');
+}
+
+// 左の作品情報メニューは、利用者が決めた順番を環境設定として保存する。
+const PROJECT_NAV_DEFAULT = ['synopsis', 'outline', 'world', 'characters', 'project-memo'];
+function applyProjectNavOrder() {
+  const box = $('project-nav');
+  const saved = prefs.get('nav.projectOrder', []);
+  const order = [...new Set([...(Array.isArray(saved) ? saved : []), ...PROJECT_NAV_DEFAULT])]
+    .filter((key) => PROJECT_NAV_DEFAULT.includes(key));
+  for (const key of order) {
+    const item = box.querySelector(`[data-view="${key}"]`);
+    if (item) box.append(item);
+  }
+}
+function saveProjectNavOrder() {
+  prefs.set('nav.projectOrder', [...$('project-nav').querySelectorAll('.nav-item')].map((item) => item.dataset.view));
+}
+function bindProjectNavOrder() {
+  const box = $('project-nav');
+  let moving = null;
+  box.addEventListener('dragstart', (e) => {
+    moving = e.target.closest('.nav-item');
+    if (!moving) return;
+    moving.classList.add('nav-dragging');
+    e.dataTransfer.effectAllowed = 'move';
+  });
+  box.addEventListener('dragover', (e) => {
+    if (!moving) return;
+    e.preventDefault();
+    const over = e.target.closest('.nav-item');
+    if (!over || over === moving) return;
+    const after = e.clientY > over.getBoundingClientRect().top + over.offsetHeight / 2;
+    box.insertBefore(moving, after ? over.nextSibling : over);
+  });
+  box.addEventListener('dragend', () => {
+    if (!moving) return;
+    moving.classList.remove('nav-dragging');
+    moving = null;
+    saveProjectNavOrder();
+  });
 }
 
 // ---------- 入力欄の最大化 ----------
@@ -3888,6 +3938,7 @@ function bindSidebarSplitter() {
 }
 
 function bindEvents() {
+  bindProjectNavOrder();
   for (const [input, apply] of bindings) {
     input.addEventListener('input', () => {
       apply(input.value);
@@ -4009,6 +4060,10 @@ function bindEvents() {
   $('sync-target-none').addEventListener('click', () => $('sync-target-list').querySelectorAll('input').forEach((x) => { x.checked = false; }));
   bindDialog('backup-manage-dialog');
   $('backup-manage-refresh').addEventListener('click', () => loadBackupManager().catch(fail));
+  $('backup-manage-open-local').addEventListener('click', () => {
+    $('backup-manage-dialog').close();
+    openBackupPackFile().catch(fail);
+  });
   $('backup-manage-all').addEventListener('click', () => $('backup-file-list').querySelectorAll('input').forEach((x) => { x.checked = true; }));
   $('backup-manage-none').addEventListener('click', () => $('backup-file-list').querySelectorAll('input').forEach((x) => { x.checked = false; }));
   $('backup-file-inspect').addEventListener('click', () => inspectManagedBackup().catch(fail));
@@ -4174,10 +4229,8 @@ function bindEvents() {
       await runSyncCheck();
     }).catch(fail);
   });
-  $('sync-targets').addEventListener('click', () => openSyncTargets().catch(fail));
   $('sync-manage').addEventListener('click', () => openBackupManager().catch(fail));
   $('sync-check').addEventListener('click', () => openSyncRestore('sync').catch(fail));
-  $('sync-restore').addEventListener('click', () => openSyncRestore().catch(fail));
   $('sync-presync').addEventListener('click', () => exportPreSync().catch(fail));
 }
 
@@ -4204,6 +4257,7 @@ window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.r
 
 async function init() {
   $('app-version').textContent = `エディターの版：${APP_VERSION}`;
+  applyProjectNavOrder();
   applyPrefs();
   bindEvents();
   selectTab('body');

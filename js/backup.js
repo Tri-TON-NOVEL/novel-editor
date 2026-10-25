@@ -151,7 +151,7 @@ export async function restoreBackup(backup, mode) {
 export function backupFileName() {
   const d = new Date();
   const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `AYATUZURI_全体_${ymd}.json`;
+  return `あや綴り_全体_${ymd}.json`;
 }
 
 // ---------- 選択式バックアップパック ----------
@@ -312,7 +312,7 @@ export function packFileName(pack, { title = '', episodeId = '', workId = '', pr
   const stamp = String(pack.createdAt || new Date().toISOString()).replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
   const device = safePart(prefix || pack.device?.prefix || 'device', 28);
   const kind = pack.reason === 'manual-episode' ? 'EPISODE' : pack.reason === 'auto-episode' ? 'AUTO' : 'PACK';
-  const parts = ['AYATUZURI', kind];
+  const parts = ['あや綴り', kind];
   if (workId) parts.push(safePart(workId, 8));
   if (episodeId) parts.push(safePart(episodeId, 8));
   if (title) parts.push(safePart(title, 32));

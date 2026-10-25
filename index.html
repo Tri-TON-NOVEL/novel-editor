@@ -5,8 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>あや綴り</title>
 <meta name="description" content="文（あや）と文（あや）で綾（あや）を成す。小説家になろう・アルファポリス向けの小説エディター">
+<meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
-<link rel="manifest" href="manifest.webmanifest">
+<link rel="manifest" href="manifest.webmanifest?v=74">
 <link rel="icon" href="icons/icon-32.png" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png">
@@ -18,16 +19,14 @@
 <header class="toolbar">
   <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
   <div class="brand" title="文（あや）と文（あや）で綾（あや）を成す。">あや綴り</div>
-  <nav class="actions">
-    <button type="button" data-action="library">作品一覧</button>
-    <button type="button" data-action="new-project">新しい作品</button>
+  <nav class="actions toolbar-left">
     <details class="menu">
       <summary>ファイル</summary>
       <div class="menu-list">
+        <button type="button" data-action="library">作品一覧…</button>
+        <button type="button" data-action="new-project">新しい作品…</button>
         <div class="menu-head">全体（すべての作品）</div>
         <button type="button" data-action="all-open">開く…</button>
-        <button type="button" data-action="backup-pack-create">バックアップパックを作成…</button>
-        <button type="button" data-action="backup-pack-open">バックアップパックを確認・読み込む…</button>
         <div class="menu-head">エピソード（今開いているもの）</div>
         <button type="button" data-action="ep-open">開く…</button>
         <button type="button" data-action="ep-save-as">名前を付けて保存…</button>
@@ -38,23 +37,23 @@
         <button type="button" data-action="export-all">全エピソード…</button>
       </div>
     </details>
+    <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶<span class="label"> 戻す</span></button>
+    <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
+  </nav>
+  <div class="status" id="status" aria-live="polite"></div>
+  <button type="button" class="warn" id="sync-attention" data-action="sync-attention" hidden></button>
+  <nav class="actions toolbar-right">
     <details class="menu" id="links-menu">
       <summary>リンク</summary>
       <div class="menu-list" id="links-menu-list"></div>
     </details>
     <button type="button" data-action="settings">設定</button>
-    <button type="button" class="history" data-action="undo" title="元に戻す（Ctrl+Z／⌘Z）" aria-label="元に戻す">↶<span class="label"> 戻す</span></button>
-    <button type="button" class="history" data-action="redo" title="やり直す（Ctrl+Y／⌘⇧Z）" aria-label="やり直す">↷<span class="label"> やり直す</span></button>
-    <!-- 保存：表示中のエピソードをサーバへバックアップする（Ctrl+S／⌘S） -->
-    <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="表示中のエピソードをサーバへバックアップ（Ctrl+S／⌘S）">保存</button>
   </nav>
-  <div class="status" id="status" aria-live="polite"></div>
-  <button type="button" class="warn" id="sync-attention" data-action="sync-attention" hidden></button>
 </header>
 
 <div class="workspace">
   <aside class="sidebar" id="sidebar">
-    <label class="site-select">投稿先
+    <label class="site-select">メイン投稿先
       <select id="site">
         <option value="narou">小説家になろう</option>
         <option value="alpha">アルファポリス</option>
@@ -70,34 +69,24 @@
       <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
     </section>
 
-    <!-- この作品と、投稿サイトの作品の対応（作品ごと・入れなくても使える） -->
-    <details class="work-codes" id="work-codes">
-      <summary>投稿サイトとの対応 <span class="work-codes-state" id="work-codes-state"></span></summary>
-      <div class="work-codes-body">
-        <label>なろうの Nコード
-          <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab">
-        </label>
-        <label>なろうの作品URL
-          <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/">
-        </label>
-        <label>アルファポリスの作品ID
-          <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789">
-        </label>
-        <label>アルファポリスの作品URL
-          <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…">
-        </label>
-        <p class="hint">この作品だけの情報です（作品ごとに別々）。入れなくても使えます。
-          Nコード・作品IDか作品URLのどちらかを入れると、もう一方は空なら自動で入ります。
-          作品URLは活動報告のひな型の {URL} に、Nコードは TXT インポートの照合に使います。</p>
-      </div>
-    </details>
-
     <nav class="nav">
-      <button type="button" class="nav-item" data-view="synopsis">あらすじ</button>
-      <button type="button" class="nav-item" data-view="outline">全体プロット</button>
-      <button type="button" class="nav-item" data-view="world">世界観・用語</button>
-      <button type="button" class="nav-item" data-view="characters">登場人物</button>
-      <button type="button" class="nav-item" data-view="project-memo">メモ</button>
+      <div class="project-nav" id="project-nav">
+        <button type="button" class="nav-item" draggable="true" data-view="synopsis">あらすじ</button>
+        <button type="button" class="nav-item" draggable="true" data-view="outline">全体プロット</button>
+        <button type="button" class="nav-item" draggable="true" data-view="world">世界観・用語</button>
+        <button type="button" class="nav-item" draggable="true" data-view="characters">登場人物</button>
+        <button type="button" class="nav-item" draggable="true" data-view="project-memo">メモ</button>
+      </div>
+      <details class="work-codes" id="work-codes">
+        <summary>小説投稿サイト情報 <span class="work-codes-state" id="work-codes-state"></span></summary>
+        <div class="work-codes-body">
+          <label>なろうの Nコード <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
+          <label>なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
+          <label>アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
+          <label>アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
+          <p class="hint">この作品だけの情報です（作品ごとに別々）。入れなくても使えます。Nコード・作品IDか作品URLのどちらかを入れると、もう一方は空なら自動で入ります。</p>
+        </div>
+      </details>
       <div class="nav-head">
         <span>章・エピソード</span>
         <span class="nav-add">
@@ -137,6 +126,7 @@
     <section class="view" id="view-episode">
       <!-- 原稿の切り替え（なろう用／アルファ用）と、エピソードの操作 -->
       <div class="site-bar">
+        <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="表示中のエピソードをサーバへバックアップ（Ctrl+S／⌘S）">編集エピソード保存</button>
         <div class="site-tabs" role="tablist" aria-label="編集する原稿">
           <button type="button" role="tab" data-edit-site="narou">なろう用</button>
           <button type="button" role="tab" data-edit-site="alpha">アルファ用</button>
@@ -153,7 +143,7 @@
 
       <!-- 活動報告（このエピソードの。「活動報告」タブで開く） -->
       <div class="report-pane" id="report-pane" hidden>
-      <p class="hint report-url-hint"><strong id="report-ep-name"></strong> の活動報告です（エピソードごとに保存します）。ひな型の話数・タイトル・{URL} は、このエピソードのものが入ります。{URL} には、目次の<button type="button" class="link-btn" data-action="open-work-codes">「投稿サイトとの対応」</button>に入れた作品URLが入ります（なろうは「作品URL＋何番目のエピソードか」）。<span id="report-url-state"></span></p>
+      <p class="hint report-url-hint"><strong id="report-ep-name"></strong> の活動報告です（エピソードごとに保存します）。ひな型の話数・タイトル・{URL} は、このエピソードのものが入ります。{URL} には、目次の<button type="button" class="link-btn" data-action="open-work-codes">「小説投稿サイト情報」</button>に入れた作品URLが入ります（なろうは「作品URL＋何番目のエピソードか」）。<span id="report-url-state"></span></p>
       <div class="report-bar">
         <button type="button" data-action="manage-templates">ひな型の管理</button>
       </div>
@@ -394,16 +384,16 @@
     <h2>バックアップパックを作成</h2>
     <p class="hint">選んだ内容を一つのファイルにまとめます。上位の内容には下位の内容が含まれるため、重複して保存しません。</p>
     <fieldset class="checks">
-      <legend>環境</legend>
+      <legend>バックアップ対象</legend>
       <label><input type="checkbox" name="environment"> 環境設定を含める</label>
+      <label><input type="checkbox" name="includeNovel" checked> 小説データを含める</label>
     </fieldset>
-    <fieldset>
+    <fieldset id="backup-pack-novel-data">
       <legend>小説データ</legend>
       <div class="radio-row pack-scope">
         <label><input type="radio" name="scope" value="all"> 全小説</label>
         <label><input type="radio" name="scope" value="project" checked> 選択した小説を丸ごと</label>
         <label><input type="radio" name="scope" value="custom"> 必要な内容を選ぶ</label>
-        <label><input type="radio" name="scope" value="none"> 小説データを含めない</label>
       </div>
       <label id="backup-pack-project-row">対象作品
         <select name="project"></select>
@@ -415,6 +405,7 @@
           <button type="button" class="tool" id="backup-pack-no-episodes">全て解除</button>
         </div>
         <div class="pack-episode-list" id="backup-pack-episodes"></div>
+        <label class="check"><input type="checkbox" name="autoTargets" checked> 選んだエピソードをサーバへの自動バックアップ対象にもする</label>
       </div>
     </fieldset>
     <p class="validation-message" id="backup-pack-validation"></p>
@@ -463,6 +454,7 @@
     <h2>バックアップファイルの管理</h2>
     <p class="hint" id="backup-manage-hint"></p>
     <div class="button-row">
+      <button type="button" class="tool" id="backup-manage-open-local">ファイルを選んで確認・読み込む…</button>
       <button type="button" class="tool" id="backup-manage-refresh">一覧を更新</button>
       <button type="button" class="tool" id="backup-manage-all">全て選択</button>
       <button type="button" class="tool" id="backup-manage-none">全て解除</button>
@@ -741,11 +733,11 @@
   <form method="dialog" class="dialog" id="settings-form">
     <h2>設定</h2>
     <div class="settings-tabs" role="tablist">
+      <button type="button" role="tab" data-stab="sites">投稿サイト</button>
       <button type="button" role="tab" data-stab="display">表示</button>
+      <button type="button" role="tab" data-stab="links">リンク</button>
       <button type="button" role="tab" data-stab="cloud">クラウド</button>
       <button type="button" role="tab" data-stab="file">ファイル</button>
-      <button type="button" role="tab" data-stab="sites">投稿サイト</button>
-      <button type="button" role="tab" data-stab="links">リンク</button>
       <button type="button" role="tab" data-stab="backup">バックアップ</button>
       <button type="button" role="tab" data-stab="import">インポート（なろう・アルファ）</button>
       <button type="button" role="tab" data-stab="about">このアプリについて</button>
@@ -795,7 +787,7 @@
       <label><input type="checkbox" data-ui="novel.world"> 世界観・用語</label>
       <label><input type="checkbox" data-ui="novel.characters"> 登場人物</label>
       <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
-      <label><input type="checkbox" data-ui="novel.workcodes"> 投稿サイトとの対応</label>
+      <label><input type="checkbox" data-ui="novel.workcodes"> 小説投稿サイト情報</label>
     </fieldset>
     <fieldset>
       <legend>章・エピソード（目次）</legend>
@@ -869,6 +861,11 @@
       <label><input type="checkbox" data-ui="max.tools"> ルビ・傍点・挿絵・記号などの入力補助ボタンを表示</label>
       <p class="hint">非表示にすると、最大化中の本文入力欄をより広く使えます。</p>
     </fieldset>
+    <fieldset class="checks">
+      <legend>その他</legend>
+      <label><input type="checkbox" data-ui="other.hints"> 機能の説明ラベルを表示</label>
+      <p class="hint">オフにすると、画面内の補足説明をまとめて隠します。入力内容や警告・保存状態は隠しません。</p>
+    </fieldset>
     </div>
     <fieldset id="iphone-max" hidden>
       <legend>iPhone：最大化したときの入力欄の高さ</legend>
@@ -938,7 +935,7 @@
       <label>ユーザ名 <input type="text" name="acc.alpha.userName" autocomplete="off"></label>
       <label>作者名（ペンネーム） <input type="text" name="acc.alpha.author" autocomplete="off"></label>
     </fieldset>
-    <p class="hint">作品ごとの Nコード・作品ID・作品URLは、左の目次の「投稿サイトとの対応」で入れます（作品ごとに別々・入れなくても使えます）。</p>
+    <p class="hint">作品ごとの Nコード・作品ID・作品URLは、左の目次の「小説投稿サイト情報」で入れます（作品ごとに別々・入れなくても使えます）。</p>
     </div>
 
     <!-- リンク -->
@@ -965,7 +962,7 @@
     </fieldset>
     <fieldset id="sync-settings">
       <legend>サーバへの自動バックアップ</legend>
-      <p class="hint">選択したエピソードを、保存間隔ごとと画面を閉じるときに一つのバックアップパックとして保存します。上段の「保存」は、表示中のエピソードだけを直ちに保存します。</p>
+      <p class="hint">選択したエピソードを、保存間隔ごとと画面を閉じるときに一つのバックアップパックとして保存します。「編集エピソード保存」は、表示中のエピソードだけを直ちに保存します。</p>
       <label>保存先（この端末）
         <select id="sync-mode">
           <option value="off">使わない</option>
@@ -980,9 +977,8 @@
       </div>
       <p id="sync-status"></p>
       <div class="button-row">
-        <button type="button" id="sync-targets">保存するエピソードを選ぶ…</button>
+        <button type="button" data-action="backup-pack-create">バックアップパックを作成…</button>
         <button type="button" id="sync-check">他の端末の更新を確認…</button>
-        <button type="button" id="sync-restore">バックアップから戻す…</button>
         <button type="button" id="sync-manage">バックアップファイルを管理…</button>
       </div>
       <div class="autobackup-options">
@@ -1002,7 +998,7 @@
           <input name="autoBackupKeep" type="number" min="10" max="2000" step="10" inputmode="numeric">
         </label>
       </div>
-      <p class="hint">ファイル名にはAYATUZURI、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
+      <p class="hint">ファイル名には「あや綴り」、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
         設定は変えるとすぐに反映されます。</p>
       <div class="button-row" id="sync-presync-row" hidden>
         <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>

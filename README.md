@@ -102,7 +102,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで動き、ホーム画�
 1. [Microsoft Entra 管理センター](https://entra.microsoft.com/)（または [Azure portal](https://portal.azure.com/)）に、OneDrive を使う Microsoft アカウントでサインインします。
    - 個人の Microsoft アカウント（outlook.jp・hotmail.com など）でも登録できます。初めてのときは、ディレクトリや無料の Azure アカウントの作成を求められることがあります。
 2. 「**アプリの登録**」→「**新規登録**」で、次のように入れて「登録」します。
-   - **名前**：自由（例：AYATUZURI）
+   - **名前**：自由（例：あや綴り）
    - **サポートされているアカウントの種類**：「**任意の組織ディレクトリ内のアカウントと個人用の Microsoft アカウント**」
    - **リダイレクト URI**：プラットフォームに「**シングルページ アプリケーション (SPA)**」を選び、`https://tri-ton-novel.github.io/novel-editor/`（最後の `/` まで同じにします）
      - 「Web」で登録すると、ログインの最後に `AADSTS9002326` のエラーになります。その場合は「認証」で「シングルページ アプリケーション」として登録し直してください。
