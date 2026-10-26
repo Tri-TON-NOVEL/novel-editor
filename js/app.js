@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.25-7.3.8';
+const APP_VERSION = '2026.10.26-7.3.9';
 
 const el = {
   novelTitle: $('novel-title'),
