@@ -1,6 +1,6 @@
 // オフラインでも起動できるよう、アプリ本体をキャッシュする。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'v89';
+const VERSION = 'v90';
 const CACHE = 'novel-editor-' + VERSION;
 const SHELL = [
   './',
@@ -13,6 +13,7 @@ const SHELL = [
   'icons/icon-512.png',
   'icons/icon-1024.png',
   'icons/icon-maskable-512.png',
+  'icons/header-icon.png',
   'js/app.js',
   'js/db.js',
   'js/format.js',

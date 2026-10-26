@@ -89,7 +89,8 @@ button:disabled { opacity: .5; cursor: default; }
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
-.brand { font-weight: 700; color: var(--accent); letter-spacing: .06em; }
+.brand { flex: none; display: flex; align-items: center; gap: 7px; font-weight: 700; color: var(--accent); letter-spacing: .06em; }
+.brand-icon { display: block; width: 30px; height: 30px; border-radius: 7px; object-fit: cover; }
 .about-acronym { margin: 0; font-size: 15px; letter-spacing: .02em; }
 .about-acronym strong { color: var(--accent); font-size: 1.15em; }
 [data-spanel="about"] p { margin: 0; line-height: 1.7; }
