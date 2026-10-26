@@ -2,6 +2,12 @@
 
 **<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>と<ruby>文<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>で<ruby>綾<rp>（</rp><rt>あや</rt><rp>）</rp></ruby>を綴る。**
 
+<p align="center">
+  <a href="docs/images/ayatuzuri-promotion.png">
+    <img src="docs/images/ayatuzuri-promotion.png" alt="あや綴り――場所が変わっても、文と文で、物語の綾を綴っていく。" width="700">
+  </a>
+</p>
+
 ## パソコンでも、スマートフォンでも。同じアプリで、物語を綴っていく。
 
 こんなことで困っていませんか？
