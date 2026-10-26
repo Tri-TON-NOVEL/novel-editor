@@ -105,6 +105,38 @@ group('7.0：バックアップパックの内容確認', () => {
   throws(() => B.parseAnyBackup('{"format":"unknown"}'), /バックアップ/);
 });
 
+group('7.4.1：新しすぎる形式のファイルは読み込まない（全種類）', () => {
+  const p = F.newProject({ title: '作品A' });
+  const ep = p.episodes[0];
+  // バックアップパック
+  const pack = { format: B.PACK_FORMAT, version: B.PACK_VERSION, schemaVersion: F.SCHEMA_VERSION, createdAt: '2026-10-26T00:00:00.000Z', items: [] };
+  ok(B.parseAnyBackup(JSON.stringify(pack)), '今の形式は読める');
+  const { schemaVersion, ...noSchema } = pack;
+  ok(B.parseAnyBackup(JSON.stringify(noSchema)), 'schemaVersion のない以前のパックも読める');
+  throws(() => B.parseAnyBackup(JSON.stringify({ ...pack, version: B.PACK_VERSION + 1 })), /新しい版.*形式 v2/, 'パックの形式が新しすぎる');
+  throws(() => B.parseAnyBackup(JSON.stringify({ ...pack, schemaVersion: F.SCHEMA_VERSION + 1 })), /新しい版.*作品データ v4/, 'パックの中の作品データが新しすぎる');
+  // 旧形式の全体バックアップ
+  const full = { format: B.BACKUP_FORMAT, version: 1, projects: [] };
+  ok(B.parseBackup(JSON.stringify(full)), '旧形式の全体バックアップは読める');
+  throws(() => B.parseBackup(JSON.stringify({ ...full, version: 2 })), /新しい版/, '全体バックアップの形式が新しすぎる');
+  throws(() => B.parseAnyBackup(JSON.stringify({ ...full, schemaVersion: 9 })), /新しい版/, '全体バックアップの作品データが新しすぎる');
+  // エピソード専用ファイル
+  const epText = B.makeEpisodeFile(ep, '作品A');
+  eq([JSON.parse(epText).version, JSON.parse(epText).schemaVersion], [B.EPISODE_VERSION, F.SCHEMA_VERSION], 'エピソードファイルに版を記録');
+  ok(B.parseEpisodeFile(epText), '今のエピソードファイルは読める');
+  throws(() => B.parseEpisodeFile(JSON.stringify({ ...JSON.parse(epText), version: 2 })), /新しい版/, 'エピソードファイルの形式が新しすぎる');
+  throws(() => B.parseEpisodeFile(JSON.stringify({ ...JSON.parse(epText), schemaVersion: 4 })), /新しい版/, 'エピソードファイルの作品データが新しすぎる');
+});
+
+group('7.4：作品資料が変わったときだけ自動バックアップに入れる（印の比較）', () => {
+  const p = F.newProject({ title: '作品A', synopsis: 'あらすじ' });
+  const sig = B.materialsSignature(p);
+  eq(B.materialsSignature({ ...p, updatedAt: '2030-01-01T00:00:00.000Z' }), sig, '更新日時だけ変わっても同じ印');
+  eq(B.materialsSignature({ ...p, episodes: [...p.episodes, F.newEpisode()] }), sig, 'エピソードが増えても同じ印（エピソードは別に保存）');
+  ok(B.materialsSignature({ ...p, synopsis: 'あらすじ２' }) !== sig, 'あらすじが変わると印が変わる');
+  ok(B.materialsSignature({ ...p, characters: { ...p.characters, items: [{ id: 'c1', categoryId: p.characters.categories[0].id, name: '新人物' }] } }) !== sig, '登場人物が変わると印が変わる');
+});
+
 group('6.0：稿の割り当て・サイト別の時刻・エピソードの活動報告を保持', () => {
   const src = oldV2();
   src.episodes[0] = {

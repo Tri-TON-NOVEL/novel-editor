@@ -420,9 +420,14 @@ body.hide-plot [data-field="plot"],
 body.hide-memo [data-field="memo"] { display: none !important; }
 body.hide-side .pane-side, body.hide-side .splitter, body.hide-side #tab-side { display: none !important; }
 body.hide-side .panes { grid-template-columns: minmax(0, 1fr); }
-body.hide-copy-ep-title [data-copy="ep-title"], body.hide-copy-body [data-copy="body"],
+body.hide-copy-novel-title [data-copy="novel-title"], body.hide-copy-ep-title [data-copy="ep-title"],
+body.hide-copy-body [data-copy="body"],
 body.hide-copy-foreword [data-copy="foreword"], body.hide-copy-afterword [data-copy="afterword"],
 body.hide-copy-plot [data-copy="plot"], body.hide-copy-free-memo [data-copy="free-memo"],
+body.hide-copy-synopsis [data-copy="synopsis"], body.hide-copy-project-memo [data-copy="project-memo"],
+body.hide-copy-x-text [data-copy="x-text"],
+body.hide-copy-narou-report-title [data-copy="narou-report-title"],
+body.hide-copy-narou-report-body [data-copy="narou-report-body"],
 body.hide-copy-main-to-sub #copy-main-to-sub,
 body.hide-max-title [data-max="title"], body.hide-max-body [data-max="body"],
 body.hide-max-foreword [data-max="foreword"], body.hide-max-afterword [data-max="afterword"],

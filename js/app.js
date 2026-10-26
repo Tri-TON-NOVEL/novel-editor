@@ -8,7 +8,7 @@ import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from 
 import {
   makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
-  makePack, parseAnyBackup, packFileName, packSummary, restorePack, PACK_FORMAT,
+  makePack, parseAnyBackup, packFileName, packSummary, restorePack, PACK_FORMAT, materialsSignature,
 } from './backup.js';
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.26-7.3.10';
+const APP_VERSION = '2026.10.26-7.4.1';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1471,13 +1471,50 @@ async function openBackupPackFile() {
   if (src) await inspectBackupText(src.text, src.name);
 }
 
+// バックアップを読み込む前の備え（読み込みで変わる作品だけ）：
+//   ・書きかけの原稿を今の稿にしまう（読み込んだあとも、この端末の稿として残るように）
+//   ・作品ごとに復元ポイント「バックアップ読み込み前（自動）」を作る（自動では消えない）
+//   ・端末全体の状態を「同期の前の状態」として残す（設定 → バックアップ の「同期の前の状態を書き出す」）
+async function protectBeforeRestore(pack, selected, name = '') {
+  const keys = new Set(selected);
+  const workIds = new Set((pack.items || []).filter((it) => keys.has(it.key))
+    .map((it) => (it.type === 'project' ? it.project?.workId : it.project?.workId)).filter(Boolean));
+  if (!workIds.size) return;
+  const now = new Date();
+  for (const p of await allProjects()) {
+    if (!workIds.has(p.workId)) continue;
+    const all = await versions.list(p.id);
+    for (const ep of p.episodes) {
+      for (const site of SITE_KEYS) {
+        const v = all.find((x) => x.id === ep.editionIds?.[site]);
+        if (!v) continue;
+        const data = editionData(draftOf(ep, site));
+        if (JSON.stringify(editionData(v.data)) === JSON.stringify(data)) continue;
+        await versions.put({ ...v, data, chars: countChars(data.body).all, updatedAt: ep.siteUpdatedAt?.[site] || now.toISOString() });
+      }
+    }
+    await versions.put({
+      id: newVersionId(), kind: 'project', projectId: p.id,
+      name: 'バックアップ読み込み前（自動）',
+      memo: `${now.toLocaleString('ja-JP')} に${name ? `「${name}」を` : 'バックアップを'}読み込む前の状態`,
+      auto: false, createdAt: now.toISOString(), chars: totalChars(p), episodes: p.episodes.length,
+      data: JSON.parse(serialize(p)).project,
+    });
+  }
+  const before = await makeBackup();
+  await meta.set('preSyncBackup', { createdAt: now.toISOString(), from: name, text: before.text });
+}
+
 async function restoreInspected(asNew = false) {
   if (!inspectedBackup) return;
   const selected = [...$('backup-inspect-tree').querySelectorAll('input:checked')].map((x) => x.value);
   if (!selected.length) { toast('読み込む内容を選んでください', true); return; }
-  const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？' : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは更新されます。';
+  const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？'
+    : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
+      + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
   if (!(await ask(verb, { ok: '読み込む' }))) return;
   await flush();
+  if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
   const result = await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
   if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
   // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
@@ -2155,11 +2192,20 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
   await flush();
   const projects = await allProjects();
   const chosen = targets?.length ? targets : savedSyncTargets().length ? savedSyncTargets() : currentSyncTarget();
+  // 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）は、前に送ったときから変わっていれば一緒に入れる
+  const sent = prefs.get('sync.materialsSent', {}) || {};
+  const nowSigs = {};
   const planTargets = chosen.map((t) => {
     const p = projects.find((x) => x.workId === t.workId || x.id === t.projectId);
-    return p ? { projectId: p.id, episodeIds: t.episodeIds || [] } : null;
+    if (!p) return null;
+    const sig = materialsSignature(p);
+    const materials = sent[p.workId] !== sig && !(p.workId in nowSigs);
+    if (materials) nowSigs[p.workId] = sig;
+    return { projectId: p.id, episodeIds: t.episodeIds || [], materials };
   }).filter(Boolean);
   const made = await makePack({ scope: 'targets', targets: planTargets, reason, appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
+  // 保存できたときだけ「送った」と記録する（失敗したら次の保存でもう一度入れる）
+  made.afterSave = () => prefs.set('sync.materialsSent', { ...(prefs.get('sync.materialsSent', {}) || {}), ...nowSigs });
   const one = reason === 'manual-episode' ? episode() : null;
   made.name = packFileName(made.pack, {
     prefix: sync.prefix(),
@@ -3475,7 +3521,10 @@ function applyUiPrefs() {
   const cls = document.body.classList;
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
-  for (const k of ['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'main-to-sub']) cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
+  for (const k of ['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo',
+    'x-text', 'narou-report-title', 'narou-report-body', 'main-to-sub']) {
+    cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
+  }
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
   document.querySelectorAll('[data-max-tool]').forEach((tool) => {
     tool.classList.toggle('max-tool-off', !uiPref(`max.tool.${tool.dataset.maxTool}`));

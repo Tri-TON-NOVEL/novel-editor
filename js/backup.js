@@ -1,10 +1,29 @@
 // 全体バックアップ：端末内のすべての作品・ひな型・設定を1つのファイルにまとめる
 import { db, prefs, versions } from './db.js';
-import { normalize, newProject, makeId } from './format.js';
+import { normalize, newProject, makeId, SCHEMA_VERSION } from './format.js';
 
+// ファイルの形式。形を変えたら、その形式の VERSION を上げる。
+// 中に入る作品データの形式は、format.js の SCHEMA_VERSION（どのファイルにも schemaVersion として記録する）。
+// 読み込むときは両方を確かめ、この端末のアプリより新しければ読み込まない（古い形のまま誤って読まないように）。
 export const BACKUP_FORMAT = 'novel-editor-backup';
+export const BACKUP_VERSION = 1;
 export const PACK_FORMAT = 'ayatuzuri-backup-pack';
 export const PACK_VERSION = 1;
+
+export class TooNewFormatError extends Error {
+  constructor(what, detail) {
+    super(`この${what}は、新しい版のあや綴りで保存されています（${detail}）。あや綴りを最新版に更新してから読み込んでください`);
+    this.name = 'TooNewFormatError';
+  }
+}
+
+// 形式の版（version）と作品データの版（schemaVersion。記録のない古いファイルは 3 として扱う）を確かめる
+function checkNotTooNew(o, what, maxVersion) {
+  const v = Number(o?.version ?? 1);
+  if (v > maxVersion) throw new TooNewFormatError(what, `形式 v${v}`);
+  const s = Number(o?.schemaVersion ?? 3);
+  if (s > SCHEMA_VERSION) throw new TooNewFormatError(what, `作品データ v${s}`);
+}
 
 // 端末ごとの設定（自動バックアップの記録・保存先・開いている作品など）は、バックアップに入れず、戻すときも使わない。
 // 他の端末のバックアップを読み込んだときに、この端末の設定が書き換わらないように。
@@ -59,7 +78,8 @@ export async function makeBackup({ device = null } = {}) {
   return {
     text: JSON.stringify({
       format: BACKUP_FORMAT,
-      version: 1,
+      version: BACKUP_VERSION,
+      schemaVersion: SCHEMA_VERSION,
       createdAt: new Date().toISOString(),
       ...(device ? { device } : {}),
       projects,
@@ -79,6 +99,7 @@ export function isBackup(text) {
 export function parseBackup(text) {
   const o = JSON.parse(text);
   if (o?.format !== BACKUP_FORMAT || !Array.isArray(o.projects)) throw new Error('バックアップファイルではありません');
+  checkNotTooNew(o, '全体バックアップ', BACKUP_VERSION);
   return o;
 }
 
@@ -252,7 +273,10 @@ export async function makePack(plan = {}) {
   if (plan.scope === 'targets') {
     for (const target of plan.targets || []) {
       const p = projects.find((x) => x.id === target.projectId || x.workId === target.workId);
-      if (p) addEpisodes(p, target.episodeIds);
+      if (!p) continue;
+      // 作品資料が変わっていれば一緒に入れる（自動バックアップ・編集エピソード保存）
+      if (target.materials) addMaterials(p);
+      addEpisodes(p, target.episodeIds);
     }
   }
 
@@ -261,6 +285,7 @@ export async function makePack(plan = {}) {
   const pack = {
     format: PACK_FORMAT,
     version: PACK_VERSION,
+    schemaVersion: SCHEMA_VERSION,
     appVersion: plan.appVersion || '',
     createdAt,
     reason: plan.reason || 'manual-pack',
@@ -279,7 +304,7 @@ export function parsePack(text) {
   let o;
   try { o = JSON.parse(text); } catch (e) { throw new Error(`JSONとして読めませんでした（${e.message}）`); }
   if (o?.format !== PACK_FORMAT || !Array.isArray(o.items)) throw new Error('あや綴りのバックアップパックではありません');
-  if ((o.version || 0) > PACK_VERSION) throw new Error(`新しい形式（v${o.version}）です。あや綴りを更新してください`);
+  checkNotTooNew(o, 'バックアップパック', PACK_VERSION);
   return o;
 }
 
@@ -288,6 +313,7 @@ function legacyToPack(backup) {
   return {
     format: PACK_FORMAT,
     version: PACK_VERSION,
+    schemaVersion: backup.schemaVersion ?? 3,
     legacy: true,
     appVersion: '',
     createdAt: backup.createdAt,
@@ -353,6 +379,31 @@ function remapVersions(list, projectId, idMap = null) {
   };
 }
 
+/**
+ * 読み込んだ稿・履歴を入れる。この端末の稿・履歴・復元ポイントは消さない（同じ ID のものだけ読み込んだ側にする）。
+ * この端末にしかない稿が、読み込んだ稿と同じサイト・同じ名前（第N稿）なら、区別できるよう「（この端末）」を付ける。
+ * episodeId を渡したときは、そのエピソードの稿だけを名前の確認の対象にする。
+ */
+async function putVersionsKeepingLocal(localProjectId, remote, episodeId = null) {
+  const remoteIds = new Set(remote.map((v) => v.id));
+  const names = new Set(remote.filter((v) => v.kind === 'episode' && v.site).map((v) => `${v.episodeId}|${v.site}|${v.name}`));
+  for (const v of await versions.list(localProjectId)) {
+    if (remoteIds.has(v.id) || v.kind !== 'episode' || !v.site) continue;
+    if (episodeId && v.episodeId !== episodeId) continue;
+    if (names.has(`${v.episodeId}|${v.site}|${v.name}`)) await versions.put({ ...v, name: `${v.name}（この端末）` });
+  }
+  for (const v of remote) await versions.put(v);
+}
+
+// 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）が変わったかを見分ける印。日時は含めない
+export function materialsSignature(p) {
+  const { createdAt, updatedAt, ...rest } = projectMaterials(p);
+  const s = JSON.stringify(rest);
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193) >>> 0; }
+  return `${s.length}-${h.toString(16)}`;
+}
+
 function remapEditionIds(project, map) {
   for (const ep of project.episodes || []) {
     if (!ep.editionIds) continue;
@@ -397,8 +448,9 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
         versionValues = versionValues.map((v) => ({ ...clone(v), projectId: localId }));
       }
       await db.put(restored);
-      if (existing) await versions.removeProject(localId);
-      for (const v of versionValues) await versions.put(v);
+      // この端末の稿・変更履歴・復元ポイントは消さずに残す
+      if (existing) await putVersionsKeepingLocal(localId, versionValues);
+      else for (const v of versionValues) await versions.put(v);
       if (existing) result.updatedList.push({ id: localId, title: restored.title || '無題' });
       else if (!result.addedList.some((x) => x.id === localId)) result.addedList.push({ id: localId, title: restored.title || '無題' });
       byWork.set(restored.workId, restored);
@@ -415,7 +467,7 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
       const srcEp = clone(item.episode);
       const index = target.episodes.findIndex((e) => e.id === srcEp.id);
       if (index >= 0) {
-        for (const v of await versions.list(target.id)) if (v.episodeId === srcEp.id) await versions.remove(v.id);
+        // この端末のこのエピソードの稿は消さない（下で、読み込んだ稿を足す）
         target.episodes[index] = srcEp;
       } else if (target.episodes.length === 1 && !target.episodes[0].plot && !target.episodes[0].freeMemo
         && Object.values(target.episodes[0].drafts || {}).every((d) => !d.title && !d.body && !d.foreword && !d.afterword)) {
@@ -423,7 +475,8 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
       } else target.episodes.splice(Math.min(item.order ?? target.episodes.length, target.episodes.length), 0, srcEp);
       const remapped = remapVersions(item.versions || [], target.id, asNew ? null : new Map((item.versions || []).map((v) => [v.id, v.id])));
       if (asNew) remapEditionIds({ episodes: [srcEp] }, remapped.map);
-      for (const v of remapped.values) await versions.put(v);
+      if (existedBefore && !asNew) await putVersionsKeepingLocal(target.id, remapped.values, srcEp.id);
+      else for (const v of remapped.values) await versions.put(v);
     }
     target.updatedAt = new Date().toISOString();
     await db.put(normalize(target));
@@ -436,11 +489,13 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
 // ---------- エピソード専用ファイル ----------
 // 1話分（なろう用・アルファ用の両方の原稿、プロット、フリーメモ）を1ファイルにする
 export const EPISODE_FORMAT = 'novel-editor-episode';
+export const EPISODE_VERSION = 1;
 
 export function makeEpisodeFile(ep, workTitle = '') {
   return JSON.stringify({
     format: EPISODE_FORMAT,
-    version: 1,
+    version: EPISODE_VERSION,
+    schemaVersion: SCHEMA_VERSION,
     createdAt: new Date().toISOString(),
     workTitle,
     episode: { drafts: ep.drafts, plot: ep.plot ?? '', freeMemo: ep.freeMemo ?? '' },
@@ -454,6 +509,7 @@ export function isEpisodeFile(text) {
 export function parseEpisodeFile(text) {
   const o = JSON.parse(text);
   if (o?.format !== EPISODE_FORMAT || !o.episode?.drafts) throw new Error('エピソードのファイルではありません');
+  checkNotTooNew(o, 'エピソードのファイル', EPISODE_VERSION);
   return o;
 }
 

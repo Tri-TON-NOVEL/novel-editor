@@ -269,6 +269,7 @@ export async function backupNow({ force = false, build = null } = {}) {
     const text = made.text;
     const name = made.name || `${prefix()}${stamp()}.json`;
     await t.write(name, text);
+    try { await made.afterSave?.(); } catch { /* 記録できなくても保存は済んでいる */ }
     dirty = false;
     prefs.set('sync.dirty', false);
     const now = new Date().toISOString();
