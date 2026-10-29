@@ -1,0 +1,22 @@
+{
+    admin off
+    auto_https disable_redirects
+}
+
+https://192.168.1.16:8766 {
+    bind 192.168.1.16
+    tls internal
+    root * "I:/Programs/NovelEditor"
+    @private path /caddy.exe /*.ps1 /*.bat /.claude/* /local-server/*
+    respond @private 404
+    encode zstd gzip
+    header Cache-Control "no-store"
+    file_server
+}
+
+http://192.168.1.16:8767 {
+    bind 192.168.1.16
+    root * "I:/Programs/NovelEditor/local-server/lan/cert-share"
+    header Cache-Control "no-store"
+    file_server
+}

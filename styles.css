@@ -424,6 +424,8 @@ body.hide-copy-novel-title [data-copy="novel-title"], body.hide-copy-ep-title [d
 body.hide-copy-body [data-copy="body"],
 body.hide-copy-foreword [data-copy="foreword"], body.hide-copy-afterword [data-copy="afterword"],
 body.hide-copy-plot [data-copy="plot"], body.hide-copy-free-memo [data-copy="free-memo"],
+body.hide-copy-plot-from-other [data-copy-other="plot"],
+body.hide-copy-free-memo-from-other [data-copy-other="free-memo"],
 body.hide-copy-synopsis [data-copy="synopsis"], body.hide-copy-project-memo [data-copy="project-memo"],
 body.hide-copy-x-text [data-copy="x-text"],
 body.hide-copy-narou-report-title [data-copy="narou-report-title"],
@@ -772,6 +774,7 @@ dialog::backdrop { background: rgba(0, 0, 0, .4); }
 .hide-help-labels .hint { display: none !important; }
 .dialog .stack { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .dialog textarea { flex: none; background: var(--bg); font-size: 16px; line-height: 1.6; }
+.dialog pre.info { margin: 0; padding: 10px 12px; max-height: 32vh; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; background: var(--bg); border: 1px solid var(--border); border-radius: 8px; color: var(--muted); }
 .dialog code { font-size: 12px; }
 #restore-info { margin: 0; white-space: pre-line; line-height: 1.7; }
 .dialog-foot.wrap { flex-wrap: wrap; }
@@ -800,6 +803,14 @@ dialog.fullscreen {
 .import-step-body { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; display: flex; flex-direction: column; gap: 10px; padding-right: 2px; }
 .import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
 .import-grid label, .imp-preset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.imp-zip-picker { margin: 10px 0 0; }
+.imp-zip-picker > .hint { margin: 0 0 6px; }
+.imp-zip-entry-list { display: grid; gap: 4px; max-height: 240px; overflow: auto; padding: 2px; }
+.imp-zip-entry-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }
+.imp-zip-entry-list label:hover { background: var(--hover); }
+.imp-zip-entry-list label:has(input:checked) { border-color: var(--accent); background: var(--hover); }
+.imp-zip-entry-list .zip-name { min-width: 0; overflow-wrap: anywhere; }
+.imp-zip-entry-list .zip-size { color: var(--muted); white-space: nowrap; font-size: 12px; }
 .import-foot { flex: none; display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-top: 0; padding-top: 8px; border-top: 1px solid var(--border); background: var(--surface); }
 .import-foot .spacer { flex: 1; }
 .import-foot > [data-imp-go]:first-child, .import-foot > #imp-rules-back { margin-right: auto; }
@@ -877,6 +888,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .imp-episodes .n { flex: none; color: var(--muted); font-size: 11px; }
 .imp-summary { display: flex; flex-wrap: wrap; gap: 8px 18px; align-items: end; font-size: 13px; }
 .imp-summary label { display: flex; flex-direction: column; gap: 4px; font-weight: 700; min-width: 240px; }
+.imp-summary label.imp-action-filter { min-width: 190px; }
 .imp-summary .stat { padding: 6px 10px; border: 1px solid var(--border); border-radius: 8px; }
 .imp-summary details { flex-basis: 100%; font-size: 13px; }
 .imp-summary pre { white-space: pre-wrap; max-height: 160px; overflow: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; }
@@ -935,6 +947,41 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { background: var(--danger); color: #fff; }
+
+.busy-dialog {
+  width: auto;
+  max-width: calc(100vw - 32px);
+  padding: 0;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text);
+}
+.busy-dialog::backdrop { background: rgba(7, 22, 34, .5); }
+#find-dialog { position: fixed; top: 72px; bottom: auto; z-index: 80; }
+.busy-card {
+  min-width: min(320px, calc(100vw - 48px));
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  align-items: center;
+  gap: 6px 12px;
+  padding: 20px 22px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 12px 40px rgba(0, 0, 0, .25);
+}
+.busy-card .hint { grid-column: 2; margin: 0; }
+.busy-spinner {
+  grid-row: 1 / span 2;
+  width: 24px;
+  height: 24px;
+  border: 3px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: busy-spin .8s linear infinite;
+}
+@keyframes busy-spin { to { transform: rotate(360deg); } }
 
 /* ---------- スマートフォン（狭い画面）・タッチ操作 ---------- */
 @media (max-width: 600px) {

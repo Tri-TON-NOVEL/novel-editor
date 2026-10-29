@@ -383,9 +383,13 @@ export async function loadAndMerge(entry, onConflict, opts = {}) {
  * name がバックアップの名前の形（プレフィックス＋日時）なら、それを「前回同期したもの」として記録する。
  * 戻り値: { added, updated, kept, addedList, updatedList, keptList }（List は [{ id, title }]）／null（やめた）
  */
-export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null } = {}) {
+export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null, beforePackRestore = null } = {}) {
   if (isPack(text)) {
-    const result = await restorePack(parsePack(text), { environmentMode: 'merge' });
+    const pack = parsePack(text);
+    // パックの自動同期でも、画面から手動で読み込むときと同じ退避処理を通す。
+    // 実際の退避内容（現在の稿・作品の復元ポイント・端末全体）は app.js 側で作る。
+    if (beforePackRestore) await beforePackRestore(pack, name);
+    const result = await restorePack(pack, { environmentMode: 'merge' });
     markLoaded(name);
     return result;
   }

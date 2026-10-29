@@ -7,7 +7,7 @@
 <meta name="description" content="文（あや）と文（あや）で綾（あや）を綴る。小説家になろう・アルファポリス向けの小説エディター">
 <meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
-<link rel="manifest" href="manifest.webmanifest?v=91">
+<link rel="manifest" href="manifest.webmanifest?v=99">
 <link rel="icon" href="icons/icon-32.png?v=89" type="image/png" sizes="32x32">
 <link rel="icon" href="icons/icon-192.png?v=89" type="image/png" sizes="192x192">
 <link rel="apple-touch-icon" href="icons/icon-180.png?v=89">
@@ -62,6 +62,7 @@
       <div class="field-head">
         <label for="novel-title">小説タイトル</label>
         <span class="count" id="count-novel-title"></span>
+        <button type="button" class="tool" data-find="novel-title">検索</button>
         <button type="button" class="copy" data-copy="novel-title">コピー</button>
       </div>
       <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
@@ -158,6 +159,7 @@
               <label for="x-text">投稿文</label>
               <span class="count" id="count-x"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-find="x-text">検索</button>
               <button type="button" class="tool" data-action="open-x" title="「リンク」の X の URL を開きます">X を開く</button>
               <button type="button" class="tool selall-btn" data-selall="x-text">全て選択</button>
               <button type="button" class="copy" data-copy="x-text">コピー</button>
@@ -178,6 +180,7 @@
               <label for="narou-report-title">タイトル</label>
               <span class="count" id="count-narou-report-title"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-find="narou-report-title">検索</button>
               <button type="button" class="tool" data-action="open-narou-report" title="「リンク」のなろう活動報告の URL を開きます">なろう活動報告を開く</button>
               <button type="button" class="tool selall-btn" data-selall="narou-report-title">全て選択</button>
               <button type="button" class="copy" data-copy="narou-report-title">コピー</button>
@@ -189,6 +192,7 @@
               <label for="narou-report-body">本文</label>
               <span class="count" id="count-narou-report-body"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-find="narou-report-body">検索</button>
               <button type="button" class="tool selall-btn" data-selall="narou-report-body">全て選択</button>
               <button type="button" class="copy" data-copy="narou-report-body">コピー</button>
             </div>
@@ -203,6 +207,7 @@
           <label for="ep-title" id="ep-label">エピソードタイトル</label>
           <span class="count" id="count-ep-title"></span>
           <span class="spacer"></span>
+          <button type="button" class="tool" data-find="ep-title">検索</button>
           <button type="button" class="tool max-btn" data-max="title" aria-label="エピソードタイトルを最大化" title="最大化">⤢</button>
           <button type="button" class="tool selall-btn" data-selall="ep-title">全て選択</button>
           <button type="button" class="copy" data-copy="ep-title">コピー</button>
@@ -234,6 +239,7 @@
                 <div class="menu-list symbol-list" id="symbol-list"></div>
               </details>
               <button type="button" class="tool" data-action="auto-indent" data-max-tool="indent" title="段落の先頭に全角スペースを入れる">字下げ</button>
+              <button type="button" class="tool" data-find="body" data-max-tool="find" title="本文内を検索する">検索</button>
               <button type="button" class="tool" data-action="replace" data-max-tool="replace" title="文字列をまとめて置き換える">置換</button>
               <details class="menu" id="image-menu" data-max-tool="image-list">
                 <summary class="tool" title="本文にある画像の一覧（押すとみてみんのページが開きます）">画像 <span class="badge" id="image-count">0</span></summary>
@@ -255,6 +261,7 @@
             <div class="extra-body">
               <div class="field-head">
                 <span class="spacer"></span>
+                <button type="button" class="tool" data-find="foreword">検索</button>
                 <button type="button" class="tool max-btn" data-max="foreword" aria-label="前書きを最大化" title="最大化">⤢</button>
                 <button type="button" class="tool selall-btn" data-selall="foreword">全て選択</button>
                 <button type="button" class="copy" data-copy="foreword">コピー</button>
@@ -271,6 +278,7 @@
                 <select id="tpl-afterword" aria-label="後書きのひな型"></select>
                 <button type="button" class="tool" data-tpl-apply="afterword">ひな型を使う</button>
                 <button type="button" class="tool" data-tpl-save="afterword">ひな型に登録</button>
+                <button type="button" class="tool" data-find="afterword">検索</button>
                 <button type="button" class="tool max-btn" data-max="afterword" aria-label="後書きを最大化" title="最大化">⤢</button>
                 <button type="button" class="tool selall-btn" data-selall="afterword">全て選択</button>
                 <button type="button" class="copy" data-copy="afterword">コピー</button>
@@ -290,6 +298,8 @@
               <span class="count" id="count-plot"></span>
               <span class="fold-info" id="fold-info-plot"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-find="plot">検索</button>
+              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="plot" title="ほかのエピソードからプロットやフリーメモをコピー">他の話から…</button>
               <button type="button" class="tool max-btn" data-max="plot" aria-label="プロットを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="plot">全て選択</button>
               <button type="button" class="copy" data-copy="plot">コピー</button>
@@ -306,6 +316,8 @@
               <span class="count" id="count-free-memo"></span>
               <span class="fold-info" id="fold-info-memo"></span>
               <span class="spacer"></span>
+              <button type="button" class="tool" data-find="free-memo">検索</button>
+              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="free-memo" title="ほかのエピソードからプロットやフリーメモをコピー">他の話から…</button>
               <button type="button" class="tool max-btn" data-max="memo" aria-label="フリーメモを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="free-memo">全て選択</button>
               <button type="button" class="copy" data-copy="free-memo">コピー</button>
@@ -319,6 +331,26 @@
       <button type="button" class="max-restore" id="max-restore" data-action="max-restore" hidden>⤡ 元に戻す（Esc）</button>
     </section>
 
+    <dialog id="episode-notes-copy-dialog" class="wide-dialog" aria-labelledby="episode-notes-copy-title">
+      <form method="dialog" class="dialog" id="episode-notes-copy-form">
+        <h2 id="episode-notes-copy-title">他のエピソードからコピー</h2>
+        <p class="hint">同じ作品の別のエピソードから、プロットとフリーメモを現在のエピソードへコピーします。本文やサイト別の原稿は変わりません。</p>
+        <label class="stack">コピー元のエピソード
+          <select id="episode-notes-copy-source"></select>
+        </label>
+        <fieldset class="checks">
+          <legend>コピーする内容</legend>
+          <label><input type="checkbox" id="episode-notes-copy-plot" checked> プロット</label>
+          <label><input type="checkbox" id="episode-notes-copy-memo" checked> フリーメモ</label>
+        </fieldset>
+        <pre class="info" id="episode-notes-copy-preview"></pre>
+        <footer class="dialog-foot">
+          <button type="button" value="cancel">キャンセル</button>
+          <button type="submit" value="ok" class="primary">現在のエピソードへコピー</button>
+        </footer>
+      </form>
+    </dialog>
+
 
     <!-- あらすじ -->
     <section class="view" id="view-synopsis" hidden>
@@ -327,6 +359,7 @@
           <label for="synopsis" class="view-title">あらすじ</label>
           <span class="count" id="count-synopsis"></span>
           <span class="spacer"></span>
+          <button type="button" class="tool" data-find="synopsis">検索</button>
           <button type="button" class="copy" data-copy="synopsis">コピー</button>
         </div>
         <textarea id="synopsis" spellcheck="false" placeholder="作品のあらすじ（投稿サイトの「あらすじ」欄に貼り付ける文章）"></textarea>
@@ -360,6 +393,7 @@
           <label for="project-memo" class="view-title">メモ</label>
           <span class="count" id="count-project-memo"></span>
           <span class="spacer"></span>
+          <button type="button" class="tool" data-find="project-memo">検索</button>
           <button type="button" class="tool selall-btn" data-selall="project-memo">全て選択</button>
           <button type="button" class="copy" data-copy="project-memo">コピー</button>
         </div>
@@ -545,10 +579,16 @@
         <button type="button" id="imp-resume-discard">破棄する</button>
       </div>
       <div class="import-grid">
-        <label>TXTの種類
+        <label>TXTの読み取り方法
+          <select id="imp-type">
+            <option value="rules">書式あり（なろう系）</option>
+            <option value="title-list">書式なし（アルファ系）</option>
+          </select>
+        </label>
+        <label>取り込む原稿
           <select id="imp-site">
-            <option value="narou">書式あり（なろう系）</option>
-            <option value="alpha">書式なし（アルファ系）</option>
+            <option value="narou">なろう用</option>
+            <option value="alpha">アルファ用</option>
           </select>
         </label>
         <label>書式
@@ -557,14 +597,20 @@
         <label>取り込み先
           <select id="imp-target"></select>
         </label>
-        <label>TXT ファイル
-          <input type="file" id="imp-file" accept=".txt,text/plain">
+        <label>TXT／ZIP ファイル
+          <input type="file" id="imp-file" accept=".txt,.zip,text/plain,application/zip">
         </label>
         <label>文字コード
           <select id="imp-encoding"></select>
         </label>
       </div>
-      <p class="hint">「書式あり」はなろう用原稿へ、「書式なし」はアルファ用原稿へ取り込みます（もう一方の原稿・プロット・フリーメモは変わりません）。確定するまで作品は一切変更しません。</p>
+      <fieldset id="imp-zip-entry-row" class="imp-zip-picker" hidden>
+        <legend>ZIP内のTXT</legend>
+        <p class="hint">取り込むTXTを一つ選んでください。フォルダー内のTXTも一覧に表示します。</p>
+        <div id="imp-zip-entry-list" class="imp-zip-entry-list"></div>
+      </fieldset>
+      <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける（対応しない話は勝手に追加せず、エラーとして表示）</label>
+      <p class="hint">TXTの読み取り方法と、取り込む原稿の投稿先は別々に選べます。既存作品を選ぶと、もう一方の投稿先のタイトルも使って対応するエピソードを探します。本文以外のプロット・フリーメモは変わりません。確定するまで作品は一切変更しません。</p>
       <div id="imp-decode-info" class="imp-info" hidden></div>
       </div>
       <footer class="import-foot">
@@ -855,6 +901,21 @@
   </form>
 </dialog>
 
+<dialog id="find-dialog" class="ask-dialog">
+  <form method="dialog" class="dialog" id="find-form">
+    <h2>この入力欄を検索</h2>
+    <p class="hint" id="find-field-name"></p>
+    <label class="stack">検索する文字列 <input name="query" type="search" autocomplete="off" required></label>
+    <label class="check"><input name="caseSensitive" type="checkbox"> 大文字・小文字を区別する</label>
+    <p class="hint" id="find-result" aria-live="polite"></p>
+    <div class="dialog-foot">
+      <button type="button" value="cancel">閉じる</button>
+      <button type="button" id="find-prev">前を検索</button>
+      <button type="button" id="find-next" class="primary">次を検索</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="templates-dialog">
   <form method="dialog" class="dialog">
     <h2>ひな型の管理</h2>
@@ -997,7 +1058,9 @@
       <label><input type="checkbox" data-ui="copy.foreword"> 前書き</label>
       <label><input type="checkbox" data-ui="copy.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="copy.plot"> プロット</label>
+      <label><input type="checkbox" data-ui="copy.plot-from-other"> プロット：他の話から</label>
       <label><input type="checkbox" data-ui="copy.free-memo"> フリーメモ</label>
+      <label><input type="checkbox" data-ui="copy.free-memo-from-other"> フリーメモ：他の話から</label>
       <label><input type="checkbox" data-ui="copy.synopsis"> あらすじ</label>
       <label><input type="checkbox" data-ui="copy.project-memo"> 作品のメモ</label>
       <label><input type="checkbox" data-ui="copy.x-text"> X の投稿文</label>
@@ -1022,6 +1085,7 @@
       <label><input type="checkbox" data-ui="max.tool.symbols"> 記号</label>
       <label><input type="checkbox" data-ui="max.tool.indent"> 字下げ</label>
       <label><input type="checkbox" data-ui="max.tool.replace"> 置換</label>
+      <label><input type="checkbox" data-ui="max.tool.find"> 検索</label>
       <label><input type="checkbox" data-ui="max.tool.image-list"> 画像一覧</label>
       <label><input type="checkbox" data-ui="max.tool.select-all"> 全て選択</label>
       <label><input type="checkbox" data-ui="max.tool.copy"> コピー</label>
@@ -1225,6 +1289,14 @@
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>
+
+<dialog id="busy-dialog" class="busy-dialog" aria-labelledby="busy-message">
+  <div class="busy-card" role="status" aria-live="assertive" aria-busy="true">
+    <span class="busy-spinner" aria-hidden="true"></span>
+    <strong id="busy-message">読み込み中…</strong>
+    <span class="hint">完了するまで、このままお待ちください。</span>
+  </div>
+</dialog>
 
 <script type="module" src="js/app.js"></script>
 </body>

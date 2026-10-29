@@ -741,6 +741,7 @@ export function chapterList(container, getChapters, ops) {
         h('label', { textContent: '章タイトル' }),
         h('span', { className: 'spacer' }),
         count,
+        btn('検索', () => ops.find?.(plot, `「${chapterName(ch)}」の章プロット`)),
         btn('コピー', () => (ch.plot ? copy(ch.plot, `「${chapterName(ch)}」のプロット`) : toast('プロットは空です')), 'copy')),
       title,
       plot);

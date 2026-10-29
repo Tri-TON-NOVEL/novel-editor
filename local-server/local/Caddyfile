@@ -1,0 +1,13 @@
+{
+    admin off
+    auto_https off
+}
+
+http://localhost:8765 {
+    root * "I:/Programs/NovelEditor"
+    @private path /caddy.exe /*.ps1 /*.bat /.claude/* /local-server/*
+    respond @private 404
+    encode zstd gzip
+    header Cache-Control "no-store"
+    file_server
+}

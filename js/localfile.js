@@ -38,7 +38,7 @@ export const localFile = {
 
   // kind: 'json'（AYATUZURI のファイル）／'txt'（テキスト）／'any'
   // 戻り値: { name, text, handle, file } / キャンセル時は null（file は文字コードを判定し直したいとき用）
-  async open(kind = 'any') {
+  async open(kind = 'any', readFile = (file) => file.text()) {
     const accepts = {
       json: { 'application/json': ['.json'] },
       txt: { 'text/plain': ['.txt'] },
@@ -53,10 +53,10 @@ export const localFile = {
         throw e;
       }
       const file = await handle.getFile();
-      return { name: file.name, text: await file.text(), handle: /\.json$/i.test(file.name) ? handle : null, file };
+      return { name: file.name, text: await readFile(file), handle: /\.json$/i.test(file.name) ? handle : null, file };
     }
     // Safari は、画面に置いていない input では選んだあとの知らせ（change）が来ないことがあるので、見えない形で置く
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = Object.entries(accepts).flatMap(([mime, exts]) => [...exts, mime]).join(',');
@@ -65,7 +65,8 @@ export const localFile = {
       const done = (v) => { input.remove(); resolve(v); };
       input.addEventListener('change', async () => {
         const file = input.files[0];
-        done(file ? { name: file.name, text: await file.text(), handle: null, file } : null);
+        try { done(file ? { name: file.name, text: await readFile(file), handle: null, file } : null); }
+        catch (e) { input.remove(); reject(e); }
       });
       input.addEventListener('cancel', () => done(null));
       input.click();

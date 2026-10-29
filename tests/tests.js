@@ -3,6 +3,7 @@ import * as F from '../js/format.js';
 import * as N from '../js/notation.js';
 import * as I from '../js/importer.js';
 import * as B from '../js/backup.js';
+import * as Z from '../js/zip.js';
 
 const results = [];
 const groups = [];
@@ -20,6 +21,36 @@ function throws(fn, pattern, msg) {
     return;
   }
   throw new Error(msg || 'エラーになりませんでした');
+}
+
+function storedZip(files) {
+  const enc = new TextEncoder();
+  const locals = [];
+  const centrals = [];
+  let offset = 0;
+  const u16 = (a, p, v) => { a[p] = v & 255; a[p + 1] = (v >>> 8) & 255; };
+  const u32 = (a, p, v) => { u16(a, p, v); u16(a, p + 2, v >>> 16); };
+  for (const [name, text] of files) {
+    const n = enc.encode(name);
+    const data = enc.encode(text);
+    const local = new Uint8Array(30 + n.length + data.length);
+    u32(local, 0, 0x04034b50); u16(local, 4, 20); u16(local, 6, 0x0800); u16(local, 8, 0);
+    u32(local, 18, data.length); u32(local, 22, data.length); u16(local, 26, n.length);
+    local.set(n, 30); local.set(data, 30 + n.length);
+    const central = new Uint8Array(46 + n.length);
+    u32(central, 0, 0x02014b50); u16(central, 4, 20); u16(central, 6, 20); u16(central, 8, 0x0800);
+    u16(central, 10, 0); u32(central, 20, data.length); u32(central, 24, data.length); u16(central, 28, n.length);
+    u32(central, 42, offset); central.set(n, 46);
+    locals.push(local); centrals.push(central); offset += local.length;
+  }
+  const centralSize = centrals.reduce((n, a) => n + a.length, 0);
+  const end = new Uint8Array(22);
+  u32(end, 0, 0x06054b50); u16(end, 8, files.length); u16(end, 10, files.length);
+  u32(end, 12, centralSize); u32(end, 16, offset);
+  const out = new Uint8Array(offset + centralSize + end.length);
+  let p = 0;
+  for (const a of [...locals, ...centrals, end]) { out.set(a, p); p += a.length; }
+  return out.buffer;
 }
 
 // ---------- Phase 1: データ形式 v3 と旧データの移行 ----------
@@ -508,6 +539,19 @@ group('Phase 8：区切り記号をタイトルから外す', () => {
   const marks = I.detectMarks(lines, { episode: { enabled: true, pattern: '◆', method: 'prefix', position: 'start' } });
   const r = I.buildEpisodes(lines, marks, { episodePrefix: '◆' });
   eq(r.episodes.map((e) => e.title), ['筆になった朝', '◆'], '記号だけの行はそのまま');
+});
+
+group('7.5.2：ZIP内のTXTを一覧・読み込み', async () => {
+  const zip = storedZip([
+    ['作品/第一話.txt', '第一話の本文'],
+    ['作品/第二話.TXT', '第二話の本文'],
+    ['作品/画像.png', '対象外'],
+    ['__MACOSX/._第一話.txt', '対象外'],
+  ]);
+  const entries = Z.listZipTextEntries(zip);
+  eq(entries.map((e) => e.name), ['作品/第一話.txt', '作品/第二話.TXT'], 'TXTだけを一覧にする');
+  const text = new TextDecoder().decode(await Z.extractZipEntry(zip, entries[1]));
+  eq(text, '第二話の本文', '選んだTXTを読み込む');
 });
 
 // ---------- 実行 ----------

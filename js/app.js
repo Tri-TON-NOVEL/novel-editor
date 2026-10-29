@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.26-7.4.1';
+const APP_VERSION = '2026.10.29-7.6.0';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -102,6 +102,34 @@ document.addEventListener('close', (e) => {
 function fail(e) {
   console.error(e);
   toast(e.message || String(e), true);
+}
+
+// ファイルやバックアップを実際に読み込んでいる間は、開始したことが分かる表示を最前面に出す。
+// 入れ子の処理（クラウドから取得 → 復元など）でも、最後の処理が終わるまで閉じない。
+let busyDepth = 0;
+async function withBusy(message, work) {
+  const dialog = $('busy-dialog');
+  busyDepth++;
+  $('busy-message').textContent = message || '読み込み中…';
+  if (!dialog.open) dialog.showModal();
+  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  try {
+    return await work();
+  } finally {
+    busyDepth = Math.max(0, busyDepth - 1);
+    if (!busyDepth && dialog.open) dialog.close();
+  }
+}
+
+function returnToEditor() {
+  for (const id of ['backup-inspect-dialog', 'backup-manage-dialog', 'sync-restore-dialog', 'restore-dialog', 'settings-dialog']) {
+    const dialog = $(id);
+    if (dialog?.open) dialog.close();
+  }
+  if (project) {
+    if (reportMode) setReportMode(false);
+    setView('episode');
+  }
 }
 
 function li(className, text) {
@@ -1302,12 +1330,12 @@ async function openFrom(title, { force = false, kind = 'json' } = {}) {
   if (dest === 'cloud') {
     const p = driveProvider();
     const f = await pickDriveFile(p, title, kind);
-    if (f && f !== 'local') return { text: await p.load(f.id), name: f.name, source: 'cloud', id: f.id };
+    if (f && f !== 'local') return withBusy('ファイルを読み込んでいます…', async () => ({ text: await p.load(f.id), name: f.name, source: 'cloud', id: f.id }));
     if (f !== 'local') return null;
     where = 'local'; // 「この端末・その他から開く」を選び直した
   }
   if (where !== 'local') return null;
-  const r = await localFile.open(kind);
+  const r = await localFile.open(kind, (file) => withBusy('ファイルを読み込んでいます…', () => file.text()));
   return r ? { ...r, source: 'local' } : null;
 }
 
@@ -1332,7 +1360,8 @@ async function allOpen({ force = false } = {}) {
     openRestoreDialog(src.text, src.name);
     return;
   }
-  await switchTo(await importContent(parse(src.text, src.name)));
+  await withBusy('作品を読み込んでいます…', async () => switchTo(await importContent(parse(src.text, src.name))));
+  returnToEditor();
   toast(`「${src.name}」を作品として開きました`);
 }
 
@@ -1350,7 +1379,7 @@ async function renderPackEpisodes(projectId) {
   box.replaceChildren();
   if (!p) return;
   p.episodes.forEach((ep, i) => {
-    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: ep.id, checked: i === epIndex && p.id === project.id });
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: ep.id, checked: false });
     const label = document.createElement('label');
     label.append(input, document.createTextNode(episodeDisplayName(p, ep, i)));
     box.append(label);
@@ -1455,7 +1484,7 @@ function renderBackupInspection(pack, name = '', { acknowledge = null } = {}) {
     const label = item.type === 'project' ? `作品全体：${item.project?.title || '無題'}`
       : item.type === 'materials' ? `作品資料：${item.project?.title || '無題'}`
         : `エピソード：${item.project?.title || '無題'}／${episodeName(item.episode)}`;
-    add(item.key, label, itemDetail(item));
+    add(item.key, label, itemDetail(item), item.type !== 'episode');
   }
   $('backup-inspect-detail').textContent = '左の項目を押すと詳細を表示します。チェックした項目だけを読み込めます。';
   $('backup-inspect-dialog').showModal();
@@ -1513,20 +1542,23 @@ async function restoreInspected(asNew = false) {
     : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
       + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
   if (!(await ask(verb, { ok: '読み込む' }))) return;
-  await flush();
-  if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
-  const result = await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
-  if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
-  // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
-  // これ以降に作成されたバックアップだけを、次回から「他の端末の更新」として通知する。
-  if (inspectedBackup.acknowledge) sync.markChecked(inspectedBackup.acknowledge);
-  syncPending = null;
-  $('backup-inspect-dialog').close();
-  const open = result.updatedList[0] || result.addedList[0];
-  if (open) {
-    const p = await db.get(open.id);
-    if (p) showProject(p);
-  }
+  const result = await withBusy('バックアップを読み込んでいます…', async () => {
+    await flush();
+    if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
+    const restored = await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
+    if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
+    // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
+    // これ以降に作成されたバックアップだけを、次回から「他の端末の更新」として通知する。
+    if (inspectedBackup.acknowledge) sync.markChecked(inspectedBackup.acknowledge);
+    syncPending = null;
+    const open = restored.updatedList[0] || restored.addedList[0];
+    if (open) {
+      const p = await db.get(open.id);
+      if (p) showProject(p);
+    }
+    return restored;
+  });
+  returnToEditor();
   toast(`バックアップを読み込みました（追加${result.addedList.length}・更新${result.updatedList.length}）`);
 }
 
@@ -1551,13 +1583,16 @@ async function epOpen({ force = false } = {}) {
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、両サイトとも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
-  // 開く前の原稿は前の番号の稿に残し、両サイトとも新しい稿に開く
-  for (const site of SITE_KEYS) await raiseEdition(ep, site);
-  applyEpisodeSnapshot(ep, data.episode);
-  touchEpisode(ep);
-  changed();
-  showEpisode();
-  renderEpisodeList();
+  await withBusy('エピソードを読み込んでいます…', async () => {
+    // 開く前の原稿は前の番号の稿に残し、両サイトとも新しい稿に開く
+    for (const site of SITE_KEYS) await raiseEdition(ep, site);
+    applyEpisodeSnapshot(ep, data.episode);
+    touchEpisode(ep);
+    changed();
+    showEpisode();
+    renderEpisodeList();
+  });
+  returnToEditor();
   toast(`「${src.name}」を今のエピソードに開きました`);
 }
 
@@ -1567,17 +1602,22 @@ async function epOpen({ force = false } = {}) {
 async function importText() {
   const src = await openFrom('プレーンテキストを開く', { kind: 'txt' });
   if (!src) return;
-  const text = src.file ? decodeText(await src.file.arrayBuffer()).text : src.text;
+  const text = src.file
+    ? await withBusy('テキストを読み込んでいます…', async () => decodeText(await src.file.arrayBuffer()).text)
+    : src.text;
   const body = text.replace(/\r\n?/g, '\n');
   const d = cur();
   if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容は、前の番号の稿に残します）`, { ok: '上書きする' }))) return;
-  if (d.body) await raiseEdition(episode(), editSite); // 読み込む前の内容は前の番号の稿に残る
-  d.body = body;
-  episode().siteUpdatedAt = { ...(episode().siteUpdatedAt || {}), [editSite]: new Date().toISOString() };
-  touchEpisode();
-  changed();
-  showEpisode();
-  renderEpisodeList();
+  await withBusy('本文へ読み込んでいます…', async () => {
+    if (d.body) await raiseEdition(episode(), editSite); // 読み込む前の内容は前の番号の稿に残る
+    d.body = body;
+    episode().siteUpdatedAt = { ...(episode().siteUpdatedAt || {}), [editSite]: new Date().toISOString() };
+    touchEpisode();
+    changed();
+    showEpisode();
+    renderEpisodeList();
+  });
+  returnToEditor();
   toast(`「${src.name}」を本文（${SITES[editSite].short}用）に読み込みました（${countChars(body).all.toLocaleString()}字）`);
 }
 
@@ -2128,12 +2168,15 @@ function openRestoreDialog(text, name = '', { acknowledge = null } = {}) {
 async function runRestore(mode) {
   if (!pendingBackup) return;
   if (mode === 'replace' && !(await ask('【最終確認】この端末の作品をすべて消して、バックアップの内容に入れ替えます。よろしいですか？'))) return;
-  await flush();
   const backup = pendingBackup;
   const loadedName = pendingBackupName;
   const acknowledge = pendingBackupAcknowledge;
-  const before = new Set((await db.all()).map((p) => p.id));
-  await restoreBackup(backup, mode);
+  const before = await withBusy('バックアップを読み込んでいます…', async () => {
+    await flush();
+    const current = new Set((await db.all()).map((p) => p.id));
+    await restoreBackup(backup, mode);
+    return current;
+  });
   pendingBackup = null;
   pendingBackupName = '';
   pendingBackupAcknowledge = null;
@@ -2218,7 +2261,6 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
 
 async function openSyncTargets() {
   const chosen = new Map(savedSyncTargets().map((x) => [x.workId, new Set(x.episodeIds || [])]));
-  if (!chosen.size) chosen.set(project.workId, new Set([episode().id]));
   const box = $('sync-target-list');
   box.replaceChildren();
   for (const p of await allProjects()) {
@@ -2308,7 +2350,9 @@ function selectedManagedFiles() {
 async function inspectManagedBackup() {
   const files = selectedManagedFiles();
   if (files.length !== 1) { toast('内容を確認するファイルを一つ選んでください', true); return; }
-  const text = files[0].pack ? JSON.stringify(files[0].pack) : await sync.read(files[0]);
+  const text = await withBusy('バックアップの内容を読み込んでいます…', async () => (
+    files[0].pack ? JSON.stringify(files[0].pack) : sync.read(files[0])
+  ));
   $('backup-manage-dialog').close();
   await inspectBackupText(text, files[0].name, { acknowledge: managedBackupLatest });
 }
@@ -2473,7 +2517,11 @@ function reportAndReload(head, { addedList = [], updatedList = [], keptList = []
 // newest：そのときいちばん新しいバックアップの名前。古いものをあえて選んだときは、次の起動で最新を勧めないよう「確認済み」にする
 async function mergeFrom(entry, { explicit = false, newest = null } = {}) {
   await flush();
-  const opts = explicit ? { explicit: true, onOlder: (list) => askReplaceNewer(entry.name, list) } : {};
+  const opts = {
+    ...(explicit ? { explicit: true, onOlder: (list) => askReplaceNewer(entry.name, list) } : {}),
+    // 自動同期でバックアップパックを読む場合も、手動読込と同じ安全策を必ず通す。
+    beforePackRestore: (pack, name) => protectBeforeRestore(pack, (pack.items || []).map((item) => item.key), name),
+  };
   const res = await sync.loadAndMerge(entry, askSyncConflict, opts);
   if (res && explicit && newest && newest.name !== entry.name) sync.markChecked(newest);
   afterMerge(res, entry.name);
@@ -2511,29 +2559,32 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
   if (r.value === ENV_CHOICE) return loadEnvironmentFrom(backup, name, env);
   const src = novels.find((p) => p.id === r.value);
   if (!src) { toast('読み込む小説を選んでください', true); return false; }
-  await flush();
-  // ひな型・リンク・アカウントなどの設定も、この端末の設定を消さずにまとめる
-  mergeSharedPrefs(backup.prefs);
-  renderTemplateSelects();
-  buildLinksMenu();
-  const now = new Date().toISOString();
-  if (r.choice === 'overwrite') {
-    await saveVersion(`「${name}」で上書きする前（自動）`, '', true);
-    const p = normalize({ ...structuredClone(src), id: project.id, workId: project.workId, links: project.links || {}, updatedAt: now });
-    await db.put(p);
-    showProject(p);
+  await withBusy('バックアップを読み込んでいます…', async () => {
+    await flush();
+    // ひな型・リンク・アカウントなどの設定も、この端末の設定を消さずにまとめる
+    mergeSharedPrefs(backup.prefs);
+    renderTemplateSelects();
+    buildLinksMenu();
+    const now = new Date().toISOString();
+    if (r.choice === 'overwrite') {
+      await saveVersion(`「${name}」で上書きする前（自動）`, '', true);
+      const p = normalize({ ...structuredClone(src), id: project.id, workId: project.workId, links: project.links || {}, updatedAt: now });
+      await db.put(p);
+      showProject(p);
+    } else {
+      const p = normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now });
+      await switchTo(p);
+    }
     syncPending = null;
     sync.markLoaded(name);
     if (newest && newest.name !== name) sync.markChecked(newest);
+  });
+  if (r.choice === 'overwrite') {
     await inform(`いま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています）`);
   } else {
-    const p = normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now });
-    await switchTo(p);
-    syncPending = null;
-    sync.markLoaded(name);
-    if (newest && newest.name !== name) sync.markChecked(newest);
     await inform(`「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
   }
+  returnToEditor();
   return true;
 }
 
@@ -2548,9 +2599,11 @@ async function loadEnvironmentFrom(backup, name, env) {
     + '自動バックアップの保存先・プレフィックス・使うクラウドとそのログインは、どちらでも変わりません。',
   [{ value: 'replace', label: '置き換える', danger: true }, { value: 'merge', label: 'まとめる', primary: true }]);
   if (!how) return false;
-  await flush();
-  applyEnvironment(backup, how);
-  prefs.set('restoredReport', `「${name}」の環境を${how === 'merge' ? 'まとめて' : '置き換えて'}読み込みました。\n${list}`);
+  await withBusy('環境設定を読み込んでいます…', async () => {
+    await flush();
+    applyEnvironment(backup, how);
+    prefs.set('restoredReport', `「${name}」の環境を${how === 'merge' ? 'まとめて' : '置き換えて'}読み込みました。\n${list}`);
+  });
   location.reload();
   return true;
 }
@@ -2841,6 +2894,7 @@ const outline = chapterList($('chapters'), () => project.chapters, {
   moveChapter: (ch, d) => moveChapter(ch, d),
   removeChapter: (ch) => removeChapter(ch),
   episodeCount: (ch) => episodeCountIn(ch),
+  find: (target, label) => openFind(target, label),
 });
 // 設定・登場人物の「テキストに書き出す」→「ファイルに保存」
 const tableOpts = {
@@ -2863,6 +2917,8 @@ const importScreen = initImport({
   flush: () => flush(),
   switchTo: (p) => switchTo(p),
   closeSettings: () => $('settings-dialog').close(),
+  withBusy,
+  returnToEditor,
 });
 
 async function copyField(key) {
@@ -2933,6 +2989,56 @@ async function runAutoIndent() {
   t.setSelectionRange(0, 0);
   t.scrollTop = 0;
   toast(`${lines}か所を字下げしました（元に戻す：Ctrl+Z）`);
+}
+
+// ---------- 入力欄の検索 ----------
+
+let findTarget = null;
+let findCursor = -1;
+const FIND_LABELS = {
+  'novel-title': '小説タイトル', 'ep-title': 'エピソードタイトル', body: '本文', foreword: '前書き', afterword: '後書き',
+  plot: 'プロット', 'free-memo': 'フリーメモ', synopsis: 'あらすじ', 'project-memo': '作品のメモ',
+  'x-text': 'X 投稿文', 'narou-report-title': '活動報告のタイトル', 'narou-report-body': '活動報告の本文',
+};
+
+function openFind(targetOrId, label = '') {
+  const target = typeof targetOrId === 'string' ? $(targetOrId) : targetOrId;
+  if (!target || !('value' in target)) return;
+  findTarget = target;
+  findCursor = target.selectionStart ?? -1;
+  const form = $('find-form');
+  const selected = target.value.slice(target.selectionStart ?? 0, target.selectionEnd ?? 0);
+  if (selected && !selected.includes('\n')) form.query.value = selected;
+  $('find-field-name').textContent = label || FIND_LABELS[target.id] || target.getAttribute('aria-label') || '入力欄';
+  $('find-result').textContent = '';
+  const dialog = $('find-dialog');
+  if (!dialog.open) dialog.show();
+  form.query.focus();
+  form.query.select();
+}
+
+function findInField(direction = 1) {
+  if (!findTarget) return;
+  const form = $('find-form');
+  const query = form.query.value;
+  if (!query) { $('find-result').textContent = '検索する文字を入力してください。'; form.query.focus(); return; }
+  const source = form.caseSensitive.checked ? findTarget.value : findTarget.value.toLocaleLowerCase('ja');
+  const needle = form.caseSensitive.checked ? query : query.toLocaleLowerCase('ja');
+  const hits = [];
+  for (let at = source.indexOf(needle); at >= 0; at = source.indexOf(needle, at + Math.max(needle.length, 1))) hits.push(at);
+  if (!hits.length) { $('find-result').textContent = '見つかりませんでした。'; return; }
+  let index;
+  if (direction > 0) index = hits.find((at) => at > findCursor) ?? hits[0];
+  else index = [...hits].reverse().find((at) => at < findCursor) ?? hits[hits.length - 1];
+  findCursor = index;
+  const fold = { body: 'body', plot: 'plot', 'free-memo': 'memo' }[findTarget.id];
+  if (fold && isFolded(fold)) setFolded(fold, false);
+  if (findTarget.id === 'foreword') $('foreword-box').open = true;
+  if (findTarget.id === 'afterword') $('afterword-box').open = true;
+  findTarget.focus({ preventScroll: true });
+  findTarget.setSelectionRange(index, index + query.length);
+  findTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  $('find-result').textContent = `${hits.indexOf(index) + 1}／${hits.length}件目`;
 }
 
 // ---------- 一括置換 ----------
@@ -3522,7 +3628,7 @@ function applyUiPrefs() {
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
   for (const k of ['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo',
-    'x-text', 'narou-report-title', 'narou-report-body', 'main-to-sub']) {
+    'plot-from-other', 'free-memo-from-other', 'x-text', 'narou-report-title', 'narou-report-body', 'main-to-sub']) {
     cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
   }
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
@@ -3866,6 +3972,69 @@ async function saveNow() {
   }
 }
 
+// ---------- 他のエピソードからプロット・フリーメモをコピー ----------
+
+function updateEpisodeNotesCopyPreview() {
+  const source = project?.episodes.find((ep) => ep.id === $('episode-notes-copy-source').value);
+  const plot = $('episode-notes-copy-plot');
+  const memo = $('episode-notes-copy-memo');
+  const preview = $('episode-notes-copy-preview');
+  if (!source) {
+    plot.disabled = memo.disabled = true;
+    preview.textContent = 'コピーできるエピソードがありません。';
+    return;
+  }
+  plot.disabled = !source.plot;
+  memo.disabled = !source.freeMemo;
+  if (plot.disabled) plot.checked = false;
+  if (memo.disabled) memo.checked = false;
+  preview.textContent = [
+    `プロット：${source.plot ? `${countChars(source.plot).all.toLocaleString()}字` : '（空）'}`,
+    `フリーメモ：${source.freeMemo ? `${countChars(source.freeMemo).all.toLocaleString()}字` : '（空）'}`,
+    '',
+    source.plot ? `【プロット】\n${source.plot.slice(0, 500)}` : '',
+    source.freeMemo ? `【フリーメモ】\n${source.freeMemo.slice(0, 500)}` : '',
+  ].filter(Boolean).join('\n');
+}
+
+function openEpisodeNotesCopy() {
+  const current = episode();
+  const sources = project.episodes.filter((ep) => ep.id !== current.id && (ep.plot || ep.freeMemo));
+  if (!sources.length) {
+    toast('プロットまたはフリーメモが入っている、ほかのエピソードがありません', true);
+    return;
+  }
+  const select = $('episode-notes-copy-source');
+  select.replaceChildren(...sources.map((ep) => {
+    const i = project.episodes.indexOf(ep);
+    const has = [ep.plot && 'プロット', ep.freeMemo && 'メモ'].filter(Boolean).join('・');
+    return new Option(`${i + 1}. ${episodeName(ep)}（${has}あり）`, ep.id);
+  }));
+  $('episode-notes-copy-plot').checked = true;
+  $('episode-notes-copy-memo').checked = true;
+  updateEpisodeNotesCopyPreview();
+  $('episode-notes-copy-dialog').showModal();
+}
+
+async function copyEpisodeNotes() {
+  const source = project.episodes.find((ep) => ep.id === $('episode-notes-copy-source').value);
+  const dest = episode();
+  const copyPlot = $('episode-notes-copy-plot').checked && !$('episode-notes-copy-plot').disabled;
+  const copyMemo = $('episode-notes-copy-memo').checked && !$('episode-notes-copy-memo').disabled;
+  if (!source || (!copyPlot && !copyMemo)) {
+    toast('コピーする内容を選んでください', true);
+    return;
+  }
+  const overwritten = [copyPlot && dest.plot && 'プロット', copyMemo && dest.freeMemo && 'フリーメモ'].filter(Boolean);
+  if (overwritten.length && !(await ask(`現在のエピソードの${overwritten.join('と')}を、\n「${episodeName(source)}」の内容で置き換えますか？`, { ok: '置き換えてコピー' }))) return;
+  if (copyPlot) dest.plot = source.plot;
+  if (copyMemo) dest.freeMemo = source.freeMemo;
+  touchEpisode(dest);
+  changed();
+  showEpisode();
+  toast(`「${episodeName(source)}」から${[copyPlot && 'プロット', copyMemo && 'フリーメモ'].filter(Boolean).join('と')}をコピーしました`);
+}
+
 const actions = {
   'toggle-drawer': () => document.body.classList.toggle('drawer-open'),
   'open-work-codes': openWorkCodes,
@@ -3877,6 +4046,7 @@ const actions = {
   'backup-pack-create': () => openBackupPackCreate().catch(fail),
   'backup-pack-open': () => openBackupPackFile().catch(fail),
   'sync-save': () => saveNow(),
+  'copy-episode-notes': openEpisodeNotesCopy,
   'ep-open': () => epOpen(),
   'ep-save-as': () => epSaveAs(),
   'import-text': importText,
@@ -4049,6 +4219,7 @@ function bindSidebarSplitter() {
 }
 
 function bindEvents() {
+  $('busy-dialog').addEventListener('cancel', (e) => e.preventDefault());
   bindProjectNavOrder();
   for (const [input, apply] of bindings) {
     input.addEventListener('input', () => {
@@ -4086,6 +4257,8 @@ function bindEvents() {
       }
     } else if (d.copy) {
       copyField(d.copy).catch(fail);
+    } else if (d.find) {
+      openFind(d.find);
     } else if (d.insert) {
       inserts[d.insert]();
     } else if (d.tab) {
@@ -4123,6 +4296,11 @@ function bindEvents() {
 
   const rf = $('replace-form');
   for (const name of ['from', 'scope']) rf.elements[name].addEventListener('input', updateReplacePreview);
+  bindDialog('find-dialog');
+  $('find-form').addEventListener('submit', (e) => { e.preventDefault(); findInField(1); });
+  $('find-next').addEventListener('click', () => findInField(1));
+  $('find-prev').addEventListener('click', () => findInField(-1));
+  $('find-form').query.addEventListener('input', () => { findCursor = -1; $('find-result').textContent = ''; });
 
   // 目次の章・エピソードの「⋯」メニュー（あとから作る）：開いたら他のメニューを閉じ、下に入りきらなければ上向きに開く
   document.addEventListener('toggle', (e) => {
@@ -4184,6 +4362,8 @@ function bindEvents() {
   bindDialog('replace-dialog', runReplace);
   bindDialog('restore-dialog');
   bindDialog('site-copy-dialog', runSiteCopy);
+  bindDialog('episode-notes-copy-dialog', copyEpisodeNotes);
+  $('episode-notes-copy-source').addEventListener('change', updateEpisodeNotesCopyPreview);
   $('site-copy-form').addEventListener('change', updateSiteCopy);
   bindDialog('version-save-dialog', async () => {
     const form = $('version-save-form');
