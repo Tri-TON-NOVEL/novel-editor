@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.29-7.6.0';
+const APP_VERSION = '2026.10.29-7.6.2';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3017,6 +3017,30 @@ function openFind(targetOrId, label = '') {
   form.query.select();
 }
 
+// textarea は選択範囲を変えただけでは、長い文章の内部スクロールが検索位置まで動かないブラウザーがある。
+// 同じ幅・書体の一時要素で検索位置の高さを測り、見つけた文字が入力欄の中央付近に来るようにする。
+function revealTextPosition(target, index) {
+  if (target instanceof HTMLTextAreaElement) {
+    const style = getComputedStyle(target);
+    const mirror = document.createElement('div');
+    const props = ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'letterSpacing', 'lineHeight',
+      'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft', 'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth'];
+    for (const prop of props) mirror.style[prop] = style[prop];
+    Object.assign(mirror.style, {
+      position: 'fixed', left: '-100000px', top: '0', visibility: 'hidden', pointerEvents: 'none',
+      boxSizing: style.boxSizing, width: `${target.clientWidth}px`, whiteSpace: 'pre-wrap', overflowWrap: 'break-word', wordBreak: style.wordBreak,
+    });
+    mirror.append(document.createTextNode(target.value.slice(0, index)));
+    const marker = document.createElement('span');
+    marker.textContent = target.value.slice(index, index + 1) || '\u200b';
+    mirror.append(marker);
+    document.body.append(mirror);
+    target.scrollTop = Math.max(0, marker.offsetTop - target.clientHeight / 2);
+    mirror.remove();
+  }
+  target.scrollIntoView({ block: 'center', behavior: 'smooth' });
+}
+
 function findInField(direction = 1) {
   if (!findTarget) return;
   const form = $('find-form');
@@ -3037,7 +3061,7 @@ function findInField(direction = 1) {
   if (findTarget.id === 'afterword') $('afterword-box').open = true;
   findTarget.focus({ preventScroll: true });
   findTarget.setSelectionRange(index, index + query.length);
-  findTarget.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  revealTextPosition(findTarget, index);
   $('find-result').textContent = `${hits.indexOf(index) + 1}／${hits.length}件目`;
 }
 
@@ -4594,7 +4618,17 @@ async function init() {
   runSyncCheck().catch((e) => console.warn('他の端末の更新の確認に失敗', e));
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-    navigator.serviceWorker.register('sw.js').catch((e) => console.warn('Service Worker 登録失敗', e));
+    // PWA版でも古いキャッシュを長く保持しないよう、起動のたびにサーバー上の版を確認する。
+    // 新しい Service Worker が有効になったら一度だけ画面を読み直し、HTML と JS の版を揃える。
+    let reloadingForUpdate = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (reloadingForUpdate) return;
+      reloadingForUpdate = true;
+      location.reload();
+    });
+    navigator.serviceWorker.register(`sw.js?v=${encodeURIComponent(APP_VERSION)}`, { updateViaCache: 'none' })
+      .then((registration) => registration.update())
+      .catch((e) => console.warn('Service Worker 登録失敗', e));
   }
 }
 
