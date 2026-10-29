@@ -1,0 +1,27 @@
+Tri-TON Video Studio v6.1
+Verified packaging: 2026-10-28
+Top-level folder: TriTONVideoEditor
+PC localhost: http://localhost:8819/
+LAN HTTPS: https://<PC-LAN-IP>:8451/
+LAN certificate transfer: http://<PC-LAN-IP>:8794/root.crt
+
+Expected interface:
+- Version in the upper-left: v6.1
+- Unified timeline hierarchy across the top of the workspace
+- Add Video / Image / Audio / Text / Shape toolbar on top of timeline
+- Split / Duplicate / Delete / Bring Front actions next to Add toolbar
+- Timeline second ruler labeled in seconds
+- Video thumbnail visibility checkbox named コマ画像
+- Clicking a colored timeline clip selects that object without moving the playhead
+- Clicking the ruler moves the yellow playhead
+- Emphasis animations include rotate and vibrate
+- Recording camera/microphone/screen from Explorer
+- Adjustable timeline row height, Explorer thumbnails, saved project with media
+- LKV v2 AES-GCM / PBKDF2-SHA256 format import/export (title metadata supported)
+- Optional faster VP8 WebCodecs/WebM export without real-time pacing
+
+If the interface differs from these items, you opened another folder or server.
+
+MP4 H.264 WebCodecs fast export added. Structural checks performed; full browser playback test pending.
+
+PPTX: browser-only basic text/shape/embedded image rasterization; limited fidelity; 5 sec/slide.

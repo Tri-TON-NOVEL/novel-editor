@@ -1,0 +1,18 @@
+{
+    admin localhost:2019
+    auto_https disable_redirects
+}
+
+https://192.168.1.10:8459 {
+    bind 192.168.1.10
+    tls internal
+    root * "I:/Programs/TriTONVideoEditor/dist"
+    encode zstd gzip
+    file_server
+}
+
+http://192.168.1.10:8819 {
+    bind 192.168.1.10
+    root * "I:/Programs/TriTONVideoEditor/local-server/cert-share"
+    file_server
+}
