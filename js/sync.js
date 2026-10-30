@@ -30,7 +30,8 @@ export const DEFAULT_KEEP = 200;
 const CHECK_MS = 30_000;       // 保存が必要かを確かめる間隔
 const LEAVE_MIN_MS = 30_000;   // 画面を離れるときの保存の最短間隔（タブを切り替えるたびに増えないように）
 const DIR_KEY = 'autoBackupDir';
-const NAME_RE = /^(.*?)(\d{8}T\d{6}Z)\.json$/;
+// 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.json。端末の時刻）の両方を読む
+const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
 
 export const folderSupported = 'showDirectoryPicker' in window;
 
@@ -208,7 +209,13 @@ export function parseName(name) {
   const m = NAME_RE.exec(name);
   if (!m) return null;
   const s = m[2];
-  const at = Date.UTC(+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15));
+  const parts = [+s.slice(0, 4), +s.slice(4, 6) - 1, +s.slice(6, 8), +s.slice(9, 11), +s.slice(11, 13), +s.slice(13, 15)];
+  const at = s.endsWith('Z') ? Date.UTC(...parts) : new Date(...parts).getTime();
+  // 今の名前：「小説話_作品名_第3話@Win_20261030-073000.json」。端末名は「@」のあと
+  if (!s.endsWith('Z')) {
+    const at2 = m[1].lastIndexOf('@');
+    return { prefix: at2 >= 0 ? m[1].slice(at2 + 1).replace(/_+$/, '') : '', at };
+  }
   let owner = m[1].replace(/__$/, '');
   // 現行名と旧名の両方を読めるようにし、画面には端末名だけを出す。
   if (owner.startsWith('あや綴り__') || owner.startsWith('AYATUZURI__')) owner = owner.split('__').at(-1) || '端末不明';
@@ -250,12 +257,13 @@ export function markDirty() {
   prefs.set('sync.dirty', true);
 }
 
-export async function backupNow({ force = false, build = null } = {}) {
+export async function backupNow({ force = false, build = null, auto = false } = {}) {
   const t = target();
   if (!t || running) return false;
   if (!checked && !force) return false;
   running = true;
   listener();
+  let made = null;
   try {
     // 保存する前に、他の端末がもっと新しいバックアップを保存していないか確かめる（両方の端末を開いたまま書いているとき）。
     // あれば保存せず、アプリに知らせて確認してもらう（先に保存すると、他の端末の更新が隠れてしまうため）
@@ -265,10 +273,15 @@ export async function backupNow({ force = false, build = null } = {}) {
       newerHandler();
       return false;
     }
-    const made = build ? await build() : autoBuilder ? await autoBuilder() : await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
+    made = build ? await build() : autoBuilder ? await autoBuilder() : await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
     const text = made.text;
     const name = made.name || `${prefix()}${stamp()}.json`;
-    await t.write(name, text);
+    try {
+      await t.write(name, text);
+    } catch (e) {
+      // 通信が途中で切れたなど、保存できたか分からないときは、保存先にファイルがあるかを確かめる
+      if (!(await savedAnyway(t, name, e))) throw e;
+    }
     try { await made.afterSave?.(); } catch { /* 記録できなくても保存は済んでいる */ }
     dirty = false;
     prefs.set('sync.dirty', false);
@@ -289,9 +302,11 @@ export async function backupNow({ force = false, build = null } = {}) {
       for (const f of files) if (old.has(f.name)) await t.remove(f.id);
     }
     listener();
+    resultHandler({ ok: true, auto, name, label: made.label || '', where: mode() });
     return true;
   } catch (e) {
     handleError(e);
+    resultHandler({ ok: false, auto, name: made?.name || '', label: made?.label || '', where: mode(), error: e?.message || String(e) });
     return false;
   } finally {
     running = false;
@@ -299,14 +314,30 @@ export async function backupNow({ force = false, build = null } = {}) {
   }
 }
 
+// 書き込みでエラーになっても、実は保存できていることがある（応答だけが届かなかったなど）。
+// ログイン切れ・許可切れは確かめようがないので、そのまま失敗にする
+async function savedAnyway(t, name, err) {
+  if (/login|auth|permission|401|403/i.test(String(err?.name || '') + String(err?.message || ''))) return false;
+  resultHandler({ checking: true });
+  try {
+    return (await t.list()).some((f) => f.name === name);
+  } catch {
+    return false;
+  }
+}
+
+// 保存の結果（自動・手動とも）を受け取る：{ ok, auto, name, label, where, error } / { checking }
+let resultHandler = () => {};
+export function onBackupResult(fn) { resultHandler = fn || (() => {}); }
+
 // 一定時間ごとに確認し、変更があって保存間隔を過ぎていれば保存する
 function tick() {
-  if (state === 'on' && checked && dirty && Date.now() - lastRun >= intervalMin() * 60_000) backupNow();
+  if (state === 'on' && checked && dirty && Date.now() - lastRun >= intervalMin() * 60_000) backupNow({ auto: true });
 }
 
 // 画面を閉じる・切り替えるときに呼ぶ。未保存の変更があれば保存する
 export function flushNow() {
-  if (state === 'on' && checked && dirty && Date.now() - lastRun >= LEAVE_MIN_MS) backupNow();
+  if (state === 'on' && checked && dirty && Date.now() - lastRun >= LEAVE_MIN_MS) backupNow({ auto: true });
 }
 
 // ---------- 起動時の確認と同期 ----------

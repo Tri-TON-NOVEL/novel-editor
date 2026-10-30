@@ -1,6 +1,6 @@
 // オフラインでも起動できるよう、アプリ本体をキャッシュする。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'v101';
+const VERSION = 'v102';
 const CACHE = 'novel-editor-' + VERSION;
 const SHELL = [
   './',

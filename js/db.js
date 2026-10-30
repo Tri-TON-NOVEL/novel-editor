@@ -152,6 +152,7 @@ export const prefs = {
   },
   set(key, value) {
     try { localStorage.setItem('novel-editor:' + key, JSON.stringify(value)); } catch { /* 保存できなくても続行 */ }
+    scheduleEnvironmentSave();
   },
   // すべての設定値（バックアップ用）
   entries() {
@@ -165,3 +166,32 @@ export const prefs = {
     return out;
   },
 };
+
+// ---------- 環境（設定）の自動保存 ----------
+// 設定は localStorage にあるが、ブラウザーが消すことがある（iPhone の Safari など）。
+// 小説とは分けて、IndexedDB の meta（'environment'）にも控えておき、設定がすべて消えていたら戻す。
+// ログインの鍵（novel-editor-session:）は控えない。クラウドへは、利用者が選んだときだけ送る（自動では送らない）。
+const ENV_KEY = 'environment';
+let envTimer = null;
+function scheduleEnvironmentSave() {
+  clearTimeout(envTimer);
+  envTimer = setTimeout(() => { saveEnvironment().catch(() => {}); }, 800);
+}
+
+export async function saveEnvironment() {
+  clearTimeout(envTimer);
+  const entries = prefs.entries();
+  if (!Object.keys(entries).length) return;
+  await meta.set(ENV_KEY, { savedAt: new Date().toISOString(), prefs: entries });
+}
+
+/** 設定がすべて消えていて、控えがあれば戻す。戻したら控えの日時、戻さなければ null */
+export async function restoreEnvironmentIfLost() {
+  if (Object.keys(prefs.entries()).length) return null;
+  const saved = await meta.get(ENV_KEY).catch(() => null);
+  if (!saved?.prefs || !Object.keys(saved.prefs).length) return null;
+  for (const [key, value] of Object.entries(saved.prefs)) {
+    try { localStorage.setItem('novel-editor:' + key, JSON.stringify(value)); } catch { /* 保存できなくても続行 */ }
+  }
+  return saved.savedAt || '';
+}

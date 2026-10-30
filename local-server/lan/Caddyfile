@@ -3,8 +3,8 @@
     auto_https disable_redirects
 }
 
-https://192.168.1.16:8766 {
-    bind 192.168.1.16
+https://192.168.1.13:8766 {
+    bind 192.168.1.13
     tls internal
     root * "I:/Programs/NovelEditor"
     @private path /caddy.exe /*.ps1 /*.bat /.claude/* /local-server/*
@@ -14,8 +14,8 @@ https://192.168.1.16:8766 {
     file_server
 }
 
-http://192.168.1.16:8767 {
-    bind 192.168.1.16
+http://192.168.1.13:8767 {
+    bind 192.168.1.13
     root * "I:/Programs/NovelEditor/local-server/lan/cert-share"
     header Cache-Control "no-store"
     file_server

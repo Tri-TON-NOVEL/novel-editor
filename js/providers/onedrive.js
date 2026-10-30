@@ -17,7 +17,7 @@ const AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
 const SCOPES = 'Files.ReadWrite offline_access';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /\d{8}T\d{6}Z\.json$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
 // これより大きいファイルは分けて送る（アップロード セッション）。分ける大きさは 320KiB の倍数にする決まり
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024;
 const CHUNK = 320 * 1024 * 10;

@@ -20,7 +20,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：7.6.2（`2026.10.29-7.6.2`）
+- **バージョン**：7.7.0（`2026.10.30-7.7.0`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **簡易マニュアル（逆引き）**：[docs/簡易マニュアル_逆引き.md](docs/簡易マニュアル_逆引き.md)
 - **設定マニュアル**：[docs/設定マニュアル.md](docs/設定マニュアル.md)
@@ -225,14 +225,14 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 | `js/notation.js` | なろう／アルファの記法と変換・挿絵・X の文字数・ひな型 |
 | `js/importer.js` / `js/importui.js` / `js/zip.js` | TXT・ZIPインポートの解析と画面 |
 | `js/tables.js` | 分類つきの表（設定・登場人物）と全体プロット |
-| `js/db.js` | 端末内保存（IndexedDB） |
+| `js/db.js` | 端末内保存（IndexedDB）・設定（localStorage）と、その控え（環境設定の自動保存） |
 | `js/backup.js` / `js/sync.js` | 全体・エピソードのファイル形式と復元／自動バックアップと同期 |
 | `js/localfile.js` | 端末のファイルの読み書き（保存先を選ぶ画面・共有メニュー・ダウンロード） |
 | `js/dialogs.js` | 確認・入力・選択の画面（どの OS でも同じボタンの並び） |
 | `js/providers/` | クラウド接続（`gdrive.js`：Google ドライブ、`onedrive.js`：OneDrive、`index.js`：使うクラウドの切り替え） |
 | `sw.js` / `manifest.webmanifest` | オフライン対応・ホーム画面アイコン |
-| `docs/` | 使い方と、改修の記録 |
-| `tests/` | 自動テストとサンプル TXT、OneDrive のテスト用の偽物（`mock_onedrive.js`） |
+| `docs/` | 使い方と、改修の記録（保存形式の比較は `docs/保存形式の比較（7.7調査）.md`） |
+| `tests/` | 自動テスト（`tests/index.html` をブラウザで開く）、OneDrive のテスト用の偽物（`mock_onedrive.js`） |
 
 - フレームワークやビルドは使っていません。HTML・CSS・JavaScript（ES モジュール）だけで動きます。
 - 更新したときは、`sw.js` の `VERSION` と `js/app.js` の `APP_VERSION` を上げてください（各端末に新しい版が届くようにするため）。

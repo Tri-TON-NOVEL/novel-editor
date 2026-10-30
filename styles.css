@@ -389,6 +389,11 @@ body.resizing { cursor: col-resize; user-select: none; }
 .pane-side .field.grow { min-height: 80px; }
 .pane-side .field[data-field="plot"] { flex: var(--plot-share, 1) 1 0; }
 .pane-side .field[data-field="memo"] { flex: var(--memo-share, 1) 1 0; }
+/* 片方を折りたたむ・隠すと、残った欄が空いた高さを全部使う（比率のままだと半分しか広がらない） */
+body.hide-plot .pane-side .field[data-field="memo"],
+.pane-side:has([data-field="plot"].folded) .field[data-field="memo"],
+body.hide-memo .pane-side .field[data-field="plot"],
+.pane-side:has([data-field="memo"].folded) .field[data-field="plot"] { flex: 1 1 0; }
 .plot-memo-splitter { flex: 0 0 12px; cursor: row-resize; touch-action: none; position: relative; }
 .plot-memo-splitter::after { content: ""; position: absolute; left: 0; right: 0; top: 5px; height: 2px; border-radius: 2px; background: var(--border); transition: background .15s; }
 .plot-memo-splitter:hover::after, .plot-memo-splitter.dragging::after { background: var(--accent); }
@@ -412,7 +417,11 @@ body.hide-plot .plot-memo-splitter, body.hide-memo .plot-memo-splitter,
 /* 章・エピソード：「リスト」はプルダウンだけ */
 .ep-pick-box { display: none; }
 body.ep-list-mode .ep-pick-box { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
-body.ep-list-mode .ep-pick-box select { font-size: 16px; font-weight: 400; padding: 8px; width: 100%; }
+.ep-pick-list { display: flex; flex-direction: column; gap: 2px; font-weight: 400; }
+.ep-pick-chapter { font-size: 12px; font-weight: 700; color: var(--muted); margin: 8px 0 2px; }
+.ep-pick-item { text-align: left; font-size: 16px; padding: 10px 12px; min-height: 44px; border-radius: 6px; width: 100%; overflow-wrap: anywhere; }
+/* 今のエピソードは色で示す（✓は付けない） */
+.ep-pick-item.current { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
 body.ep-list-mode .nav-head, body.ep-list-mode .ep-sort, body.ep-list-mode .ep-search, body.ep-list-mode #episode-list { display: none !important; }
 body.hide-foreword [data-field="foreword"],
 body.hide-afterword [data-field="afterword"],
@@ -947,6 +956,29 @@ button.danger-solid { background: var(--danger); border-color: var(--danger); co
 }
 .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 .toast.error { background: var(--danger); color: #fff; }
+.toast { white-space: pre-line; }
+
+/* 保存・読み込みの共通の表示：押したボタンだけを処理中の色にする（最初から強調しない） */
+button.task-running,
+button.task-running:disabled {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-text, #fff);
+  opacity: 1;
+  cursor: progress;
+}
+/* 失敗したときは画面を閉じずに、画面の中に理由を出す */
+.task-error {
+  margin: 0;
+  padding: 8px 10px;
+  border: 1px solid var(--danger);
+  border-radius: 8px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
+  white-space: pre-line;
+  font-size: 13px;
+}
+.task-error[hidden] { display: none; }
 
 .busy-dialog {
   width: auto;
@@ -1089,3 +1121,24 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .ask-dialog input[type="text"] { background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-size: 16px; width: 100%; }
 .ask-dialog .ask-select { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .ask-dialog .ask-select select { font-size: 16px; font-weight: 400; padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+
+/* バックアップの作成：選べない項目は薄くして、押せないことが見て分かるようにする */
+.dialog fieldset:disabled { opacity: 0.45; }
+.dialog fieldset.checks .sub-check { grid-column: 1 / -1; padding-left: 28px; }
+.dialog fieldset.checks label.disabled { opacity: 0.45; }
+#backup-pack-name { word-break: break-all; color: var(--text); }
+.list .item-meta, .backup-file-list .file-meta { white-space: pre-line; }
+/* 狭い画面の「プロット・メモ」タブ：見えている高さをプロットとフリーメモで分け合う（高さは app.js の fitSideFields） */
+@media (max-width: 899px) {
+  .pane-side.side-fit { min-height: var(--side-avail); }
+  .pane-side.side-fit .field.grow:not(.folded) { flex-basis: 0; flex-shrink: 1; min-height: min-content; } /* 中身（見出し＋最低の高さ）より小さくしない＝重ならない */
+  .pane-side.side-fit .field[data-field="plot"]:not(.folded) { flex-grow: var(--plot-share, 1); }
+  .pane-side.side-fit .field[data-field="memo"]:not(.folded) { flex-grow: var(--memo-share, 1); }
+  body.hide-plot .pane-side.side-fit .field[data-field="memo"],
+  .pane-side.side-fit:has([data-field="plot"].folded) .field[data-field="memo"],
+  body.hide-memo .pane-side.side-fit .field[data-field="plot"],
+  .pane-side.side-fit:has([data-field="memo"].folded) .field[data-field="plot"] { flex-grow: 1; }
+  .pane-side.side-fit #plot, .pane-side.side-fit #free-memo { flex: 1 1 auto; min-height: 30dvh; } /* 前の版と同じ最低の高さ。空きがあれば広がる */
+  /* キーボードが出ている間：入力中の欄を、キーボードの上に見えている高さに収める（閉じたら元に戻る） */
+  body.keyboard-open:not(.maximizing) .pane textarea.kb-target { flex: none !important; min-height: 120px !important; height: calc(var(--vv-height, 100dvh) - 140px) !important; max-height: calc(var(--vv-height, 100dvh) - 140px) !important; }
+}

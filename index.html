@@ -108,9 +108,10 @@
         </select>
         <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
       </div>
-      <label class="ep-pick-box">章・エピソード
-        <select id="ep-pick" aria-label="編集するエピソード"></select>
-      </label>
+      <div class="ep-pick-box">
+        <div class="ep-pick-head">章・エピソード</div>
+        <div class="ep-pick-list" id="ep-pick" role="group" aria-label="編集するエピソード"></div>
+      </div>
       <div class="ep-search">
         <input type="search" id="ep-search" placeholder="検索（本文・タイトル・プロット・メモ）" aria-label="エピソードを検索" autocomplete="off" spellcheck="false" enterkeyhint="search">
       </div>
@@ -418,20 +419,23 @@
     <fieldset class="checks">
       <legend>バックアップ対象</legend>
       <label><input type="checkbox" name="environment"> 環境設定を含める</label>
-      <label><input type="checkbox" name="includeNovel" checked> 小説データを含める</label>
+      <label class="sub-check" id="backup-pack-clientid-row"><input type="checkbox" name="includeClientId"> OAuth Client IDを環境バックアップに含める</label>
+      <p class="hint sub-check">ログインの情報（アクセストークンなど）は、どれを選んでも保存しません。</p>
+      <label><input type="checkbox" name="includeNovel" checked> 小説を含める</label>
     </fieldset>
     <fieldset id="backup-pack-novel-data">
-      <legend>小説データ</legend>
+      <legend>小説の範囲</legend>
       <div class="radio-row pack-scope">
-        <label><input type="radio" name="scope" value="all"> 全小説</label>
-        <label><input type="radio" name="scope" value="project" checked> 選択した小説を丸ごと</label>
-        <label><input type="radio" name="scope" value="custom"> 必要な内容を選ぶ</label>
+        <label><input type="radio" name="scope" value="all"> 全作品</label>
+        <label><input type="radio" name="scope" value="project" checked> 作品全体</label>
+        <label><input type="radio" name="scope" value="materials"> 作品資料</label>
+        <label><input type="radio" name="scope" value="episodes"> エピソードを選ぶ</label>
       </div>
       <label id="backup-pack-project-row">対象作品
         <select name="project"></select>
       </label>
+      <p class="hint" id="backup-pack-scope-hint"></p>
       <div id="backup-pack-custom" hidden>
-        <label class="check"><input type="checkbox" name="materials" checked> 作品資料（あらすじ・全体プロット・世界観／用語・登場人物・メモ）</label>
         <div class="button-row">
           <button type="button" class="tool" id="backup-pack-all-episodes">エピソードを全て選択</button>
           <button type="button" class="tool" id="backup-pack-no-episodes">全て解除</button>
@@ -440,7 +444,7 @@
         <label class="check"><input type="checkbox" name="autoTargets" checked> 選んだエピソードをサーバへの自動バックアップ対象にもする</label>
       </div>
     </fieldset>
-    <p class="validation-message" id="backup-pack-validation"></p>
+    <p class="hint">ファイル名：<span id="backup-pack-name"></span></p>    <p class="validation-message" id="backup-pack-validation"></p>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
       <button value="save" class="primary" id="backup-pack-save">次へ</button>

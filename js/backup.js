@@ -84,7 +84,7 @@ export async function makeBackup({ device = null } = {}) {
       ...(device ? { device } : {}),
       projects,
       versions: allVersions,
-      prefs: sharedPrefs(prefs.entries()),
+      prefs: withoutClientIds(sharedPrefs(prefs.entries())), // クライアントIDは入れない（環境バックアップで選んだときだけ）
       devicePrefs: portableDevicePrefs(prefs.entries()), // 「環境」を読み込むときだけ使う
     }, null, 1),
     count: projects.length,
@@ -114,12 +114,21 @@ const ENV_LABELS = [
   ['gdrive.clientId', 'Google ドライブのクライアントID', () => ''],
   ['onedrive.clientId', 'OneDrive のアプリケーション（クライアント）ID', () => ''],
 ];
+const CLOUD_LABELS = {
+  'cloud.provider': (v) => `使うクラウド（${{ gdrive: 'Google ドライブ', onedrive: 'OneDrive', none: 'なし' }[v] || v}）`,
+  'gdrive.folder': (v) => `Google ドライブの保存先フォルダ${v?.name ? `（${v.name}）` : ''}`,
+  'gdrive.backupFolder': (v) => `Google ドライブの自動バックアップ先${v?.name ? `（${v.name}）` : ''}`,
+  'onedrive.folder': (v) => `OneDrive の保存先フォルダ${v?.name ? `（${v.name}）` : ''}`,
+  'onedrive.backupFolder': (v) => `OneDrive の自動バックアップ先${v?.name ? `（${v.name}）` : ''}`,
+  'sync.mode': (v) => `自動バックアップの方式（${{ off: '使わない', folder: 'フォルダ', cloud: 'クラウド', gdrive: 'クラウド' }[v] || v}）`,
+};
 
 /** バックアップに入っている環境の中身（画面で知らせる用）。何もなければ空の配列 */
 export function environmentSummary(backup) {
   const p = backup?.prefs || {};
   const lines = [];
   for (const [key, label, count] of ENV_LABELS) if (p[key] !== undefined && p[key] !== null) lines.push(`${label}${count(p[key]) ? `（${count(p[key])}）` : ''}`);
+  for (const [key, value] of Object.entries(backup?.cloud || {})) if (CLOUD_LABELS[key] && value !== null && value !== undefined) lines.push(CLOUD_LABELS[key](value));
   const others = Object.keys(sharedPrefs(p)).filter((k) => !ENV_LABELS.some(([key]) => key === k)).length
     + Object.keys(backup?.devicePrefs || {}).length;
   if (others) lines.push(`表示・ファイル・自動バックアップの間隔・書き出しの選び方などの設定（${others}項目）`);
@@ -133,10 +142,30 @@ export function environmentSummary(backup) {
  * 自動バックアップの保存先・プレフィックス・ログインなど、端末そのものの記録は変えない。
  */
 export function applyEnvironment(backup, mode) {
-  if (mode === 'merge') { mergeSharedPrefs(backup.prefs); return; }
-  for (const [key, value] of Object.entries({ ...sharedPrefs(backup.prefs), ...portableDevicePrefs(backup.devicePrefs) })) {
-    prefs.set(key, value);
+  // クライアントIDが入っていない（空の）ときは、この端末のクライアントIDを消さない
+  const remote = Object.fromEntries(Object.entries(backup.prefs || {}).filter(([k, v]) => !CLIENT_ID_PREFS.includes(k) || (typeof v === 'string' && v.trim())));
+  const before = { provider: prefs.get('cloud.provider', null), ids: CLIENT_ID_PREFS.map((k) => prefs.get(k, '')) };
+  if (mode === 'merge') mergeSharedPrefs(remote);
+  else {
+    for (const [key, value] of Object.entries({ ...sharedPrefs(remote), ...portableDevicePrefs(backup.devicePrefs) })) prefs.set(key, value);
   }
+  // 表示（折りたたみ）とクラウド・フォルダの設定。まとめるときは、この端末でまだ決めていないものだけ
+  const extra = {
+    ...Object.fromEntries(Object.entries(backup.devicePrefs || {}).filter(([k]) => DISPLAY_DEVICE_PREFS.test(k))),
+    ...Object.fromEntries(Object.entries(backup.cloud || {}).filter(([k]) => CLOUD_PREFS.test(k))),
+  };
+  const cloudChanged = [];
+  for (const [key, value] of Object.entries(extra)) {
+    if (value === null || value === undefined) continue;
+    const mine = prefs.get(key, null);
+    if (mode === 'merge' && mine !== null) continue;
+    if (JSON.stringify(mine) === JSON.stringify(value)) continue;
+    prefs.set(key, value);
+    if (CLOUD_PREFS.test(key)) cloudChanged.push(key);
+  }
+  const idsChanged = CLIENT_ID_PREFS.some((k, i) => prefs.get(k, '') !== before.ids[i]);
+  // クラウドを切り替えた・フォルダやクライアントIDが変わった → つなぎ直し・フォルダの選び直しが要ることがある
+  return { cloudChanged, idsChanged, providerChanged: prefs.get('cloud.provider', null) !== before.provider };
 }
 
 /**
@@ -170,10 +199,16 @@ export async function restoreBackup(backup, mode) {
   return backup.projects.length;
 }
 
-export function backupFileName() {
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}${String(d.getDate()).padStart(2, '0')}`;
-  return `あや綴り_全体_${ymd}.json`;
+// 全体バックアップ（旧形式。作品すべて＋環境）。名前は [対象]_[範囲]_[日時]
+export function backupFileName(label = '', at = new Date()) {
+  return `環境＋小説全作品${label ? '_' + label : ''}_${fileStamp(at)}.json`;
+}
+
+// ファイル名に使う日時（この端末の時刻）：20261030-073000
+export function fileStamp(at = new Date()) {
+  const d = new Date(at);
+  const p = (n) => String(n).padStart(2, '0');
+  return `${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}-${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}`;
 }
 
 // ---------- 選択式バックアップパック ----------
@@ -184,10 +219,24 @@ const clone = (value) => structuredClone(value);
 const safePart = (value, max = 36) => String(value || '')
   .replace(/[\\/:*?"<>|\r\n\t]/g, '_').replace(/\s+/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').slice(0, max);
 
-function environmentPayload() {
+// クラウド・保存先フォルダの設定（どのクラウドを使うか・選んだフォルダ・自動バックアップの方式）。
+// 環境として読み込むときだけ使う。ログインの鍵（novel-editor-session:）はここにも、どのバックアップにも入らない
+const CLOUD_PREFS = /^(cloud\.provider|gdrive\.(folder|backupFolder)|onedrive\.(folder|backupFolder)|sync\.mode)$/;
+// 表示の設定のうち、端末の記録として外していたもの（折りたたみの状態）
+const DISPLAY_DEVICE_PREFS = /^fold\./;
+// OAuth のクライアントID。「OAuth Client IDを環境バックアップに含める」を選んだときだけ入れる
+export const CLIENT_ID_PREFS = ['gdrive.clientId', 'onedrive.clientId'];
+const withoutClientIds = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !CLIENT_ID_PREFS.includes(k)));
+
+function environmentPayload({ includeClientId = false } = {}) {
+  const all = prefs.entries();
+  const shared = sharedPrefs(all);
+  const pick = (re) => Object.fromEntries(Object.entries(all).filter(([k]) => re.test(k)));
   return {
-    prefs: sharedPrefs(prefs.entries()),
-    devicePrefs: portableDevicePrefs(prefs.entries()),
+    prefs: includeClientId ? shared : withoutClientIds(shared),
+    devicePrefs: { ...portableDevicePrefs(all), ...pick(DISPLAY_DEVICE_PREFS) },
+    cloud: pick(CLOUD_PREFS),
+    clientIdIncluded: !!includeClientId,
   };
 }
 
@@ -263,6 +312,15 @@ export async function makePack(plan = {}) {
     const p = projects.find((x) => x.id === plan.projectId);
     if (p) addWhole(p);
   }
+  // 作品資料だけ／エピソードだけ（エピソードは複数選べる）。'custom' は前の版の画面（資料とエピソードを一緒に選ぶ）
+  if (plan.scope === 'materials') {
+    const p = projects.find((x) => x.id === plan.projectId);
+    if (p) addMaterials(p);
+  }
+  if (plan.scope === 'episodes') {
+    const p = projects.find((x) => x.id === plan.projectId);
+    if (p) addEpisodes(p, plan.episodeIds);
+  }
   if (plan.scope === 'custom') {
     const p = projects.find((x) => x.id === plan.projectId);
     if (p) {
@@ -290,9 +348,12 @@ export async function makePack(plan = {}) {
     createdAt,
     reason: plan.reason || 'manual-pack',
     device: plan.device || null,
-    environment: plan.environment ? environmentPayload() : null,
+    environment: plan.environment ? environmentPayload(plan.environmentOptions) : null,
     items,
   };
+  // 一覧の表示とファイル名のための管理情報（読み込みには使わない。なくても読める）
+  const { works, ...meta } = packMeta(pack);
+  pack.meta = { ...meta, scope: items.length ? (plan.scope || meta.scope) : null };
   return { pack, text: JSON.stringify(pack, null, 1), itemCount: items.length };
 }
 
@@ -335,18 +396,100 @@ export function parseAnyBackup(text) {
   throw new Error('あや綴りのバックアップファイルではありません');
 }
 
-export function packFileName(pack, { title = '', episodeId = '', workId = '', prefix = '' } = {}) {
-  const stamp = String(pack.createdAt || new Date().toISOString()).replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
-  const device = safePart(prefix || pack.device?.prefix || 'device', 28);
-  const kind = pack.reason === 'manual-episode' ? 'EPISODE' : pack.reason === 'auto-episode' ? 'AUTO' : 'PACK';
-  const parts = ['あや綴り', kind];
-  if (workId) parts.push(safePart(workId, 8));
-  if (episodeId) parts.push(safePart(episodeId, 8));
-  if (title) parts.push(safePart(title, 32));
-  parts.push(device, stamp);
-  return parts.filter(Boolean).join('__') + '.json';
+// ---------- 管理情報・ファイル名 ----------
+// ファイル名は人が見分けるためのもの。同じ作品・エピソードかどうかは、中の workId・エピソードの id で見分ける（名前では判断しない）。
+
+const episodeNo = (item) => (Number.isInteger(item.order) && item.order >= 0 ? item.order + 1 : null);
+
+function episodesLabel(list) {
+  const nos = list.map(episodeNo).filter((n) => n !== null).sort((a, b) => a - b);
+  if (!nos.length) return `${list.length}話`;
+  if (nos.length === 1) return `第${nos[0]}話`;
+  const contiguous = nos.every((n, i) => i === 0 || n === nos[i - 1] + 1);
+  return contiguous ? `第${nos[0]}-${nos.at(-1)}話` : `第${nos[0]}話ほか${nos.length - 1}話`;
 }
 
+/** パックの中身から、一覧とファイル名に使う情報を作る（古いファイルにも使える） */
+export function packMeta(pack) {
+  const items = pack.items || [];
+  const byWork = new Map();
+  for (const item of items) {
+    const p = item.project || {};
+    const workId = p.workId || p.id || item.key;
+    if (!byWork.has(workId)) byWork.set(workId, { workId, title: p.title || '無題', whole: false, materials: false, episodes: [] });
+    const row = byWork.get(workId);
+    if (item.type === 'project') row.whole = true;
+    else if (item.type === 'materials') row.materials = true;
+    else if (item.type === 'episode') row.episodes.push(item);
+  }
+  const works = [...byWork.values()];
+  const env = !!pack.environment && Object.keys(pack.environment).some((k) => Object.keys(pack.environment[k] || {}).length);
+  const novel = items.length > 0;
+  let scope = pack.meta?.scope || null;
+  if (!scope && novel) {
+    if (pack.legacy || (works.length > 1 && works.every((w) => w.whole))) scope = 'all';
+    else if (works.every((w) => w.whole)) scope = 'project';
+    else if (works.every((w) => !w.whole && !w.episodes.length)) scope = 'materials';
+    else if (works.length === 1 && !works[0].whole && !works[0].materials) scope = 'episodes';
+    else scope = 'targets';
+  }
+  return {
+    content: env && novel ? 'both' : env ? 'environment' : novel ? 'novel' : 'none',
+    scope,
+    projects: works.map((w) => ({ workId: w.workId, title: w.title })),
+    episodes: works.flatMap((w) => w.episodes.map((e) => ({ workId: w.workId, id: e.episode?.id || '', no: episodeNo(e), title: e.episode?.title || '' }))),
+    auto: /^auto/.test(pack.reason || ''),
+    works,
+  };
+}
+
+const SCOPE_LABEL = { all: '全作品', project: '作品全体', materials: '作品資料', episodes: 'エピソード', targets: 'エピソード', custom: '作品資料・エピソード' };
+
+/** 一覧に出す内容。分からないところは「不明」 */
+export function describePack(pack) {
+  const m = packMeta(pack);
+  const one = m.works.length === 1 ? m.works[0] : null;
+  const allEpisodes = m.works.flatMap((w) => w.episodes);
+  return {
+    // 前の形式（全体バックアップ）は、自動バックアップでも手動の保存でも同じ形なので見分けられない
+    kind: !pack.reason || pack.reason === 'legacy-full' ? '不明' : m.auto ? '自動' : '手動',
+    environment: m.content === 'environment' || m.content === 'both' ? 'あり' : 'なし',
+    novel: m.content === 'novel' || m.content === 'both' ? 'あり' : 'なし',
+    scope: m.content === 'environment' ? '—' : (SCOPE_LABEL[m.scope] || '不明'),
+    project: !m.works.length ? '—' : m.scope === 'all' ? `${m.works.length}作品` : one ? one.title : `${m.works.length}作品（${m.works.map((w) => w.title).join('、')}）`,
+    episode: !allEpisodes.length ? '—' : one ? episodesLabel(allEpisodes) : `${allEpisodes.length}話`,
+    device: pack.device?.prefix ? String(pack.device.prefix).replace(/_+$/, '') : '不明',
+    createdAt: pack.createdAt || null,
+    meta: m,
+  };
+}
+
+// 名前に入れる「対象」と「範囲」：小説全作品／小説作品_作品名／小説作品資料_作品名／小説話_作品名_第126話、環境は「環境」「環境＋…」
+export function packLabel(pack) {
+  const m = packMeta(pack);
+  const title = (w) => safePart(w?.title || '無題', 24);
+  let novel = '';
+  if (m.content === 'novel' || m.content === 'both') {
+    const one = m.works.length === 1 ? m.works[0] : null;
+    const eps = m.works.flatMap((w) => w.episodes);
+    if (m.scope === 'all') novel = '小説全作品';
+    else if (m.scope === 'project') novel = one ? `小説作品_${title(one)}` : `小説作品_${m.works.length}作品`;
+    else if (m.scope === 'materials' || (one && !eps.length)) novel = one ? `小説作品資料_${title(one)}` : `小説作品資料_${m.works.length}作品`;
+    else novel = one ? `小説話_${title(one)}_${episodesLabel(eps)}` : `小説話_${m.works.length}作品${eps.length}話`;
+  }
+  if (m.content === 'environment') return '環境';
+  if (m.content === 'both') return `環境＋${novel}`;
+  return novel || '空';
+}
+
+/**
+ * パックのファイル名：[対象]_[範囲]_[日時].json（例：小説話_星の庭_第126話_20261030-073000.json）
+ * device を渡したとき（自動バックアップの共有フォルダ）は、どの端末のものか一覧で分かるよう「@端末名」を日時の前に付ける
+ */
+export function packFileName(pack, { device = '' } = {}) {
+  const who = safePart(String(device || '').replace(/_+$/, ''), 20);
+  return `${packLabel(pack)}${who ? '@' + who : ''}_${fileStamp(pack.createdAt || new Date())}.json`;
+}
 export function packSummary(pack) {
   const projects = new Map();
   let episodes = 0;
@@ -415,11 +558,11 @@ function remapEditionIds(project, map) {
 export async function restorePack(pack, { selected = null, asNew = false, environmentMode = 'merge' } = {}) {
   const keys = selected ? new Set(selected) : null;
   const use = (key) => !keys || keys.has(key);
-  if (pack.environment && use('environment')) applyEnvironment(pack.environment, environmentMode);
+  const environmentResult = pack.environment && use('environment') ? applyEnvironment(pack.environment, environmentMode) : null;
   const locals = await db.all();
   const byWork = new Map(locals.map((p) => [p.workId, normalize(p)]));
   const created = new Map();
-  const result = { addedList: [], updatedList: [], keptList: [] };
+  const result = { addedList: [], updatedList: [], keptList: [], environmentResult };
 
   const targetFor = async (remote, title) => {
     const workId = remote.workId || remote.id || makeId();

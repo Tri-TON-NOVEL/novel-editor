@@ -20,7 +20,7 @@ import { prefs } from '../db.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /\d{8}T\d{6}Z\.json$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';

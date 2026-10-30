@@ -78,6 +78,10 @@ export const localFile = {
     const w = await handle.createWritable();
     await w.write(text);
     await w.close();
+    // 書けたかを読み直して確かめる（大きさが違えば失敗として知らせる）
+    const size = new Blob([text]).size;
+    const saved = await handle.getFile();
+    if (saved.size !== size) throw new Error(`ファイルを最後まで書き込めませんでした（${saved.size.toLocaleString()} / ${size.toLocaleString()} バイト）`);
   },
 
   // 保存のしかた（画面の案内に使う）：'picker' | 'share' | 'download'
@@ -88,11 +92,12 @@ export const localFile = {
   },
 
   // 戻り値: 保存先のハンドル / 'shared'（共有メニューで渡した） / 'downloaded'（ダウンロード） / キャンセル時は null
-  async saveAs(text, suggestedName, types, mime) {
+  // whileWriting：保存先を選んだあと、実際に書き込む間だけ「保存中…」を出すための包み（アプリ側から渡す）
+  async saveAs(text, suggestedName, types, mime, whileWriting = (fn) => fn()) {
     if (hasFsa) {
       try {
         const handle = await window.showSaveFilePicker({ suggestedName, types });
-        await this.write(handle, text);
+        await whileWriting(() => this.write(handle, text));
         return handle;
       } catch (e) {
         if (isAbort(e)) return null;

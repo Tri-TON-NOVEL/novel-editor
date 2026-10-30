@@ -554,6 +554,40 @@ group('7.5.2：ZIP内のTXTを一覧・読み込み', async () => {
   eq(text, '第二話の本文', '選んだTXTを読み込む');
 });
 
+group('7.7：バックアップの名前は [対象]_[範囲]_[日時]（あや綴り_ を付けない）', () => {
+  const at = new Date(2026, 9, 30, 7, 30, 0).toISOString();
+  const p = { workId: 'w1', title: '星の庭', episodes: [] };
+  const ep = (order, id) => ({ type: 'episode', project: p, order, episode: { id, title: '' } });
+  const pack = (environment, items, scope, reason = 'manual-pack') => ({ environment, items, meta: scope ? { scope } : undefined, reason, createdAt: at });
+  eq(B.packFileName(pack({ prefs: { a: 1 } }, [], null)), '環境_20261030-073000.json', '環境だけ');
+  eq(B.packFileName(pack(null, [{ type: 'project', project: p }, { type: 'project', project: { workId: 'w2', title: '別' } }], 'all')), '小説全作品_20261030-073000.json', '全作品');
+  eq(B.packFileName(pack(null, [{ type: 'project', project: p }], 'project')), '小説作品_星の庭_20261030-073000.json', '作品全体');
+  eq(B.packFileName(pack(null, [{ type: 'materials', project: p }], 'materials')), '小説作品資料_星の庭_20261030-073000.json', '作品資料');
+  eq(B.packFileName(pack(null, [ep(125, 'e126')], 'episodes')), '小説話_星の庭_第126話_20261030-073000.json', '1話');
+  eq(B.packFileName(pack(null, [ep(2, 'a'), ep(3, 'b'), ep(4, 'c')], 'episodes')), '小説話_星の庭_第3-5話_20261030-073000.json', '続いた話');
+  eq(B.packFileName(pack({ prefs: { a: 1 } }, [{ type: 'project', project: p }], 'all')), '環境＋小説全作品_20261030-073000.json', '環境＋小説');
+  eq(B.packFileName(pack(null, [ep(0, 'a')], 'targets', 'auto-episode'), { device: 'Win_' }), '小説話_星の庭_第1話@Win_20261030-073000.json', '自動バックアップは端末名を付ける');
+  ok(!B.backupFileName().startsWith('あや綴り'), '全体バックアップにも あや綴り_ を付けない');
+  ok(/^環境＋小説全作品_\d{8}-\d{6}\.json$/.test(B.backupFileName()), '全体バックアップは環境＋小説全作品');
+});
+
+group('7.7：一覧に出す管理情報（古いファイルは中身から判断・分からなければ不明）', () => {
+  const p = { workId: 'w1', title: '星の庭', episodes: [{ id: 'e1' }] };
+  const auto = B.describePack({ reason: 'auto-episode', device: { prefix: 'iPhone_' }, environment: null,
+    items: [{ type: 'episode', project: p, order: 0, episode: { id: 'e1' } }] });
+  eq([auto.kind, auto.environment, auto.novel, auto.scope, auto.project, auto.episode, auto.device], ['自動', 'なし', 'あり', 'エピソード', '星の庭', '第1話', 'iPhone'], '自動バックアップ');
+  const legacy = B.parseAnyBackup(JSON.stringify({ format: B.BACKUP_FORMAT, version: 1, projects: [p], versions: [], prefs: { templates: [] } }));
+  const d = B.describePack(legacy);
+  eq([d.kind, d.environment, d.novel, d.scope, d.device], ['不明', 'あり', 'あり', '全作品', '不明'], '旧形式の全体バックアップ');
+  const env = B.describePack({ reason: 'manual-pack', environment: { prefs: { a: 1 } }, items: [] });
+  eq([env.kind, env.environment, env.novel, env.scope, env.project, env.episode], ['手動', 'あり', 'なし', '—', '—', '—'], '環境だけ');
+});
+
+group('7.7：環境バックアップの一覧表示にクラウド・フォルダの設定も出す', () => {
+  const lines = B.environmentSummary({ prefs: {}, devicePrefs: {}, cloud: { 'cloud.provider': 'onedrive', 'onedrive.folder': { id: 'x', name: '小説' } } });
+  ok(lines.some((l) => l.includes('OneDrive') && l.includes('使うクラウド')), '使うクラウド');
+  ok(lines.some((l) => l.includes('保存先フォルダ（小説）')), 'フォルダ');
+});
 // ---------- 実行 ----------
 
 const list = document.getElementById('results');

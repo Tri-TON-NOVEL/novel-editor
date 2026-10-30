@@ -1,4 +1,4 @@
-import { db, prefs, versions, meta } from './db.js';
+import { db, prefs, versions, meta, saveEnvironment, restoreEnvironmentIfLost } from './db.js';
 import {
   newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars,
   draftOf, DRAFT_FIELDS, SITE_KEYS,
@@ -8,7 +8,7 @@ import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from 
 import {
   makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
-  makePack, parseAnyBackup, packFileName, packSummary, restorePack, PACK_FORMAT, materialsSignature,
+  makePack, parseAnyBackup, packFileName, describePack, packSummary, restorePack, PACK_FORMAT, materialsSignature,
 } from './backup.js';
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
@@ -24,7 +24,7 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 600;
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.29-7.6.2';
+const APP_VERSION = '2026.10.30-7.7.0';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -112,12 +112,72 @@ async function withBusy(message, work) {
   busyDepth++;
   $('busy-message').textContent = message || '読み込み中…';
   if (!dialog.open) dialog.showModal();
-  await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  // 表示が描かれてから始める。アプリが裏に回っていると描画が止まるので、少し待っても描かれなければそのまま始める
+  await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, 150); });
   try {
     return await work();
   } finally {
     busyDepth = Math.max(0, busyDepth - 1);
     if (!busyDepth && dialog.open) dialog.close();
+  }
+}
+
+// 処理中の文言だけを変える（例：通信の結果が分からず、保存先を確かめ直しているとき）
+function setBusyMessage(message) {
+  if ($('busy-dialog').open) $('busy-message').textContent = message;
+}
+
+// ---------- 保存・読み込みの共通の流れ ----------
+// アプリ全体で同じ動きにする：
+//   1. 押したボタンだけを「処理中」の色にし、その画面のほかのボタンは押せなくする（二重に実行しない）
+//   2. 処理中の文言を最前面に出す（処理が終わるまで出し続ける）
+//   3. 成功：その画面を閉じ、完了の文言を出す（しばらくして消える）
+//   4. 失敗：画面は閉じず、画面の中にエラーとやり直し方を出す
+// work() が false を返したら「やめた」（キャンセル）として、何も知らせない。
+const TASK_TEXT = {
+  load: ['読み込み中…', '読み込みが完了しました'],
+  save: ['保存中…', '保存が完了しました'],
+  backup: ['バックアップ作成中…', 'バックアップを作成しました'],
+  restore: ['復元中…', '復元が完了しました'],
+};
+
+function setTaskError(dialog, text) {
+  if (!dialog) return;
+  let el = dialog.querySelector('.task-error');
+  if (!el && text) {
+    el = Object.assign(document.createElement('p'), { className: 'task-error' });
+    el.setAttribute('role', 'alert');
+    const foot = dialog.querySelector('.dialog-foot');
+    if (foot) foot.before(el); else dialog.querySelector('form, .dialog')?.append(el);
+  }
+  if (el) { el.textContent = text; el.hidden = !text; }
+}
+
+async function runTask(kind, work, { button = null, dialog = button?.closest('dialog') || null, busy, done, closeOnSuccess = true } = {}) {
+  if (button?.classList.contains('task-running')) return null;
+  const [busyText, doneText] = TASK_TEXT[kind] || TASK_TEXT.load;
+  const controls = dialog ? [...dialog.querySelectorAll('button, input, select, textarea')] : (button ? [button] : []);
+  const wasDisabled = controls.map((c) => c.disabled);
+  controls.forEach((c) => { c.disabled = true; });
+  button?.classList.add('task-running');
+  setTaskError(dialog, '');
+  try {
+    // busy:false … 保存先を選ぶ画面などを先に出す処理。処理中の表示は work の中で必要なときだけ出す
+    const result = busy === false ? await work() : await withBusy(busy || busyText, work);
+    if (result === false) return false;
+    if (dialog && closeOnSuccess && dialog.open) dialog.close();
+    const text = typeof done === 'function' ? done(result) : (done || doneText);
+    if (text) toast(text);
+    return result;
+  } catch (e) {
+    console.error(e);
+    const msg = e?.message || String(e);
+    if (dialog?.open) setTaskError(dialog, `⚠ ${msg}\n内容を確かめて、もう一度ボタンを押すとやり直せます。`);
+    toast(msg, true);
+    return null;
+  } finally {
+    controls.forEach((c, i) => { c.disabled = wasDisabled[i]; });
+    button?.classList.remove('task-running');
   }
 }
 
@@ -248,6 +308,7 @@ function applyFolds() {
     if (b) { b.textContent = folded ? '▸' : '▾'; b.setAttribute('aria-expanded', String(!folded)); }
   }
   renderFoldInfo();
+  scheduleFitFields();
 }
 
 function renderFoldInfo() {
@@ -578,20 +639,22 @@ function jumpToSearchHit(i) {
   toast(`${h.label}（${searchCursor.n + 1}／${hits.length}件目）${hits.length > 1 ? '　もう一度押すと次へ' : ''}`);
 }
 
-// 「表示」の章・エピソードを「リスト」にしたとき：エピソードを選ぶプルダウン（章ごとにまとめる）
+// 「表示」の章・エピソードを「リスト」にしたとき：エピソードを選ぶ一覧（章ごとにまとめる）。
+// プルダウンは iPhone で今のエピソードに✓が付き、同じものを選び直しても何も起きないため、ボタンの一覧にする。
+// どれを押しても（今のエピソードでも）本文の編集画面へ移る。今のエピソードは色で示す（✓は付けない）
 function renderEpisodePick() {
-  const sel = $('ep-pick');
-  const groups = episodeGroups().filter((g) => g.indexes.length);
-  const opt = (i) => new Option(`${i + 1}. ${episodeName(project.episodes[i], project.site)}`, String(i));
-  sel.replaceChildren(...groups.map((g) => {
-    if (!project.chapters.length) return null;
-    const og = document.createElement('optgroup');
-    og.label = g.chapter ? chapterName(g.chapter) : '未分類';
-    og.append(...g.indexes.map(opt));
-    return og;
-  }).filter(Boolean));
-  if (!project.chapters.length) sel.append(...project.episodes.map((_, i) => opt(i)));
-  sel.value = String(epIndex);
+  const box = $('ep-pick');
+  const btn = (i) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ep-pick-item', textContent: `${i + 1}. ${episodeName(project.episodes[i], project.site)}` });
+    b.dataset.ep = i;
+    if (view === 'episode' && i === epIndex) { b.classList.add('current'); b.setAttribute('aria-current', 'true'); }
+    return b;
+  };
+  box.replaceChildren();
+  if (!project.chapters.length) { box.append(...project.episodes.map((_, i) => btn(i))); return; }
+  for (const g of episodeGroups().filter((x) => x.indexes.length)) {
+    box.append(Object.assign(document.createElement('div'), { className: 'ep-pick-chapter', textContent: g.chapter ? chapterName(g.chapter) : '未分類' }), ...g.indexes.map(btn));
+  }
 }
 
 function renderEpisodeList() {
@@ -1230,12 +1293,14 @@ async function renderDrive() {
     }
     if (driveUi !== ui) return;
     for (const f of files) {
-      const act = ui.mode === 'open'
-        ? button('開く', () => finishDrive({ id: f.id, name: f.name }), 'primary')
-        : button('上書き', async () => {
-          if (!(await ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${ui.p.label} の版の履歴から戻せます）`, { ok: '上書きする' }))) return;
-          await runDriveSave(f.name, f.id);
-        }, 'danger');
+      // 最初から強調するボタンは置かない（押したボタンだけを処理中の色にする）
+      const act = Object.assign(document.createElement('button'), { type: 'button', textContent: ui.mode === 'open' ? '開く' : '上書き', className: ui.mode === 'open' ? '' : 'danger' });
+      act.addEventListener('click', () => (ui.mode === 'open'
+        // 開く：読み込みが済んでから画面を閉じる（失敗したら画面に理由を出す）
+        ? runTask('load', () => ui.p.load(f.id), { button: act, dialog: $('drive-dialog'), busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false })
+          .then((text) => { if (typeof text === 'string') finishDrive({ id: f.id, name: f.name, text }); })
+        : ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${ui.p.label} の版の履歴から戻せます）`, { ok: '上書きする' })
+          .then((yes) => (yes ? runDriveSave(f.name, f.id, act) : null))).catch(fail));
       list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [act]));
     }
   }
@@ -1267,24 +1332,50 @@ async function driveOk() {
   if (!ui?.cur) return;
   prefs.set(lastFolderKey(ui.p), ui.cur);
   if (ui.mode === 'folder') { const f = ui.byId.get(ui.cur); finishDrive({ id: f.id, name: f.name }); return; }
-  if (ui.mode === 'save') await runDriveSave($('drive-name').value);
+  if (ui.mode === 'save') await runDriveSave($('drive-name').value, null, $('drive-ok'));
 }
 
-async function runDriveSave(name, fileId = null) {
+// 通信が途中で切れたなどで結果が分からないとき、保存先に実際にファイルができたかを確かめる。
+// できていれば成功とする（保存できているのに「失敗」と出さないため）
+async function confirmCloudSaved(p, folderId, name, startedAt) {
+  setBusyMessage('処理結果を確認しています…');
+  try {
+    const files = await p.filesIn(folderId);
+    const hit = files.find((f) => f.name === name && (!f.modifiedTime || Date.parse(f.modifiedTime) >= startedAt - 120_000));
+    return hit || null;
+  } catch {
+    return null;
+  }
+}
+
+async function runDriveSave(name, fileId = null, btn = $('drive-ok')) {
   const ui = driveUi;
   if (!ui || !ui.cur) return;
   let finalName = name.trim() || 'untitled';
   if (!hasExt(finalName, ui.kind)) finalName += FILE_KINDS[ui.kind].ext;
-  // 戻り値は ID（Google ドライブ）か { id, name }（OneDrive。同じ名前があって番号を付けたときは、その名前）
-  const saved = await ui.p.save(ui.text, finalName, fileId, { workId: ui.workId, mime: FILE_KINDS[ui.kind].mime, folderId: ui.cur });
+  const saved = await runTask('save', async () => {
+    const startedAt = Date.now();
+    try {
+      // 戻り値は ID（Google ドライブ）か { id, name }（OneDrive。同じ名前があって番号を付けたときは、その名前）
+      return await ui.p.save(ui.text, finalName, fileId, { workId: ui.workId, mime: FILE_KINDS[ui.kind].mime, folderId: ui.cur });
+    } catch (e) {
+      if (e?.name === 'NeedLoginError') throw e;
+      const hit = await confirmCloudSaved(ui.p, ui.cur, finalName, startedAt);
+      if (hit) return { id: hit.id, name: hit.name };
+      throw e;
+    }
+  }, { button: btn, dialog: $('drive-dialog'), busy: ui.busyText || '保存中…', done: null, closeOnSuccess: false });
+  if (saved === null || saved === false) return; // 失敗：画面は開いたまま（理由は画面に出ている）
   prefs.set(lastFolderKey(ui.p), ui.cur);
   prefs.set('file.lastDestination', 'cloud');
   finishDrive({ type: 'cloud', label: ui.p.label, id: saved?.id ?? saved, name: saved?.name || finalName });
 }
 
-// 保存・開くで使う入口（前の版からの名前）
-function openDriveSave({ p, title, name, text, workId = '', kind = 'json' }) {
-  return driveBrowse({ p, mode: 'save', kind, title, name, text, workId });
+// 保存・開くで使う入口（前の版からの名前）。busyText：書き込む間に出す文言（「バックアップ作成中…」など）
+async function openDriveSave({ p, title, name, text, workId = '', kind = 'json', busyText = '' }) {
+  const r = driveBrowse({ p, mode: 'save', kind, title, name, text, workId });
+  if (driveUi) driveUi.busyText = busyText;
+  return r;
 }
 
 function pickDriveFile(p, title, kind = 'json') {
@@ -1296,28 +1387,31 @@ function pickDriveFile(p, title, kind = 'json') {
  * title：クラウドの画面の見出し（「（全体：すべての作品）」など。前に「○○に保存」を付ける）
  * 戻り値: { type: 'cloud', label, id, name }／{ type: 'local', handle, how, name }／null（やめた）
  */
-async function saveTextTo(text, name, { title, force = false, workId = '', kind = 'json' } = {}) {
+async function saveTextTo(text, name, { title, force = false, workId = '', kind = 'json', busyText = '保存中…' } = {}) {
   const dest = await chooseDestination('save', { force });
   let where = dest;
   if (dest === 'cloud') {
-    const r = await openDriveSave({ p: driveProvider(), title, name, text, workId, kind });
+    const r = await openDriveSave({ p: driveProvider(), title, name, text, workId, kind, busyText });
     if (r !== 'local') return r;
     where = 'local';
   }
   if (where !== 'local') return null;
   // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
   if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive・OneDrive など）を選べます');
-  const r = await localFile.saveAs(text, name, FILE_KINDS[kind].types, FILE_KINDS[kind].mime);
+  // 保存先を選んだあと、実際に書き込む間だけ処理中の文言を出す
+  const r = await localFile.saveAs(text, name, FILE_KINDS[kind].types, FILE_KINDS[kind].mime, (write) => withBusy(busyText, write));
   if (!r) return null;
   prefs.set('file.lastDestination', 'local');
   return typeof r === 'string' ? { type: 'local', handle: null, how: r, name } : { type: 'local', handle: r, how: 'picker', name: r.name };
 }
 
-function savedMessage(r, what) {
-  if (r.type === 'cloud') return `${what}を ${r.label} に「${r.name}」として保存しました`;
-  if (r.how === 'downloaded') return `${what}を書き出しました（「ダウンロード」フォルダ）`;
-  if (r.how === 'shared') return `${what}を渡しました（共有メニューで選んだ保存先）`;
-  return `${what}を「${r.name}」に保存しました`;
+// 保存が終わったときの知らせ。head：完了の文言（「保存が完了しました」「バックアップを作成しました」）
+// ダウンロード・共有メニューは、ブラウザーの外で保存されるため「完了」とは言わず、確かめ方を伝える
+function savedMessage(r, what, head = '保存が完了しました') {
+  if (r.type === 'cloud') return `${head}\n${what}：${r.label} の「${r.name}」`;
+  if (r.how === 'downloaded') return `${what}をダウンロードとして書き出しました（「ダウンロード」フォルダを確かめてください）`;
+  if (r.how === 'shared') return `${what}を共有メニューに渡しました（選んだ保存先に保存されたか確かめてください）`;
+  return `${head}\n${what}：「${r.name}」`;
 }
 
 /**
@@ -1330,12 +1424,13 @@ async function openFrom(title, { force = false, kind = 'json' } = {}) {
   if (dest === 'cloud') {
     const p = driveProvider();
     const f = await pickDriveFile(p, title, kind);
-    if (f && f !== 'local') return withBusy('ファイルを読み込んでいます…', async () => ({ text: await p.load(f.id), name: f.name, source: 'cloud', id: f.id }));
+    // クラウドの画面の「開く」で、読み込みが済んでから画面を閉じている（f.text）
+    if (f && f !== 'local') return { text: f.text ?? await withBusy('ファイルを読み込み中…', () => p.load(f.id)), name: f.name, source: 'cloud', id: f.id };
     if (f !== 'local') return null;
     where = 'local'; // 「この端末・その他から開く」を選び直した
   }
   if (where !== 'local') return null;
-  const r = await localFile.open(kind, (file) => withBusy('ファイルを読み込んでいます…', () => file.text()));
+  const r = await localFile.open(kind, (file) => withBusy('ファイルを読み込み中…', () => file.text()));
   return r ? { ...r, source: 'local' } : null;
 }
 
@@ -1360,9 +1455,9 @@ async function allOpen({ force = false } = {}) {
     openRestoreDialog(src.text, src.name);
     return;
   }
-  await withBusy('作品を読み込んでいます…', async () => switchTo(await importContent(parse(src.text, src.name))));
+  await withBusy('読み込み中…', async () => switchTo(await importContent(parse(src.text, src.name))));
   returnToEditor();
-  toast(`「${src.name}」を作品として開きました`);
+  toast(`読み込みが完了しました\n「${src.name}」を作品として開きました`);
 }
 
 // ---------- 選択式バックアップパック ----------
@@ -1386,63 +1481,92 @@ async function renderPackEpisodes(projectId) {
   });
 }
 
+const PACK_SCOPE_HINT = {
+  all: 'すべての作品を、稿・履歴とあわせて保存します。',
+  project: '選んだ作品を丸ごと（作品資料・全エピソード・稿・履歴）保存します。',
+  materials: 'あらすじ・全体プロット・章・世界観／用語・登場人物・メモを保存します（エピソードは含みません）。',
+  episodes: '選んだエピソード（複数可）を、両サイトの全稿・プロット・フリーメモ・活動報告とあわせて保存します。',
+};
+
+let packFormProjects = [];
 function updatePackForm() {
   const form = $('backup-pack-form');
   const scope = form.elements.scope.value;
   const includeNovel = form.elements.includeNovel.checked;
+  const env = form.elements.environment.checked;
+  // 「小説を含める」を外したら、範囲の選択は見た目でも押せなくする（選んでいた範囲は残しておき、付け直すと元に戻る）
   $('backup-pack-novel-data').disabled = !includeNovel;
-  $('backup-pack-project-row').hidden = !includeNovel || scope === 'all';
-  $('backup-pack-custom').hidden = !includeNovel || scope !== 'custom';
-  const hasNovel = includeNovel && (scope === 'all' || scope === 'project'
-    || (scope === 'custom' && (form.elements.materials.checked || [...$('backup-pack-episodes').querySelectorAll('input:checked')].length)));
-  const has = form.elements.environment.checked || hasNovel;
+  form.elements.includeClientId.disabled = !env;
+  $('backup-pack-clientid-row').classList.toggle('disabled', !env);
+  $('backup-pack-project-row').hidden = scope === 'all';
+  $('backup-pack-custom').hidden = scope !== 'episodes';
+  $('backup-pack-scope-hint').textContent = PACK_SCOPE_HINT[scope] || '';
+  const checked = [...$('backup-pack-episodes').querySelectorAll('input:checked')].map((x) => x.value);
+  const hasNovel = includeNovel && (scope !== 'episodes' || checked.length > 0);
+  const has = env || hasNovel;
   $('backup-pack-save').disabled = !has;
-  $('backup-pack-validation').textContent = has ? '' : '保存する内容を一つ以上選んでください。';
+  $('backup-pack-validation').textContent = has ? ''
+    : !env && !includeNovel ? '「環境設定を含める」「小説を含める」のどちらかを選んでください。' : '保存するエピソードを一つ以上選んでください。';
+  // ファイル名の見本（実際の名前は、作成した時刻で決まる）
+  const p = packFormProjects.find((x) => x.id === form.elements.project.value);
+  const items = !hasNovel ? [] : scope === 'all' ? packFormProjects.map((x) => ({ type: 'project', project: x }))
+    : !p ? [] : scope === 'project' ? [{ type: 'project', project: p }]
+      : scope === 'materials' ? [{ type: 'materials', project: p }]
+        : p.episodes.map((ep, order) => ({ type: 'episode', project: p, order, episode: ep })).filter((x) => checked.includes(x.episode.id));
+  $('backup-pack-name').textContent = has
+    ? packFileName({ environment: env ? { prefs: { x: 1 } } : null, items, meta: { scope: items.length ? scope : null }, reason: 'manual-pack', createdAt: new Date().toISOString() })
+    : '—';
 }
 
 async function openBackupPackCreate() {
   await flush();
   const form = $('backup-pack-form');
   const projects = await allProjects();
+  packFormProjects = projects;
   form.elements.project.replaceChildren(...projects.map((p) => new Option(p.title || '無題', p.id)));
   form.elements.project.value = project.id;
   form.elements.scope.value = 'project';
   form.elements.environment.checked = false;
+  form.elements.includeClientId.checked = false; // 既定は含めない
   form.elements.includeNovel.checked = true;
-  form.elements.materials.checked = true;
   form.elements.autoTargets.checked = true;
+  setTaskError($('backup-pack-dialog'), '');
   await renderPackEpisodes(project.id);
   updatePackForm();
   $('backup-pack-dialog').showModal();
 }
 
-async function createBackupPack() {
+// 「次へ」：保存先を選んで保存する。保存が終わるまで画面は閉じない（失敗したら、画面の中で知らせてやり直せる）
+async function createBackupPack(btn = $('backup-pack-save')) {
   const form = $('backup-pack-form');
-  for (const site of SITE_KEYS) {
-    const state = await ensureEdition(episode(), site);
-    await storeEdition(episode(), site, state.cur);
-  }
-  await flush();
-  const scope = form.elements.includeNovel.checked ? form.elements.scope.value : 'none';
-  const plan = {
-    environment: form.elements.environment.checked,
-    scope,
-    projectId: form.elements.project.value,
-    materials: form.elements.materials.checked,
-    episodeIds: [...$('backup-pack-episodes').querySelectorAll('input:checked')].map((x) => x.value),
-    reason: 'manual-pack', appVersion: APP_VERSION,
-    device: { prefix: sync.prefix(), id: sync.deviceId() },
-  };
-  const made = await makePack(plan);
-  const selectedProject = (await allProjects()).find((p) => p.id === plan.projectId);
-  if (scope === 'custom' && form.elements.autoTargets.checked) {
-    prefs.set('sync.episodeTargets', plan.episodeIds.length ? [{ workId: selectedProject?.workId || project.workId, episodeIds: plan.episodeIds }] : []);
-  }
-  const name = packFileName(made.pack, { title: scope === 'all' || scope === 'none' ? '' : selectedProject?.title, prefix: sync.prefix() });
-  const saved = await saveTextTo(made.text, name, { title: `${cloudName()}に保存（バックアップパック）`, force: true });
-  if (saved) toast(savedMessage(saved, `バックアップパック（${made.itemCount}項目）`));
+  const dialog = $('backup-pack-dialog');
+  const saved = await runTask('backup', async () => {
+    for (const site of SITE_KEYS) {
+      const state = await ensureEdition(episode(), site);
+      await storeEdition(episode(), site, state.cur);
+    }
+    await flush();
+    const scope = form.elements.includeNovel.checked ? form.elements.scope.value : 'none';
+    const plan = {
+      environment: form.elements.environment.checked,
+      environmentOptions: { includeClientId: form.elements.environment.checked && form.elements.includeClientId.checked },
+      scope,
+      projectId: form.elements.project.value,
+      episodeIds: scope === 'episodes' ? [...$('backup-pack-episodes').querySelectorAll('input:checked')].map((x) => x.value) : [],
+      reason: 'manual-pack', appVersion: APP_VERSION,
+      device: { prefix: sync.prefix(), id: sync.deviceId() },
+    };
+    const made = await makePack(plan);
+    const selectedProject = (await allProjects()).find((p) => p.id === plan.projectId);
+    const r = await saveTextTo(made.text, packFileName(made.pack), { title: `${cloudName()}に保存（バックアップ）`, force: true, busyText: 'バックアップ作成中…' });
+    if (!r) return false; // 保存先を選ぶ画面を閉じた（やめた）
+    if (scope === 'episodes' && form.elements.autoTargets.checked) {
+      prefs.set('sync.episodeTargets', plan.episodeIds.length ? [{ workId: selectedProject?.workId || project.workId, episodeIds: plan.episodeIds }] : []);
+    }
+    return { r, made };
+  }, { button: btn, dialog, busy: false, done: ({ r, made }) => savedMessage(r, `バックアップ（${made.itemCount}項目${made.pack.environment ? '・環境設定' : ''}）`, 'バックアップを作成しました') });
+  return saved;
 }
-
 function itemDetail(item) {
   if (item.type === 'project') {
     const p = normalize(item.project);
@@ -1468,7 +1592,9 @@ function renderBackupInspection(pack, name = '', { acknowledge = null } = {}) {
   inspectedBackup = { pack, name, acknowledge };
   const s = packSummary(pack);
   const reason = { 'manual-pack': '手動バックアップパック', 'manual-episode': '上段の保存', 'auto-episode': 'サーバへの自動バックアップ', 'legacy-full': '旧形式の全体バックアップ' }[pack.reason] || pack.reason || '不明';
-  $('backup-inspect-summary').textContent = `${name ? `ファイル：${name}\n` : ''}作成日時：${fmtTime(pack.createdAt)}\n作成方法：${reason}\n端末：${pack.device?.prefix || '不明'}\n内容：${s.environment ? '環境設定・' : ''}${s.projects.length}作品・${s.episodes}選択エピソード`;
+  const d = describePack(pack);
+  $('backup-inspect-summary').textContent = `${name ? `ファイル：${name}\n` : ''}作成日時：${fmtTime(pack.createdAt)}\n作成方法：${reason}（${d.kind}）\n端末：${d.device}\n`
+    + `環境：${d.environment}${pack.environment?.clientIdIncluded ? '（OAuth Client IDを含む）' : ''}・小説：${d.novel}・範囲：${d.scope}・作品：${d.project}・話：${d.episode}\n内容：${s.environment ? '環境設定・' : ''}${s.projects.length}作品・${s.episodes}選択エピソード`;
   $('backup-inspect-warning').textContent = pack.legacy ? '旧形式のバックアップです。内容を確認してから読み込んでください。' : '';
   const tree = $('backup-inspect-tree');
   tree.replaceChildren();
@@ -1534,15 +1660,16 @@ async function protectBeforeRestore(pack, selected, name = '') {
   await meta.set('preSyncBackup', { createdAt: now.toISOString(), from: name, text: before.text });
 }
 
-async function restoreInspected(asNew = false) {
+async function restoreInspected(asNew = false, btn = null) {
   if (!inspectedBackup) return;
   const selected = [...$('backup-inspect-tree').querySelectorAll('input:checked')].map((x) => x.value);
-  if (!selected.length) { toast('読み込む内容を選んでください', true); return; }
+  if (!selected.length) { setTaskError($('backup-inspect-dialog'), '⚠ 読み込む内容を、左の一覧で一つ以上選んでください。'); return; }
   const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？'
     : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
       + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
   if (!(await ask(verb, { ok: '読み込む' }))) return;
-  const result = await withBusy('バックアップを読み込んでいます…', async () => {
+  // 復元が済んでから画面を閉じる。失敗したら画面は開いたまま、理由を出す
+  const result = await runTask('restore', async () => {
     await flush();
     if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
     const restored = await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
@@ -1557,9 +1684,18 @@ async function restoreInspected(asNew = false) {
       if (p) showProject(p);
     }
     return restored;
+  }, {
+    button: btn || $('backup-restore'), dialog: $('backup-inspect-dialog'),
+    done: (r) => `復元が完了しました（追加${r.addedList.length}・更新${r.updatedList.length}${selected.includes('environment') ? '・環境設定' : ''}）`,
   });
+  if (!result) return;
   returnToEditor();
-  toast(`バックアップを読み込みました（追加${result.addedList.length}・更新${result.updatedList.length}）`);
+  const follow = environmentFollowUp(result.environmentResult);
+  if (follow) {
+    await inform(`環境設定を読み込みました。${follow}`);
+    // 使うクラウド・クライアントIDが変わったときは、つなぎ直すために画面を読み直す
+    if (result.environmentResult.providerChanged || result.environmentResult.idsChanged) location.reload();
+  }
 }
 
 // ---------- エピソード専用ファイル（今開いているエピソード） ----------
@@ -1583,7 +1719,7 @@ async function epOpen({ force = false } = {}) {
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、両サイトとも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
-  await withBusy('エピソードを読み込んでいます…', async () => {
+  await withBusy('読み込み中…', async () => {
     // 開く前の原稿は前の番号の稿に残し、両サイトとも新しい稿に開く
     for (const site of SITE_KEYS) await raiseEdition(ep, site);
     applyEpisodeSnapshot(ep, data.episode);
@@ -1593,7 +1729,7 @@ async function epOpen({ force = false } = {}) {
     renderEpisodeList();
   });
   returnToEditor();
-  toast(`「${src.name}」を今のエピソードに開きました`);
+  toast(`読み込みが完了しました\n「${src.name}」を今のエピソードに開きました`);
 }
 
 // ---------- インポート・エクスポート（プレーンテキスト） ----------
@@ -1603,12 +1739,12 @@ async function importText() {
   const src = await openFrom('プレーンテキストを開く', { kind: 'txt' });
   if (!src) return;
   const text = src.file
-    ? await withBusy('テキストを読み込んでいます…', async () => decodeText(await src.file.arrayBuffer()).text)
+    ? await withBusy('ファイルを読み込み中…', async () => decodeText(await src.file.arrayBuffer()).text)
     : src.text;
   const body = text.replace(/\r\n?/g, '\n');
   const d = cur();
   if (d.body && !(await ask(`今のエピソードの本文（${SITES[editSite].short}用）を、「${src.name}」の内容で上書きしますか？\n（上書き前の内容は、前の番号の稿に残します）`, { ok: '上書きする' }))) return;
-  await withBusy('本文へ読み込んでいます…', async () => {
+  await withBusy('読み込み中…', async () => {
     if (d.body) await raiseEdition(episode(), editSite); // 読み込む前の内容は前の番号の稿に残る
     d.body = body;
     episode().siteUpdatedAt = { ...(episode().siteUpdatedAt || {}), [editSite]: new Date().toISOString() };
@@ -1618,7 +1754,7 @@ async function importText() {
     renderEpisodeList();
   });
   returnToEditor();
-  toast(`「${src.name}」を本文（${SITES[editSite].short}用）に読み込みました（${countChars(body).all.toLocaleString()}字）`);
+  toast(`読み込みが完了しました\n「${src.name}」を本文（${SITES[editSite].short}用）に読み込みました（${countChars(body).all.toLocaleString()}字）`);
 }
 
 // 書き出しは、いま編集している側（なろう用／アルファ用）の原稿
@@ -2171,7 +2307,7 @@ async function runRestore(mode) {
   const backup = pendingBackup;
   const loadedName = pendingBackupName;
   const acknowledge = pendingBackupAcknowledge;
-  const before = await withBusy('バックアップを読み込んでいます…', async () => {
+  const before = await withBusy('復元中…', async () => {
     await flush();
     const current = new Set((await db.all()).map((p) => p.id));
     await restoreBackup(backup, mode);
@@ -2249,13 +2385,11 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
   const made = await makePack({ scope: 'targets', targets: planTargets, reason, appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
   // 保存できたときだけ「送った」と記録する（失敗したら次の保存でもう一度入れる）
   made.afterSave = () => prefs.set('sync.materialsSent', { ...(prefs.get('sync.materialsSent', {}) || {}), ...nowSigs });
-  const one = reason === 'manual-episode' ? episode() : null;
-  made.name = packFileName(made.pack, {
-    prefix: sync.prefix(),
-    title: one ? episodeName(one, project.site) : '',
-    episodeId: one?.id || '',
-    workId: one ? project.workId : '',
-  });
+  // 共有フォルダに置くので、どの端末のものか分かるよう端末名を付ける（例：小説話_作品名_第3話@Win_20261030-073000.json）
+  made.name = packFileName(made.pack, { device: sync.prefix() });
+  // 知らせに出す名前：小説・作品名・第3話（作品資料も入れたときは「・作品資料」）
+  const d = describePack(made.pack);
+  made.label = ['小説', d.project, d.episode !== '—' ? d.episode : '', made.pack.items.some((x) => x.type === 'materials') ? '作品資料' : ''].filter(Boolean).join('・');
   return made;
 }
 
@@ -2313,7 +2447,9 @@ async function loadBackupManager() {
       else if (projectItems.length) alias = projectItems.length === 1 ? `作品全体「${projectItems[0].project?.title || '無題'}」` : `全小説 ${projectItems.length}作品`;
       else if (materialItems.length) alias = `作品資料「${materialItems[0].project?.title || '無題'}」`;
       else alias = '環境設定';
-      return { ...f, pack, alias, priority, size: new Blob([text]).size };
+      const desc = describePack(pack);
+      backupDescriptions.set(`${f.id}|${f.name}`, Promise.resolve(desc));
+      return { ...f, pack, alias, desc, priority, size: new Blob([text]).size };
     } catch (e) {
       return { ...f, alias: '内容を確認できないバックアップ', priority: 9, error: e.message };
     }
@@ -2326,7 +2462,7 @@ async function loadBackupManager() {
     const row = Object.assign(document.createElement('label'), { className: 'file-row' });
     row.append(input,
       Object.assign(document.createElement('span'), { className: 'file-name', textContent: `${f.priority === 0 && f === managedBackupFiles.find((x) => x.priority === 0) ? '最新　' : ''}${f.alias}` }),
-      Object.assign(document.createElement('span'), { className: 'file-meta', textContent: `${f.prefix || '端末不明'}・${fmtTime(new Date(f.at).toISOString())}${f.size ? `・${Math.ceil(f.size / 1024).toLocaleString()}KB` : ''}${f.error ? `・⚠ ${f.error}` : ''}` }));
+      Object.assign(document.createElement('span'), { className: 'file-meta', textContent: `${f.name}\n${fmtTime(new Date(f.desc?.createdAt || f.at).toISOString())}・${f.desc ? backupDescriptionLine(f.desc) : `端末：${f.prefix || '不明'}`}${f.size ? `・${Math.ceil(f.size / 1024).toLocaleString()}KB` : ''}${f.error ? `・⚠ ${f.error}` : ''}` }));
     box.append(row);
   }
 }
@@ -2350,10 +2486,12 @@ function selectedManagedFiles() {
 async function inspectManagedBackup() {
   const files = selectedManagedFiles();
   if (files.length !== 1) { toast('内容を確認するファイルを一つ選んでください', true); return; }
-  const text = await withBusy('バックアップの内容を読み込んでいます…', async () => (
+  const text = await runTask('load', async () => (
     files[0].pack ? JSON.stringify(files[0].pack) : sync.read(files[0])
-  ));
+  ), { button: $('backup-file-inspect'), dialog: $('backup-manage-dialog'), busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false });
+  if (!text) return;
   $('backup-manage-dialog').close();
+  toast('読み込みが完了しました\n戻す内容を選んでください');
   await inspectBackupText(text, files[0].name, { acknowledge: managedBackupLatest });
 }
 
@@ -2363,9 +2501,11 @@ async function deleteManagedBackups() {
   const names = files.slice(0, 8).map((f) => `・${f.name}`).join('\n') + (files.length > 8 ? `\nほか${files.length - 8}件` : '');
   if (!(await ask(`次のバックアップファイルを削除します。\n${names}\n\n削除後は、あや綴りから元に戻せません。`, { ok: `${files.length}件を削除`, danger: true }))) return;
   let done = 0;
-  for (const f of files) {
-    try { await sync.remove(f); done++; } catch (e) { console.warn(e); }
-  }
+  await withBusy('削除中…', async () => {
+    for (const f of files) {
+      try { await sync.remove(f); done++; } catch (e) { console.warn(e); }
+    }
+  });
   await loadBackupManager();
   toast(`${done}件のバックアップファイルを削除しました${done < files.length ? `（${files.length - done}件は削除できませんでした）` : ''}`, done < files.length);
 }
@@ -2559,7 +2699,7 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
   if (r.value === ENV_CHOICE) return loadEnvironmentFrom(backup, name, env);
   const src = novels.find((p) => p.id === r.value);
   if (!src) { toast('読み込む小説を選んでください', true); return false; }
-  await withBusy('バックアップを読み込んでいます…', async () => {
+  await withBusy('復元中…', async () => {
     await flush();
     // ひな型・リンク・アカウントなどの設定も、この端末の設定を消さずにまとめる
     mergeSharedPrefs(backup.prefs);
@@ -2580,9 +2720,9 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
     if (newest && newest.name !== name) sync.markChecked(newest);
   });
   if (r.choice === 'overwrite') {
-    await inform(`いま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています）`);
+    await inform(`復元が完了しました\n\nいま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています）`);
   } else {
-    await inform(`「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
+    await inform(`復元が完了しました\n\n「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
   }
   returnToEditor();
   return true;
@@ -2590,19 +2730,29 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
 
 const ENV_CHOICE = '__environment__';
 
+// 環境を読み込んだあと、つなぎ直し・フォルダの選び直しが要るかを知らせる文
+function environmentFollowUp(res) {
+  if (!res) return '';
+  const lines = [];
+  if (res.providerChanged || res.idsChanged) lines.push('・使うクラウドかクライアントIDが変わりました。「設定」→「クラウド」でログインし直してください。');
+  if (res.cloudChanged?.some((k) => /folder|backupFolder/i.test(k))) lines.push('・保存先フォルダの設定を読み込みました。この端末で使えないときは「設定」でフォルダを選び直してください。');
+  if (res.cloudChanged?.includes('sync.mode')) lines.push('・自動バックアップの方式を読み込みました。「設定」→「自動バックアップ」で保存先が使えるか確かめてください（フォルダ方式は、この端末でフォルダを選び直す必要があります）。');
+  return lines.length ? `\n\n${lines.join('\n')}` : '';
+}
+
 // バックアップの「環境」（設定・ひな型・リンク・アカウントなど）を読み込む。小説は変えない。読み込んだら画面を読み直す
 async function loadEnvironmentFrom(backup, name, env) {
   const list = env.map((l) => '・' + l).join('\n');
   const how = await choose(`「${name}」の環境を読み込みます。小説は変わりません。\n\n入っているもの：\n${list}\n\n`
     + '・まとめる：この端末の設定を残したまま、足りないものを足します（ひな型・リンク・TXT インポートの条件は足し合わせ、アカウントは空の欄だけ埋めます）。\n'
     + '・置き換える：バックアップの設定で上書きします（表示・ファイル・自動バックアップの間隔なども）。\n'
-    + '自動バックアップの保存先・プレフィックス・使うクラウドとそのログインは、どちらでも変わりません。',
+    + '端末の名前（プレフィックス）とログインは、どちらでも変わりません。クライアントIDが入っていないときは、この端末のクライアントIDをそのまま使います。',
   [{ value: 'replace', label: '置き換える', danger: true }, { value: 'merge', label: 'まとめる', primary: true }]);
   if (!how) return false;
-  await withBusy('環境設定を読み込んでいます…', async () => {
+  await withBusy('復元中…', async () => {
     await flush();
-    applyEnvironment(backup, how);
-    prefs.set('restoredReport', `「${name}」の環境を${how === 'merge' ? 'まとめて' : '置き換えて'}読み込みました。\n${list}`);
+    const res = applyEnvironment(backup, how);
+    prefs.set('restoredReport', `復元が完了しました\n「${name}」の環境を${how === 'merge' ? 'まとめて' : '置き換えて'}読み込みました。\n${list}${environmentFollowUp(res)}`);
   });
   location.reload();
   return true;
@@ -2680,12 +2830,16 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
     renderSyncState();
   };
   keep.onclick = async () => {
+    const ok = await runTask('backup', async () => {
+      const ok = await sync.backupNow({ force: true });
+      if (!ok) throw new Error('保存できませんでした：' + (sync.getError() || '原因不明'));
+      return true;
+    }, { button: keep, dialog, closeOnSuccess: false, done: 'バックアップを作成しました\nこの端末の記録が最新になります' });
+    if (!ok) return;
     decide();
     dialog.close();
     syncPending = null;
     sync.markChecked(notice.entry);
-    const ok = await sync.backupNow({ force: true });
-    toast(ok ? 'この端末の記録を保存しました（これが最新になります）' : '保存できませんでした：' + (sync.getError() || ''), !ok);
   };
   later.onclick = () => { decide(); dialog.close(); doLater(); };
   // Esc などで閉じたときは「あとで／読み込まない」と同じ
@@ -2720,31 +2874,58 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
       if (f === files[0]) tags.push('最新');
       if (f.mine) tags.push('この端末');
       if (f.name === last) tags.push('前回同期したもの');
-      const act = isSync
-        ? button('読み込む', async () => {
-          // 一覧の画面は開いたまま、その上で「上書き／新小説／キャンセル」を聞く（キャンセルなら一覧に戻る）
+      // 最初はどのボタンも強調しない。押したボタンだけ「処理中」の色になる（runTask）
+      const act = button(isSync ? '読み込む' : '選ぶ', async () => {
+        const read = await runTask('load', async () => {
           const text = await sync.read(f);
-          if ((() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; } })()) {
-            decide();
-            dialog.close();
-            await inspectBackupText(text, f.name, { acknowledge: files[0] });
-            return;
-          }
+          const isPack = (() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { throw new Error('ファイルの中身を読み取れませんでした（壊れているか、あや綴りのファイルではありません）'); } })();
+          return { text, isPack };
+        }, { button: act, dialog, busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false });
+        if (!read) return;
+        const { text, isPack } = read;
+        if (isPack) {
+          decide();
+          dialog.close();
+          toast('読み込みが完了しました\n戻す内容を選んでください');
+          await inspectBackupText(text, f.name, { acknowledge: files[0] });
+          return;
+        }
+        if (isSync) {
+          // 一覧の画面は開いたまま、その上で「上書き／新小説／キャンセル」を聞く（キャンセルなら一覧に戻る）
           if (!(await loadBackupAs(text, f.name, { newest: files[0] }))) return;
           decide();
           dialog.close();
-        }, f === files[0] ? 'primary' : '')
-        : button('選ぶ', async () => {
-          const text = await sync.read(f);
-          $('sync-restore-dialog').close();
-          if ((() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; } })()) await inspectBackupText(text, f.name, { acknowledge: files[0] });
-          else openRestoreDialog(text, f.name, { acknowledge: files[0] });
-        });
-      list.append(listItem(f.name, tags.join('・'), [act]));
+          return;
+        }
+        dialog.close();
+        openRestoreDialog(text, f.name, { acknowledge: files[0] });
+      });
+      const item = listItem(f.name, tags.join('・'), [act]);
+      list.append(item);
+      // 中の管理情報（自動／手動・環境・範囲・作品・話・端末）は、あとから読んで足す
+      const metaEl = item.querySelector('.item-meta');
+      // 通信が多くなりすぎないよう、上から60件まで
+      if (list.children.length <= 60) describeBackupFile(f).then((d) => { if (d && metaEl.isConnected) metaEl.textContent = `${tags.join('・')}\n${backupDescriptionLine(d)}`; });
     }
   };
   filter.onchange = render;
   render();
+}
+
+// 一覧に出す管理情報の1行。分からないところは「不明」
+function backupDescriptionLine(d) {
+  return `${d.kind}・環境：${d.environment}・小説：${d.novel}・範囲：${d.scope}・作品：${d.project}・話：${d.episode}・端末：${d.device}`;
+}
+
+// 保存先にあるバックアップの中身を読んで、一覧用の情報にする（同じファイルは読み直さない）
+const backupDescriptions = new Map();
+function describeBackupFile(f) {
+  const key = `${f.id}|${f.name}`;
+  if (!backupDescriptions.has(key)) {
+    backupDescriptions.set(key, sync.read(f).then((text) => describePack(parseAnyBackup(text)))
+      .catch(() => ({ kind: '不明', environment: '不明', novel: '不明', scope: '不明', project: '不明', episode: '不明', device: f.prefix || '不明' })));
+  }
+  return backupDescriptions.get(key);
 }
 
 async function exportPreSync() {
@@ -2752,7 +2933,7 @@ async function exportPreSync() {
   if (!saved) { toast('同期の前の状態はありません'); return; }
   const d = new Date(saved.createdAt);
   const p = (n) => String(n).padStart(2, '0');
-  const r = await localFile.saveAs(saved.text, `あや綴り_同期の前_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}.json`, WORK_TYPES, 'application/json');
+  const r = await localFile.saveAs(saved.text, backupFileName('同期の前', d), WORK_TYPES, 'application/json', (write) => withBusy('保存中…', write));
   if (r) toast('同期の前の状態を書き出しました（「設定」→「バックアップ」→「バックアップファイルの管理」から戻せます）');
 }
 
@@ -3227,6 +3408,7 @@ function onBodyPaste(e) {
 function selectTab(name) {
   document.querySelectorAll('[data-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.tab === name)));
   document.querySelectorAll('[data-pane]').forEach((p) => p.classList.toggle('active', p.dataset.pane === name));
+  scheduleFitFields();
 }
 
 // ---------- 活動報告・ひな型 ----------
@@ -3551,6 +3733,7 @@ function applyPrefs() {
   document.documentElement.dataset.font = uiValue('font', 'serif');
   document.documentElement.style.setProperty('--body-size', uiValue('fontSize', '18') + 'px');
   applyUiPrefs();
+  scheduleFitFields();
 }
 
 // ---------- 表示（「簡易」「詳細」の2つを登録して切り替える。作品データには入れない） ----------
@@ -3648,6 +3831,11 @@ function applyUiPrefs() {
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
   if (reportMode && !uiPref('show.report')) setReportMode(false);
   document.body.classList.toggle('ep-list-mode', uiValue('episodes', 'full') === 'list');
+  // iPhone の「簡易」表示では、左の一覧を開くボタンを「作品」と呼ぶ（作品の資料とエピソードを選ぶ場所のため）
+  const drawerName = isIPhone() && uiActive() === 'simple' ? '作品' : '目次';
+  const drawerBtn = document.querySelector('.drawer-toggle');
+  drawerBtn.textContent = `☰ ${drawerName}`;
+  drawerBtn.setAttribute('aria-label', drawerName);
   const cls = document.body.classList;
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
@@ -3740,8 +3928,8 @@ function saveIphoneMaxSettings() {
 
 function fitVisualViewport() {
   const vv = window.visualViewport;
-  // 最大化中の iPhone で高さを決めてあれば、その高さにする
-  const custom = maximized ? iphoneMaxHeight() : null;
+  // 最大化中の iPhone で高さを決めてあれば、キーボードが出ている間だけその高さにする（閉じたら画面いっぱいに戻す）
+  const custom = maximized && keyboardOpen ? iphoneMaxHeight() : null;
   document.body.classList.toggle('max-custom-height', !!custom);
   const height = custom || vv?.height || window.innerHeight || document.documentElement.clientHeight;
   const width = vv?.width || window.innerWidth || document.documentElement.clientWidth;
@@ -3751,6 +3939,64 @@ function fitVisualViewport() {
   document.documentElement.style.setProperty('--vv-left', Math.round(vv?.offsetLeft || 0) + 'px');
 }
 
+// ---------- 画面のキーボードと、入力欄の高さ合わせ ----------
+// キーボードが出ているか：見えている範囲（visualViewport）が、入力中に画面より大きく縮んだとき。
+//   ・拡大（ピンチ）は scale をかけて除く ・回転は画面の高さも一緒に変わるので差が出ない
+//   ・iPad のフローティングキーボード・外付けキーボードは、ほとんど縮まないので「出ていない」として扱う
+// 出たり消えたりの途中でちらつかないよう、出たと見なす幅と消えたと見なす幅に差を付け、動きが落ち着いてから決める
+let keyboardOpen = false;
+let keyboardTimer = null;
+function isTextInput(node) {
+  return !!node?.matches?.('textarea, input:not([type]), input[type="text"], input[type="search"], input[type="url"], input[type="number"], [contenteditable="true"]');
+}
+function checkKeyboard() {
+  const vv = window.visualViewport;
+  if (!vv) return;
+  const full = window.innerHeight || document.documentElement.clientHeight;
+  const covered = full - vv.height * (vv.scale || 1);
+  const typing = isTextInput(document.activeElement);
+  const open = typing && (keyboardOpen ? covered > 60 : covered > Math.max(120, full * 0.18));
+  // 入力中の欄に印を付ける（キーボードの上に見えている高さに収める。:focus はアプリが裏に回ると外れるため使わない）
+  document.querySelectorAll('.kb-target').forEach((x) => { if (!open || x !== document.activeElement) x.classList.remove('kb-target'); });
+  if (open && document.activeElement?.tagName === 'TEXTAREA') document.activeElement.classList.add('kb-target');
+  if (open === keyboardOpen) return;
+  keyboardOpen = open;
+  document.body.classList.toggle('keyboard-open', open);
+  fitVisualViewport();
+  scheduleFitFields();
+  // 出たときは、入力中の欄がキーボードに隠れないよう見える位置へ
+  if (open && !maximized) setTimeout(() => document.activeElement?.scrollIntoView?.({ block: 'nearest' }), 50);
+}
+function scheduleKeyboardCheck(delay = 120) {
+  clearTimeout(keyboardTimer);
+  keyboardTimer = setTimeout(checkKeyboard, delay);
+}
+
+// 狭い画面の「プロット・メモ」タブ：プロットとフリーメモで、見えている高さを分け合う（境目で決めた比率どおり）。
+// 折りたたみ・表示の切り替え・画面の回転・大きさの変更・表示（簡易／詳細）の切り替え・最大化の解除のたびに計算し直す。
+// キーボードが出ている間は計算し直さない（入力中に欄の大きさが動かないように）
+let fitFrame = 0;
+let fitTimer = null;
+function scheduleFitFields() {
+  // 描画の直前にまとめて1回だけ計算する（描画が止まっているときのために、少し待つ予備も置く）
+  cancelAnimationFrame(fitFrame);
+  clearTimeout(fitTimer);
+  const run = () => { cancelAnimationFrame(fitFrame); clearTimeout(fitTimer); fitSideFields(); };
+  fitFrame = requestAnimationFrame(run);
+  fitTimer = setTimeout(run, 100);
+}
+function fitSideFields() {
+  const pane = document.querySelector('.pane-side');
+  const view = $('view-episode');
+  if (!pane || !view) return;
+  const narrow = window.matchMedia('(max-width: 899px)').matches;
+  if (!narrow || view.hidden || !pane.classList.contains('active')) { pane.style.removeProperty('--side-avail'); pane.classList.remove('side-fit'); return; }
+  if (keyboardOpen) return;
+  // 狭い画面では上の欄（稿・タイトルなど）で画面の多くが埋まるので、編集エリアの1画面分を分け合う（スクロールすると全体が見える）
+  const avail = Math.max(320, Math.floor(view.clientHeight - 8));
+  pane.style.setProperty('--side-avail', avail + 'px');
+  pane.classList.add('side-fit');
+}
 function maximizeField(field) {
   if (maximized) restoreMaximized();
   if (isFolded(field)) setFolded(field, false); // 折りたたんだ欄は開いてから最大化する
@@ -3794,6 +4040,8 @@ function restoreMaximized(fromHistory = false) {
   if (!fromHistory && history.state?.novelEditorMax) history.back();
   input.focus({ preventScroll: true });
   input.setSelectionRange(s, e);
+  fitVisualViewport();
+  scheduleFitFields();
 }
 
 function selectSettingsTab(name) {
@@ -3966,7 +4214,10 @@ function quickSave() {
  * 書いた内容そのものは、これとは別に端末の中へ自動で保存されている。
  */
 async function saveNow() {
+  if (manualServerSaving) return; // 押し直し・Ctrl+S の連打で二重に保存しない
   manualServerSaving = true;
+  const btn = $('sync-save-btn');
+  btn?.classList.add('task-running');
   updateStatus();
   try {
   await flush();
@@ -3986,12 +4237,13 @@ async function saveNow() {
     await runSyncCheck({ manual: !!syncPending });
     if (syncPending || !sync.isChecked()) return;
   }
-  const ok = await sync.backupNow({ build: () => buildEpisodeBackup('manual-episode', currentSyncTarget()) });
-  if (ok) toast(`表示中のエピソードを保存しました（${sync.folderName()}）`);
-  else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください'), true);
+  const ok = await withBusy('保存中…', () => sync.backupNow({ build: () => buildEpisodeBackup('manual-episode', currentSyncTarget()) }));
+  if (ok) toast(`保存が完了しました\n表示中のエピソード → ${sync.folderName()}`);
+  else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください') + '\nもう一度「編集エピソード保存」を押すとやり直せます', true);
   // 他の端末のほうが新しかったときは、sync.onNewer から確認の画面が出る
   } finally {
     manualServerSaving = false;
+    btn?.classList.remove('task-running');
     updateStatus();
   }
 }
@@ -4292,7 +4544,10 @@ function bindEvents() {
     } else if (d.view) {
       setView(d.view);
     } else if (d.ep !== undefined) {
+      // 選んだエピソードが今と同じでも、本文の編集画面へ移る（狭い画面ではプロット・メモのタブから本文へ）
+      if (reportMode) setReportMode(false);
       selectEpisode(Number(d.ep));
+      selectTab('body');
       if (epSearch) jumpToSearchHit(Number(d.ep));
     } else if (d.epAct) {
       episodeAction(d.epAct, Number(d.epIndex), d.epTo);
@@ -4355,7 +4610,12 @@ function bindEvents() {
   $('drive-local').addEventListener('click', () => finishDrive('local'));
   $('drive-dialog').addEventListener('close', () => { if (driveUi) finishDrive(null); });
   bindDialog('sync-restore-dialog');
-  bindDialog('backup-pack-dialog', createBackupPack);
+  bindDialog('backup-pack-dialog');
+  $('backup-pack-form').addEventListener('submit', (e) => {
+    if (e.submitter?.value !== 'save') return;
+    e.preventDefault();
+    try { createBackupPack(e.submitter).catch(fail); } catch (err) { fail(err); }
+  });
   $('backup-pack-form').addEventListener('change', async (e) => {
     if (e.target.name === 'project') await renderPackEpisodes(e.target.value);
     updatePackForm();
@@ -4366,7 +4626,7 @@ function bindEvents() {
   $('backup-inspect-form').addEventListener('submit', (e) => {
     if (!['restore', 'restore-new'].includes(e.submitter?.value)) return;
     e.preventDefault();
-    restoreInspected(e.submitter.value === 'restore-new').catch(fail);
+    restoreInspected(e.submitter.value === 'restore-new', e.submitter).catch(fail);
   });
   bindDialog('sync-target-dialog', saveSyncTargets);
   $('sync-target-all').addEventListener('click', () => $('sync-target-list').querySelectorAll('input').forEach((x) => { x.checked = true; }));
@@ -4415,7 +4675,6 @@ function bindEvents() {
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
   document.querySelectorAll('[data-uiv]').forEach((s) => s.addEventListener('change', () => setUiPref(s.dataset.uiv, s.value)));
   document.querySelectorAll('[name="ui-active"]').forEach((r) => r.addEventListener('change', () => { if (r.checked) setUiActive(r.value); }));
-  $('ep-pick').addEventListener('change', (e) => selectEpisode(Number(e.target.value)));
   // 全て選択（押してもフォーカスを奪わないよう、押した時点では何もしない）
   document.querySelectorAll('[data-selall]').forEach((b) => {
     b.addEventListener('pointerdown', (e) => e.preventDefault());
@@ -4439,15 +4698,22 @@ function bindEvents() {
   // スマートフォン・タブレットでキーボードが出ているとき、最大化した欄を見えている範囲に合わせる
   if (window.visualViewport) {
     const vv = window.visualViewport;
-    vv.addEventListener('resize', fitVisualViewport);
-    vv.addEventListener('scroll', fitVisualViewport);
+    vv.addEventListener('resize', () => { fitVisualViewport(); scheduleKeyboardCheck(); });
+    vv.addEventListener('scroll', () => { fitVisualViewport(); scheduleKeyboardCheck(); });
   }
-  window.addEventListener('resize', fitVisualViewport);
+  window.addEventListener('resize', () => { fitVisualViewport(); scheduleFitFields(); });
+  window.addEventListener('orientationchange', () => setTimeout(() => { fitVisualViewport(); scheduleKeyboardCheck(0); scheduleFitFields(); }, 300));
   document.addEventListener('focusin', (e) => {
+    scheduleKeyboardCheck(350);
     if (!maximized || e.target !== maximized.input) return;
     [0, 100, 350, 700].forEach((ms) => setTimeout(fitVisualViewport, ms));
   });
+  // 入力欄から離れたとき：別の入力欄へ移っただけならキーボードは出たままなので、落ち着いてから決める
+  document.addEventListener('focusout', () => scheduleKeyboardCheck(350));
+  // 画面（編集エリア）の大きさが変わったら、プロット・フリーメモの高さを合わせ直す
+  if ('ResizeObserver' in window) new ResizeObserver(scheduleFitFields).observe($('view-episode'));
   fitVisualViewport();
+  scheduleFitFields();
   // 最大化中の「戻る」（Android の戻る操作・ブラウザの戻る）は、最大化を解除するだけにする
   window.addEventListener('popstate', () => { if (maximized) restoreMaximized(true); });
   // 最大化ボタンを押しても、入力欄のカーソル位置が変わらないようにする
@@ -4495,6 +4761,7 @@ function bindEvents() {
 
   // 画面を閉じる・別のアプリに切り替えるとき：端末に保存し、自動バージョンと自動バックアップも残す
   const onLeave = () => {
+    saveEnvironment().catch(() => {}); // 環境設定の控え（小説とは別）
     flush().then(() => {
       autoVersion(60_000).catch(() => {});
       sync.flushNow();
@@ -4571,6 +4838,9 @@ window.addEventListener('error', (e) => toast('エラー：' + (e.message || '�
 window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.reason?.message || String(e.reason)), true));
 
 async function init() {
+  // ブラウザーが設定（localStorage）だけを消していたら、自動保存していた環境を戻す（小説のデータとは別に控えている）
+  const restoredEnvAt = await restoreEnvironmentIfLost().catch(() => null);
+  if (restoredEnvAt !== null) prefs.set('restoredMessage', `この端末に自動保存していた環境設定を戻しました${restoredEnvAt ? `（${fmtTime(restoredEnvAt)} の状態）` : ''}`);
   $('app-version').textContent = `エディターの版：${APP_VERSION}`;
   applyProjectNavOrder();
   applyPrefs();
@@ -4599,6 +4869,14 @@ async function init() {
   sync.onChange(renderSyncState);
   // 自動バックアップしようとしたら他の端末のほうが新しかった：画面が見えていれば、その場で確認する
   sync.onNewer(() => { if (document.visibilityState === 'visible') runSyncCheck().catch(fail); });
+  // 自動バックアップの結果は、画面の下に短く知らせる（作業は止めない）。手動の保存は、それぞれの画面で知らせる
+  sync.onBackupResult((r) => {
+    if (r.checking) { setBusyMessage('処理結果を確認しています…'); return; }
+    if (!r.auto) return;
+    const where = r.where === 'cloud' ? `クラウド（${sync.folderName()}）` : `この端末のフォルダ（${sync.folderName()}）`;
+    if (r.ok) toast(`自動バックアップ完了：${r.label || 'バックアップ'}\n保存先：${where}`);
+    else toast(`自動バックアップに失敗しました：${r.error || '原因不明'}\n保存先：${where}`, true);
+  });
   await sync.init({ provider: drive, makeAutoBackup: () => buildEpisodeBackup('auto-episode') }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
   renderSyncState();
   let login = null;
