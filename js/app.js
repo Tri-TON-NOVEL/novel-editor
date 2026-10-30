@@ -22,9 +22,10 @@ import { localFile, WORK_TYPES, TEXT_TYPES } from './localfile.js';
 import { providers, activeProvider } from './providers/index.js';
 
 const $ = (id) => document.getElementById(id);
-const AUTOSAVE_MS = 600;
+const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
+const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.30-7.7.0';
+const APP_VERSION = '2026.10.30-7.7.1';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -243,6 +244,7 @@ function updateStatus() {
   if (s) parts.push(s);
   $('status').textContent = parts.join(' ・ ');
   $('status').classList.toggle('saving', serverSaving || localSaving);
+  $('status').classList.toggle('warn', parts.some((p) => p.startsWith('⚠')));
   renderSaveButton();
 }
 
@@ -340,6 +342,7 @@ function selectAllIn(id) {
 async function flush() {
   if (!dirty || !project) return;
   clearTimeout(saveTimer);
+  unsavedSince = 0;
   dirty = false;
   try {
     await db.put(project);
@@ -355,14 +358,22 @@ async function flush() {
   updateStatus();
 }
 
+// 端末への保存は、入力が止まって AUTOSAVE_MS たってから（打ち続けている間は待つ）。
+// ただし、まだ保存していない変更が AUTOSAVE_MAX_MS を超えたら、入力中でも保存する
+let unsavedSince = 0;
+function scheduleFlush() {
+  if (!unsavedSince) unsavedSince = Date.now();
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(flush, Math.max(0, Math.min(AUTOSAVE_MS, unsavedSince + AUTOSAVE_MAX_MS - Date.now())));
+}
+
 function changed() {
   project.updatedAt = new Date().toISOString();
   dirty = true;
   autoDirty = true;
   sync.markDirty();
   updateStatus();
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, AUTOSAVE_MS);
+  scheduleFlush();
 }
 
 // エピソードの中身を変えたときは、そのエピソードの更新日時も進める
@@ -1138,6 +1149,8 @@ async function chooseDestination(kind) {
 const FILE_KINDS = {
   json: { ext: '.json', mime: 'application/json', types: WORK_TYPES },
   txt: { ext: '.txt', mime: 'text/plain', types: TEXT_TYPES },
+  // TXT インポート：TXT と ZIP を、文字にせずそのまま読む（文字コードはインポートの画面で判定する）
+  import: { ext: '.txt', exts: ['.txt', '.zip'], bytes: true },
 };
 
 // ---------- クラウドの画面（エディター内のフォルダ選択。Google ドライブ・OneDrive 共通） ----------
@@ -1152,7 +1165,7 @@ const FILE_KINDS = {
 //         folder → { id, name }／null
 let driveUi = null; // { p, mode, kind, text, workId, resolve, folders, byId, cur, lazy, loaded }
 
-const hasExt = (name, kind) => name.toLowerCase().endsWith(FILE_KINDS[kind].ext);
+const hasExt = (name, kind) => (FILE_KINDS[kind].exts || [FILE_KINDS[kind].ext]).some((ext) => name.toLowerCase().endsWith(ext));
 // 前回開いたフォルダ（サービスごと。Google ドライブは以前の版と同じ gdrive.lastFolder）
 const lastFolderKey = (p) => `${p.id}.lastFolder`;
 
@@ -1297,8 +1310,11 @@ async function renderDrive() {
       const act = Object.assign(document.createElement('button'), { type: 'button', textContent: ui.mode === 'open' ? '開く' : '上書き', className: ui.mode === 'open' ? '' : 'danger' });
       act.addEventListener('click', () => (ui.mode === 'open'
         // 開く：読み込みが済んでから画面を閉じる（失敗したら画面に理由を出す）
-        ? runTask('load', () => ui.p.load(f.id), { button: act, dialog: $('drive-dialog'), busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false })
-          .then((text) => { if (typeof text === 'string') finishDrive({ id: f.id, name: f.name, text }); })
+        ? runTask('load', () => (FILE_KINDS[ui.kind].bytes ? ui.p.loadBytes(f.id) : ui.p.load(f.id)), { button: act, dialog: $('drive-dialog'), busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false })
+          .then((data) => {
+            if (typeof data === 'string') finishDrive({ id: f.id, name: f.name, text: data });
+            else if (data instanceof ArrayBuffer) finishDrive({ id: f.id, name: f.name, bytes: data });
+          })
         : ask(`「${f.name}」を、今の内容で上書きしますか？\n（前の内容は ${ui.p.label} の版の履歴から戻せます）`, { ok: '上書きする' })
           .then((yes) => (yes ? runDriveSave(f.name, f.id, act) : null))).catch(fail));
       list.append(listItem(f.name, '更新 ' + fmtTime(f.modifiedTime), [act]));
@@ -1960,8 +1976,7 @@ async function saveEdition(ep, site, name, data = editionSnapshot(ep, site)) {
 // 稿の割り当てだけを変えたとき：作品の更新日時は変えずに端末へ保存する
 function quietSave() {
   dirty = true;
-  clearTimeout(saveTimer);
-  saveTimer = setTimeout(flush, AUTOSAVE_MS);
+  scheduleFlush();
 }
 
 // 6.0 より前の版（両サイトの原稿＋プロット・フリーメモを1つに持つ）を、サイト別の稿に分ける。
@@ -2425,46 +2440,109 @@ let managedBackupFiles = [];
 let managedBackupLatest = null;
 async function loadBackupManager() {
   const box = $('backup-file-list');
+  const gen = ++backupManagerGen;
   box.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: '一覧を読み込んでいます…' }));
   managedBackupLatest = null;
   try { managedBackupFiles = await sync.listAll(); }
-  catch (e) { box.textContent = `一覧を読み込めませんでした：${e.message}`; return; }
+  catch (e) { if (gen === backupManagerGen) box.textContent = `一覧を読み込めませんでした：${e.message}`; return; }
+  if (gen !== backupManagerGen) return;
   managedBackupLatest = managedBackupFiles[0] || null;
-  // ファイル名ではなく中の管理情報から、利用者向けの別名と種類を作る。
-  // エピソード → 作品 → 作品資料 → 環境の順、同じ種類では新しい順。
-  const inspected = await Promise.all(managedBackupFiles.slice(0, 300).map(async (f) => {
-    try {
-      const text = await sync.read(f);
+  box.replaceChildren();
+  if (!managedBackupFiles.length) { box.textContent = 'バックアップファイルはありません。'; return; }
+  // まずファイル名と日時だけで一覧を出す（すぐに選べる・消せる）。
+  // 中の管理情報は、あとから少しずつ読んで足す（全部を一度に読むと、ファイルが多いとき一覧が出てこないため）
+  const progress = Object.assign(document.createElement('p'), { className: 'hint' });
+  box.append(progress);
+  const fileMeta = (f, info) => `${f.name}\n${fmtTime(new Date(info?.desc?.createdAt || f.at).toISOString())}・${info?.desc ? backupDescriptionLine(info.desc) : `端末：${f.prefix || '不明'}${info ? '' : '・内容を確認中…'}`}${info?.size ? `・${Math.ceil(info.size / 1024).toLocaleString()}KB` : ''}${info?.error ? `・⚠ ${info.error}` : ''}`;
+  const rows = managedBackupFiles.map((f) => {
+    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: f.id });
+    const row = Object.assign(document.createElement('label'), { className: 'file-row' });
+    const name = Object.assign(document.createElement('span'), { className: 'file-name', textContent: f.name.replace(/\.json$/i, '') });
+    const metaEl = Object.assign(document.createElement('span'), { className: 'file-meta', textContent: fileMeta(f, null) });
+    row.append(input, name, metaEl);
+    box.append(row);
+    return { f, row, name, metaEl, info: null };
+  });
+  const targets = rows.slice(0, 300);
+  let done = 0;
+  const showProgress = () => { progress.textContent = `内容を確認しています…（${done}／${targets.length}件）`; };
+  showProgress();
+  await Promise.all(targets.map(async (r) => {
+    const info = await inspectBackupFile(r.f);
+    if (gen !== backupManagerGen) return;
+    r.info = info;
+    if (info) {
+      r.name.textContent = info.alias;
+      r.metaEl.textContent = fileMeta(r.f, info);
+    }
+    done++;
+    showProgress();
+  }));
+  if (gen !== backupManagerGen) return;
+  progress.remove();
+  // 読み終わったら並べ直す：エピソード → 作品 → 作品資料 → 環境の順、同じ種類では新しい順（チェックはそのまま）
+  rows.sort((a, b) => (a.info?.priority ?? 8) - (b.info?.priority ?? 8) || b.f.at - a.f.at);
+  for (const r of rows) box.append(r.row);
+  const newest = rows.find((r) => r.info?.priority === 0);
+  if (newest) newest.name.textContent = `最新　${newest.info.alias}`;
+  managedBackupFiles = rows.map((r) => r.f);
+}
+
+// 保存先のファイルの中身を読むのは、同時に3件まで（一覧を開いたときに通信が詰まらないように）
+const BACKUP_READ_LIMIT = 3;
+let backupReading = 0;
+let backupReadQueue = [];
+let backupManagerGen = 0;
+function queuedBackupRead(f) {
+  return new Promise((resolve, reject) => {
+    backupReadQueue.push({ f, resolve, reject });
+    pumpBackupReads();
+  });
+}
+function pumpBackupReads() {
+  while (backupReading < BACKUP_READ_LIMIT && backupReadQueue.length) {
+    const { f, resolve, reject } = backupReadQueue.shift();
+    backupReading++;
+    sync.read(f).then(resolve, reject).finally(() => { backupReading--; pumpBackupReads(); });
+  }
+}
+// 一覧の画面を閉じたら、まだ読んでいないものは読まない
+function cancelQueuedBackupReads() {
+  const waiting = backupReadQueue;
+  backupReadQueue = [];
+  for (const w of waiting) w.reject(Object.assign(new Error('取りやめました'), { name: 'AbortError' }));
+}
+
+// バックアップの中身を読んで、一覧用の別名・種類・管理情報にする（同じファイルは読み直さない）。
+// 戻り値：{ alias, priority, desc, size, error? }／null（取りやめた）
+const backupInspections = new Map();
+function inspectBackupFile(f) {
+  const key = `${f.id}|${f.name}`;
+  if (!backupInspections.has(key)) {
+    backupInspections.set(key, queuedBackupRead(f).then((text) => {
+      // ファイル名ではなく中の管理情報から、利用者向けの別名と種類を作る
       const pack = parseAnyBackup(text);
       const summary = packSummary(pack);
       const episodeItems = pack.items.filter((x) => x.type === 'episode');
       const projectItems = pack.items.filter((x) => x.type === 'project');
       const materialItems = pack.items.filter((x) => x.type === 'materials');
-      let priority = episodeItems.length ? 0 : projectItems.length ? 1 : materialItems.length ? 2 : 3;
+      const priority = episodeItems.length ? 0 : projectItems.length ? 1 : materialItems.length ? 2 : 3;
       let alias;
       if (pack.reason === 'manual-episode' && episodeItems.length === 1) alias = `${episodeItems[0].project?.title || '無題'}／${episodeName(episodeItems[0].episode)}`;
       else if (episodeItems.length) alias = `エピソード ${episodeItems.length}件（${summary.projects.map((p) => p.title).join('、')}）`;
       else if (projectItems.length) alias = projectItems.length === 1 ? `作品全体「${projectItems[0].project?.title || '無題'}」` : `全小説 ${projectItems.length}作品`;
       else if (materialItems.length) alias = `作品資料「${materialItems[0].project?.title || '無題'}」`;
       else alias = '環境設定';
-      const desc = describePack(pack);
-      backupDescriptions.set(`${f.id}|${f.name}`, Promise.resolve(desc));
-      return { ...f, pack, alias, desc, priority, size: new Blob([text]).size };
-    } catch (e) {
-      return { ...f, alias: '内容を確認できないバックアップ', priority: 9, error: e.message };
-    }
-  }));
-  managedBackupFiles = inspected.sort((a, b) => a.priority - b.priority || b.at - a.at);
-  box.replaceChildren();
-  if (!managedBackupFiles.length) { box.textContent = 'バックアップファイルはありません。'; return; }
-  for (const f of managedBackupFiles) {
-    const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: f.id });
-    const row = Object.assign(document.createElement('label'), { className: 'file-row' });
-    row.append(input,
-      Object.assign(document.createElement('span'), { className: 'file-name', textContent: `${f.priority === 0 && f === managedBackupFiles.find((x) => x.priority === 0) ? '最新　' : ''}${f.alias}` }),
-      Object.assign(document.createElement('span'), { className: 'file-meta', textContent: `${f.name}\n${fmtTime(new Date(f.desc?.createdAt || f.at).toISOString())}・${f.desc ? backupDescriptionLine(f.desc) : `端末：${f.prefix || '不明'}`}${f.size ? `・${Math.ceil(f.size / 1024).toLocaleString()}KB` : ''}${f.error ? `・⚠ ${f.error}` : ''}` }));
-    box.append(row);
+      return { alias, priority, desc: describePack(pack), size: new Blob([text]).size };
+    }).catch((e) => {
+      if (e?.name === 'AbortError') { backupInspections.delete(key); return null; }
+      return {
+        alias: '内容を確認できないバックアップ', priority: 9, error: e?.message || String(e),
+        desc: { kind: '不明', environment: '不明', novel: '不明', scope: '不明', project: '不明', episode: '不明', device: f.prefix || '不明' },
+      };
+    }));
   }
+  return backupInspections.get(key);
 }
 
 async function openBackupManager() {
@@ -2918,14 +2996,8 @@ function backupDescriptionLine(d) {
 }
 
 // 保存先にあるバックアップの中身を読んで、一覧用の情報にする（同じファイルは読み直さない）
-const backupDescriptions = new Map();
 function describeBackupFile(f) {
-  const key = `${f.id}|${f.name}`;
-  if (!backupDescriptions.has(key)) {
-    backupDescriptions.set(key, sync.read(f).then((text) => describePack(parseAnyBackup(text)))
-      .catch(() => ({ kind: '不明', environment: '不明', novel: '不明', scope: '不明', project: '不明', episode: '不明', device: f.prefix || '不明' })));
-  }
-  return backupDescriptions.get(key);
+  return inspectBackupFile(f).then((x) => x?.desc || null);
 }
 
 async function exportPreSync() {
@@ -3100,6 +3172,12 @@ const importScreen = initImport({
   closeSettings: () => $('settings-dialog').close(),
   withBusy,
   returnToEditor,
+  // 「クラウド」タブで選んだクラウドの名前（使えないときは ''）と、そこから TXT／ZIP を選ぶ画面
+  cloudLabel: () => driveProvider()?.label || '',
+  pickCloudImportFile: () => {
+    const p = driveProvider();
+    return p ? pickDriveFile(p, `${p.label}から TXT／ZIP を選ぶ`, 'import') : Promise.resolve(null);
+  },
 });
 
 async function copyField(key) {
@@ -3848,6 +3926,7 @@ function applyUiPrefs() {
     tool.classList.toggle('max-tool-off', !uiPref(`max.tool.${tool.dataset.maxTool}`));
   });
   cls.toggle('hide-help-labels', !uiPref('other.hints'));
+  cls.toggle('hide-status', !uiPref('other.status'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ
   if (cls.contains('hide-side') && document.querySelector('[data-tab="side"][aria-selected="true"]')) selectTab('body');
 }
@@ -4610,6 +4689,9 @@ function bindEvents() {
   $('drive-local').addEventListener('click', () => finishDrive('local'));
   $('drive-dialog').addEventListener('close', () => { if (driveUi) finishDrive(null); });
   bindDialog('sync-restore-dialog');
+  // バックアップの一覧を閉じたら、まだ読んでいない中身は読まない
+  $('sync-restore-dialog').addEventListener('close', cancelQueuedBackupReads);
+  $('backup-manage-dialog').addEventListener('close', () => { backupManagerGen++; cancelQueuedBackupReads(); });
   bindDialog('backup-pack-dialog');
   $('backup-pack-form').addEventListener('submit', (e) => {
     if (e.submitter?.value !== 'save') return;

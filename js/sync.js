@@ -29,6 +29,8 @@ export const DEFAULT_INTERVAL_MIN = 10;
 export const DEFAULT_KEEP = 200;
 const CHECK_MS = 30_000;       // 保存が必要かを確かめる間隔
 const LEAVE_MIN_MS = 30_000;   // 画面を離れるときの保存の最短間隔（タブを切り替えるたびに増えないように）
+const IDLE_MS = 20_000;        // 自動バックアップは、入力がこれだけ止まってから
+const IDLE_MAX_MS = 30 * 60_000; // 打ち続けていても、保存間隔からこれ以上は待たない
 const DIR_KEY = 'autoBackupDir';
 // 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.json。端末の時刻）の両方を読む
 const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
@@ -76,6 +78,8 @@ let drive = null;
 let dirty = !!prefs.get('sync.dirty', false);
 let checked = false;   // 起動時の確認が済んだか
 let lastRun = 0;
+let lastEdit = 0;      // 最後に書き換えた時刻
+let dirtySince = 0;    // 保存していない変更が始まった時刻（前回から残っている変更は 0：すぐ保存してよい）
 let running = false;
 let autoBuilder = null;
 let listener = () => {};
@@ -252,7 +256,9 @@ export async function remove(entry) {
 
 // 書き換えた印（編集のたびに呼ぶ）
 export function markDirty() {
+  lastEdit = Date.now();
   if (dirty) return;
+  dirtySince = lastEdit;
   dirty = true;
   prefs.set('sync.dirty', true);
 }
@@ -264,6 +270,7 @@ export async function backupNow({ force = false, build = null, auto = false } = 
   running = true;
   listener();
   let made = null;
+  const startedAt = Date.now();
   try {
     // 保存する前に、他の端末がもっと新しいバックアップを保存していないか確かめる（両方の端末を開いたまま書いているとき）。
     // あれば保存せず、アプリに知らせて確認してもらう（先に保存すると、他の端末の更新が隠れてしまうため）
@@ -283,8 +290,10 @@ export async function backupNow({ force = false, build = null, auto = false } = 
       if (!(await savedAnyway(t, name, e))) throw e;
     }
     try { await made.afterSave?.(); } catch { /* 記録できなくても保存は済んでいる */ }
-    dirty = false;
-    prefs.set('sync.dirty', false);
+    // 保存している間に書き換えた分は、次のバックアップに入れる
+    dirty = lastEdit > startedAt;
+    dirtySince = dirty ? lastEdit : 0;
+    prefs.set('sync.dirty', dirty);
     const now = new Date().toISOString();
     prefs.set('sync.last', { name, at: now, syncedAt: Date.now() });
     prefs.set('lastAutoBackupAt', now);
@@ -330,9 +339,16 @@ async function savedAnyway(t, name, err) {
 let resultHandler = () => {};
 export function onBackupResult(fn) { resultHandler = fn || (() => {}); }
 
-// 一定時間ごとに確認し、変更があって保存間隔を過ぎていれば保存する
+// 一定時間ごとに確認し、変更があって保存間隔を過ぎていれば保存する。
+// 前の保存から間があいていても、最初の変更ですぐには保存しない：最初の変更から保存間隔の分だけ待ち、
+// さらに入力が IDLE_MS 止まるまで待つ（打ち続けている間は保存しない。ただし IDLE_MAX_MS を超えたら保存する）
 function tick() {
-  if (state === 'on' && checked && dirty && Date.now() - lastRun >= intervalMin() * 60_000) backupNow({ auto: true });
+  if (state !== 'on' || !checked || !dirty) return;
+  const now = Date.now();
+  const interval = intervalMin() * 60_000;
+  if (now - lastRun < interval || now - dirtySince < interval) return;
+  if (now - lastEdit < IDLE_MS && now - dirtySince < interval + IDLE_MAX_MS) return;
+  backupNow({ auto: true });
 }
 
 // 画面を閉じる・切り替えるときに呼ぶ。未保存の変更があれば保存する

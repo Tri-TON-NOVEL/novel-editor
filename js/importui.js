@@ -955,6 +955,10 @@ export function initImport(ctx) {
     fillPresets();
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
+    $('imp-file-name').textContent = '';
+    const cloud = ctx.cloudLabel?.() || '';
+    $('imp-cloud-row').hidden = !cloud;
+    $('imp-cloud-file').textContent = `${cloud}から選ぶ…`;
     resetZipSelection();
     $('imp-title-list-file').value = '';
     $('imp-title-list-text').value = '';
@@ -1011,9 +1015,7 @@ export function initImport(ctx) {
   });
   $('imp-strict-match').addEventListener('change', (e) => { state.strictMatch = e.target.checked; saveSession(); });
   $('imp-encoding').addEventListener('change', (e) => { state.encoding = e.target.value; decodeAndShow(); });
-  $('imp-file').addEventListener('change', async (e) => {
-    const file = e.target.files[0];
-    if (!file) return;
+  async function useImportFile(file) {
     try { await ctx.withBusy('TXT・ZIPファイルを読み込んでいます…', () => loadImportFile(file)); }
     catch (error) {
       state.buffer = null;
@@ -1022,6 +1024,24 @@ export function initImport(ctx) {
       updateNextButton();
       ctx.toast(error?.message || 'ファイルを読み込めませんでした。', true);
     }
+  }
+  $('imp-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    $('imp-file-name').textContent = '';
+    await useImportFile(file);
+  });
+  // 「クラウド」タブで選んだクラウド（OneDrive など）から選ぶ。
+  // 上の「ファイルを選択」は端末のファイル選択画面で、どこが開くかは端末が決める（前に使った場所など）
+  $('imp-cloud-file').addEventListener('click', async () => {
+    try {
+      const f = await ctx.pickCloudImportFile();
+      if (f === 'local') { $('imp-file').click(); return; }
+      if (!f?.bytes) return;
+      $('imp-file').value = '';
+      $('imp-file-name').textContent = `選んだファイル：${f.name}`;
+      await useImportFile(new File([f.bytes], f.name));
+    } catch (e) { ctx.fail(e); }
   });
   $('imp-zip-entry-list').addEventListener('change', async (e) => {
     if (!e.target.matches('input[name="imp-zip-entry"]')) return;
@@ -1051,8 +1071,17 @@ export function initImport(ctx) {
     markPending();
     saveSession();
   });
-  $('imp-to-2').addEventListener('click', () => go(2, { detect: state.type !== 'title-list' }).catch(ctx.fail));
-  $('imp-title-to-rules').addEventListener('click', () => go(3, { detect: true }).catch(ctx.fail));
+  // 「次へ」：区切りの検出やプレビュー作りは時間がかかるので、終わるまで処理中の画面を出す
+  // （押したボタンだけを処理中の色にし、二重には動かさない）
+  async function busyGo(btn, message, work) {
+    if (btn.classList.contains('task-running')) return;
+    btn.classList.add('task-running');
+    try { await ctx.withBusy(message, work); }
+    catch (e) { ctx.fail(e); }
+    finally { btn.classList.remove('task-running'); }
+  }
+  $('imp-to-2').addEventListener('click', (e) => busyGo(e.currentTarget, '読み込み中…', () => go(2, { detect: state.type !== 'title-list' })));
+  $('imp-title-to-rules').addEventListener('click', (e) => busyGo(e.currentTarget, '読み込み中…', () => go(3, { detect: true })));
   $('imp-rules-back').addEventListener('click', () => go(state.type === 'title-list' ? 2 : 1).catch(ctx.fail));
   $('imp-resume-btn').addEventListener('click', () => resume().catch(ctx.fail));
   $('imp-resume-discard').addEventListener('click', async () => {
@@ -1060,7 +1089,12 @@ export function initImport(ctx) {
     await clearSession();
     $('imp-resume').hidden = true;
   });
-  document.querySelectorAll('[data-imp-go]').forEach((b) => b.addEventListener('click', () => go(Number(b.dataset.impGo)).catch(ctx.fail)));
+  document.querySelectorAll('[data-imp-go]').forEach((b) => b.addEventListener('click', () => {
+    const step = Number(b.dataset.impGo);
+    // 戻るときはすぐ。先へ進むとき（プレビューを作る）は処理中の画面を出す
+    if (step <= state.step) go(step).catch(ctx.fail);
+    else busyGo(b, step === 4 ? 'プレビューを作成中…' : '読み込み中…', () => go(step));
+  }));
   $('imp-detect').addEventListener('click', () => detect());
   $('imp-narou-help').addEventListener('click', () => $('import-narou-help-dialog').showModal());
   $('imp-alpha-help').addEventListener('click', () => $('import-alpha-help-dialog').showModal());

@@ -324,6 +324,12 @@ export const gdrive = {
     return res.text();
   },
 
+  // 文字にせず ArrayBuffer で返す（TXT・ZIP の取り込み）
+  async loadBytes(fileId) {
+    const res = await api(`${API}/files/${encodeURIComponent(fileId)}?alt=media`);
+    return res.arrayBuffer();
+  },
+
   /**
    * fileId があれば上書き、なければ保存先フォルダに新しく作る。戻り値: fileId
    * 新しく作るとき、同じフォルダに同じ名前のファイルがあれば：

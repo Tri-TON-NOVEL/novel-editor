@@ -97,6 +97,8 @@ button:disabled { opacity: .5; cursor: default; }
 .actions { display: flex; flex-wrap: wrap; gap: 6px; }
 .toolbar-right { margin-left: auto; }
 .status { color: var(--muted); font-size: 13px; }
+/* 「表示」→「その他」で保存状態ラベルを隠したとき。警告（⚠）があるときだけは出す */
+body.hide-status .status:not(.warn) { display: none; }
 .status.saving, .sync-save.saving { color: #b42318 !important; border-color: #b42318 !important; font-weight: 700; }
 .sync-save.saving { background: #fff1f0; }
 :root[data-theme="dark"] .sync-save.saving { background: #3c2020; }
@@ -813,6 +815,9 @@ dialog.fullscreen {
 .import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
 .import-grid label, .imp-preset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .imp-zip-picker { margin: 10px 0 0; }
+.imp-cloud-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; align-self: end; }
+.imp-cloud-pick[hidden] { display: none; }
+.imp-cloud-pick .hint { margin: 0; overflow-wrap: anywhere; }
 .imp-zip-picker > .hint { margin: 0 0 6px; }
 .imp-zip-entry-list { display: grid; gap: 4px; max-height: 240px; overflow: auto; padding: 2px; }
 .imp-zip-entry-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }

@@ -215,16 +215,18 @@ async function getItem(path) {
   }
 }
 
-// 中身を読む（ダウンロード用の URL から。なければ /content から）
-async function download(id) {
+// 中身を読む（ダウンロード用の URL から。なければ /content から）。bytes：文字にせず ArrayBuffer で返す（TXT・ZIP の取り込み）
+async function download(id, { bytes = false } = {}) {
   const it = await (await api(byId(id))).json();
   const url = it['@microsoft.graph.downloadUrl'];
+  let res;
   if (url) {
-    const res = await fetch(url);
+    res = await fetch(url);
     if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
-    return res.text();
+  } else {
+    res = await api(`${byId(id)}/content`);
   }
-  return (await api(`${byId(id)}/content`)).text();
+  return bytes ? res.arrayBuffer() : res.text();
 }
 
 // 書き込む。target は byPath() か byId()。conflict：'replace'（上書き）／'fail'（同じ名前があればエラー）
@@ -382,6 +384,7 @@ export const onedrive = {
   },
 
   async load(fileId) { return download(fileId); },
+  async loadBytes(fileId) { return download(fileId, { bytes: true }); },
 
   /**
    * fileId があれば上書き、なければ保存先フォルダに新しく作る。戻り値: { id, name }（name は実際に保存した名前）

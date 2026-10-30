@@ -601,9 +601,13 @@
         <label>取り込み先
           <select id="imp-target"></select>
         </label>
-        <label>TXT／ZIP ファイル
+        <label>TXT／ZIP ファイル（この端末・その他）
           <input type="file" id="imp-file" accept=".txt,.zip,text/plain,application/zip">
         </label>
+        <div class="imp-cloud-pick" id="imp-cloud-row" hidden>
+          <button type="button" id="imp-cloud-file"></button>
+          <span class="hint" id="imp-file-name"></span>
+        </div>
         <label>文字コード
           <select id="imp-encoding"></select>
         </label>
@@ -1101,6 +1105,8 @@
       <legend>その他</legend>
       <label><input type="checkbox" data-ui="other.hints"> 機能の説明ラベルを表示</label>
       <p class="hint">オフにすると、画面内の補足説明をまとめて隠します。入力内容や警告・保存状態は隠しません。</p>
+      <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル（画面上部の「端末に保存済み」「サーバ保存」など）</label>
+      <p class="hint">オフにしても、保存の失敗などの警告（⚠）が出たときは表示します。</p>
     </fieldset>
     </div>
     <fieldset id="iphone-max" hidden>
