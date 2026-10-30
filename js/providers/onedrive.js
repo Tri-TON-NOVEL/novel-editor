@@ -430,8 +430,27 @@ export const onedrive = {
       const folder = await backupFolderId();
       return (await upload(byPath(folder, name), text, 'application/json', 'replace')).id;
     },
+    // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
+    async listAny() {
+      const id = await backupFolderId();
+      return (await children(id)).filter((it) => it.file && !it.deleted && /\.json$/i.test(it.name))
+        .map((it) => ({ id: it.id, name: it.name, modifiedTime: it.lastModifiedDateTime }));
+    },
+    // 自動整理（残す件数を超えた分）：ごみ箱へ
     async remove(id) {
       await api(byId(id), { method: 'DELETE' });
+    },
+    // 「バックアップファイルの管理」の削除：ごみ箱にも残さず消す。
+    // 個人用 OneDrive など、完全削除が使えないときはごみ箱へ移す。戻り値：'deleted'／'recycled'
+    async removeForever(id) {
+      try {
+        await api(`${byId(id)}/permanentDelete`, { method: 'POST' });
+        return 'deleted';
+      } catch (e) {
+        if (![400, 403, 404, 405, 501].includes(e.status)) throw e;
+      }
+      await api(byId(id), { method: 'DELETE' });
+      return 'recycled';
     },
   },
 };

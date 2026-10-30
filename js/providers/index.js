@@ -4,7 +4,7 @@
 //   ready?()（起動時にログインの結果を待つ）, takeRedirectResult(), onBeforeRedirect, silently(fn),
 //   フォルダ：folders()（全部を一度に）か childFolders(parentId) ＋ folderPath(id)（開くたびに読む）, filesIn(id), makeFolder(name, parentId),
 //   folderInfo(), setFolder(), resetFolder(), defaultFolderId(), backupFolderInfo(), setBackupFolder(),
-//   load(fileId) → text, loadBytes(fileId) → ArrayBuffer, save(text, name, fileId, opts) → fileId か { id, name }（name：実際に保存した名前）, backups: { hasFolder, folderName, list, read, write, remove }
+//   load(fileId) → text, loadBytes(fileId) → ArrayBuffer, save(text, name, fileId, opts) → fileId か { id, name }（name：実際に保存した名前）, backups: { hasFolder, folderName, list, listAny, read, write, remove, removeForever }
 import { prefs } from '../db.js';
 import { gdrive } from './gdrive.js';
 import { onedrive } from './onedrive.js';

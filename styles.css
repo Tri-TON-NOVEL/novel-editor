@@ -815,9 +815,19 @@ dialog.fullscreen {
 .import-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px 16px; }
 .import-grid label, .imp-preset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .imp-zip-picker { margin: 10px 0 0; }
-.imp-cloud-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; align-self: end; }
-.imp-cloud-pick[hidden] { display: none; }
-.imp-cloud-pick .hint { margin: 0; overflow-wrap: anywhere; }
+/* TXT インポート：ファイルを選ぶボタン（選ぶと読み込んで次の画面へ） */
+.imp-file-pick { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
+.imp-file-buttons { display: flex; flex-wrap: wrap; gap: 6px 8px; font-weight: 400; font-size: 15px; }
+.imp-file-buttons [hidden] { display: none; }
+label.imp-file-button {
+  position: relative; display: inline-flex; align-items: center; cursor: pointer;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 6px 12px; min-height: 34px; line-height: 1.2; white-space: nowrap;
+}
+label.imp-file-button:hover { background: var(--hover); }
+label.imp-file-button:focus-within { outline: 2px solid var(--accent); outline-offset: 1px; }
+.imp-file-pick .hint { margin: 0; font-weight: 400; overflow-wrap: anywhere; }
+.visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; opacity: 0; }
 .imp-zip-picker > .hint { margin: 0 0 6px; }
 .imp-zip-entry-list { display: grid; gap: 4px; max-height: 240px; overflow: auto; padding: 2px; }
 .imp-zip-entry-list label { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 8px; align-items: center; padding: 8px 10px; border: 1px solid var(--border); border-radius: 7px; cursor: pointer; }

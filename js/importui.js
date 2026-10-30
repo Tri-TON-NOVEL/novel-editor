@@ -282,7 +282,9 @@ export function initImport(ctx) {
   }
 
   function updateNextButton() {
+    // ファイルを選ぶと自動で次へ進むので、「次へ」は読み込み済みのファイルがあるとき（戻ってきたとき）だけ出す
     $('imp-to-2').disabled = !state.text;
+    $('imp-to-2').hidden = !state.text;
     $('imp-title-to-rules').disabled = !state.titleListText.trim();
   }
 
@@ -955,9 +957,9 @@ export function initImport(ctx) {
     fillPresets();
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
-    $('imp-file-name').textContent = '';
+    $('imp-file-name').textContent = '上の設定を選んでからファイルを選ぶと、読み込んで次の画面へ進みます。';
     const cloud = ctx.cloudLabel?.() || '';
-    $('imp-cloud-row').hidden = !cloud;
+    $('imp-cloud-file').hidden = !cloud;
     $('imp-cloud-file').textContent = `${cloud}から選ぶ…`;
     resetZipSelection();
     $('imp-title-list-file').value = '';
@@ -965,6 +967,7 @@ export function initImport(ctx) {
     showTitleListSource();
     $('imp-decode-info').hidden = true;
     $('imp-to-2').disabled = true;
+    $('imp-to-2').hidden = true;
     $('imp-lines').replaceChildren();
     rowEls = [];
     $('import-title').textContent = 'TXT インポート';
@@ -1015,9 +1018,18 @@ export function initImport(ctx) {
   });
   $('imp-strict-match').addEventListener('change', (e) => { state.strictMatch = e.target.checked; saveSession(); });
   $('imp-encoding').addEventListener('change', (e) => { state.encoding = e.target.value; decodeAndShow(); });
+  // 1つ目の画面の次（書式あり：区切り設定／書式なし：タイトル一覧）へ進む
+  const goNext = () => go(2, { detect: state.type !== 'title-list' });
+
+  // ファイルを選んだら、読み込んでそのまま次の画面へ進む（終わるまで処理中の画面を出す）。
+  // ZIP は、中の TXT を選んでから進む
   async function useImportFile(file) {
-    try { await ctx.withBusy('TXT・ZIPファイルを読み込んでいます…', () => loadImportFile(file)); }
-    catch (error) {
+    try {
+      await ctx.withBusy('TXT・ZIPファイルを読み込んでいます…', async () => {
+        await loadImportFile(file);
+        if (state.text) await goNext();
+      });
+    } catch (error) {
       state.buffer = null;
       state.text = '';
       state.lines = [];
@@ -1028,11 +1040,12 @@ export function initImport(ctx) {
   $('imp-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
-    $('imp-file-name').textContent = '';
+    $('imp-file-name').textContent = `選んだファイル：${file.name}`;
+    e.target.value = ''; // 同じファイルを選び直しても読み込めるように
     await useImportFile(file);
   });
   // 「クラウド」タブで選んだクラウド（OneDrive など）から選ぶ。
-  // 上の「ファイルを選択」は端末のファイル選択画面で、どこが開くかは端末が決める（前に使った場所など）
+  // 「この端末・その他から選ぶ」は端末のファイル選択画面で、どこが開くかは端末が決める（前に使った場所など）
   $('imp-cloud-file').addEventListener('click', async () => {
     try {
       const f = await ctx.pickCloudImportFile();
@@ -1045,7 +1058,12 @@ export function initImport(ctx) {
   });
   $('imp-zip-entry-list').addEventListener('change', async (e) => {
     if (!e.target.matches('input[name="imp-zip-entry"]')) return;
-    try { await ctx.withBusy('ZIP内のTXTを読み込んでいます…', () => selectZipEntry(Number(e.target.value))); }
+    try {
+      await ctx.withBusy('ZIP内のTXTを読み込んでいます…', async () => {
+        await selectZipEntry(Number(e.target.value));
+        if (state.text) await goNext();
+      });
+    }
     catch (error) { ctx.toast(error?.message || 'ZIP内のTXTを読み込めませんでした。', true); }
   });
   $('imp-title-list-file').addEventListener('change', async (e) => {
@@ -1080,7 +1098,7 @@ export function initImport(ctx) {
     catch (e) { ctx.fail(e); }
     finally { btn.classList.remove('task-running'); }
   }
-  $('imp-to-2').addEventListener('click', (e) => busyGo(e.currentTarget, '読み込み中…', () => go(2, { detect: state.type !== 'title-list' })));
+  $('imp-to-2').addEventListener('click', (e) => busyGo(e.currentTarget, '読み込み中…', goNext));
   $('imp-title-to-rules').addEventListener('click', (e) => busyGo(e.currentTarget, '読み込み中…', () => go(3, { detect: true })));
   $('imp-rules-back').addEventListener('click', () => go(state.type === 'title-list' ? 2 : 1).catch(ctx.fail));
   $('imp-resume-btn').addEventListener('click', () => resume().catch(ctx.fail));

@@ -185,15 +185,28 @@ function target() {
         await w.close();
       },
       async remove(id) { await dir.removeEntry(id); },
+      async listAny() {
+        const out = [];
+        for await (const [name, h] of dir.entries()) {
+          if (h.kind !== 'file' || !/\.json$/i.test(name)) continue;
+          const file = await h.getFile().catch(() => null);
+          out.push({ id: name, name, modifiedTime: file ? new Date(file.lastModified).toISOString() : '' });
+        }
+        return out;
+      },
+      // フォルダのファイルは、消すとごみ箱に入らない（完全に消える）
+      async removeForever(id) { await dir.removeEntry(id); return 'deleted'; },
     };
   }
   if (mode() === 'cloud' && drive) {
     const b = drive.backups;
     return {
       list: () => drive.silently(() => b.list()),
+      listAny: () => drive.silently(() => (b.listAny ? b.listAny() : b.list())),
       read: (id) => drive.silently(() => b.read(id)),
       write: (name, text) => drive.silently(() => b.write(name, text)),
       remove: (id) => drive.silently(() => b.remove(id)),
+      removeForever: (id) => drive.silently(async () => (b.removeForever ? b.removeForever(id) : (await b.remove(id), 'recycled'))),
     };
   }
   return null;
@@ -242,6 +255,27 @@ export async function listAll() {
   }
 }
 
+// 「バックアップファイルの管理」の一覧：保存先フォルダの .json すべて（新しい順）。
+// listAll と違い、名前の形が違うもの（「… (2).json」や手で置いたファイル）も出す。日時は名前から、読めなければ更新日時から。
+// [{ id, name, prefix, at, mine, nameless? }]
+export async function listManaged() {
+  const t = target();
+  if (!t) throw new Error('自動バックアップの保存先が使えません（設定 → バックアップで確認してください）');
+  try {
+    const mine = new Set(prefs.get('sync.mine', []));
+    return (await t.listAny())
+      .map((f) => {
+        const parsed = parseName(f.name);
+        return parsed ? { ...f, ...parsed, mine: mine.has(f.name) }
+          : { ...f, prefix: '', at: Date.parse(f.modifiedTime) || 0, mine: false, nameless: true };
+      })
+      .sort((a, b) => b.at - a.at);
+  } catch (e) {
+    handleError(e);
+    throw e;
+  }
+}
+
 export async function read(entry) {
   return target().read(entry.id);
 }
@@ -250,6 +284,17 @@ export async function remove(entry) {
   const t = target();
   if (!t) throw new Error('バックアップの保存先が使えません');
   await t.remove(entry.id);
+}
+
+// ごみ箱にも残さず消す（「バックアップファイルの管理」の削除）。戻り値：'deleted'／'recycled'（完全削除が使えずごみ箱へ移した）
+export async function removeForever(entry) {
+  const t = target();
+  if (!t) throw new Error('バックアップの保存先が使えません');
+  const how = await t.removeForever(entry.id);
+  // この端末が保存した記録からも外す（残す件数の数え方がずれないように）
+  const mine = prefs.get('sync.mine', []);
+  if (mine.includes(entry.name)) prefs.set('sync.mine', mine.filter((n) => n !== entry.name));
+  return how;
 }
 
 // ---------- 保存 ----------

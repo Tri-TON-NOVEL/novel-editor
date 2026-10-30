@@ -94,10 +94,19 @@ export function installOneDriveMock({ seed = true } = {}) {
       const it = byName(m[1] ? decodeURIComponent(m[1]) : 'ROOT', decodeURIComponent(m[2]));
       return it ? J(view(it)) : err(404, 'itemNotFound', 'nf');
     }
+    // 完全削除。M.personal = true のときは、個人用 OneDrive のように使えない（400）
+    if ((m = /^\/me\/drive\/items\/([^/:]+)\/permanentDelete$/.exec(path)) && method === 'POST') {
+      if (M.personal) return err(400, 'invalidRequest', 'permanentDelete is not supported');
+      const it = M.items.get(decodeURIComponent(m[1]));
+      if (!it) return err(404, 'itemNotFound', 'nf');
+      M.items.delete(it.id);
+      M.log.push('permanentDelete ' + it.name);
+      return new Response(null, { status: 204 });
+    }
     if ((m = /^\/me\/drive\/items\/([^/:]+)$/.exec(path))) {
       const it = M.items.get(decodeURIComponent(m[1]));
       if (!it) return err(404, 'itemNotFound', 'nf');
-      if (method === 'DELETE') { M.items.delete(it.id); return new Response(null, { status: 204 }); }
+      if (method === 'DELETE') { M.items.delete(it.id); M.recycled = [...(M.recycled || []), it.name]; return new Response(null, { status: 204 }); }
       return J(view(it));
     }
     return err(400, 'unknown', 'unmocked ' + method + ' ' + path);

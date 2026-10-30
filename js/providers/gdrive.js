@@ -391,11 +391,23 @@ export const gdrive = {
       const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
       return (await res.json()).id;
     },
+    // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
+    async listAny() {
+      const id = await backupFolderId();
+      return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`, 'id,name,modifiedTime'))
+        .filter((f) => /\.json$/i.test(f.name))
+        .map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime }));
+    },
     async remove(id) {
-      // 手動管理でも自動整理でも、誤操作から戻せるよう完全削除ではなくゴミ箱へ移す
+      // 自動整理（残す件数を超えた分）は、誤って消しても戻せるよう完全削除ではなくゴミ箱へ移す
       await api(`${API}/files/${encodeURIComponent(id)}?fields=id,trashed`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ trashed: true }),
       });
+    },
+    // 「バックアップファイルの管理」の削除：ゴミ箱にも残さず消す。戻り値：'deleted'
+    async removeForever(id) {
+      await api(`${API}/files/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      return 'deleted';
     },
   },
 };

@@ -601,23 +601,27 @@
         <label>取り込み先
           <select id="imp-target"></select>
         </label>
-        <label>TXT／ZIP ファイル（この端末・その他）
-          <input type="file" id="imp-file" accept=".txt,.zip,text/plain,application/zip">
-        </label>
-        <div class="imp-cloud-pick" id="imp-cloud-row" hidden>
-          <button type="button" id="imp-cloud-file"></button>
-          <span class="hint" id="imp-file-name"></span>
-        </div>
         <label>文字コード
           <select id="imp-encoding"></select>
         </label>
       </div>
+      <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける（対応しない話は勝手に追加せず、エラーとして表示）</label>
+      <div class="imp-file-pick">
+        <span class="imp-file-head">TXT／ZIP ファイル</span>
+        <div class="imp-file-buttons">
+          <!-- ラベルを押すと端末のファイル選択が開く（iPhone でも確実に開くよう、入力欄はラベルの中に置く） -->
+          <label class="imp-file-button">この端末・その他から選ぶ…
+            <input type="file" id="imp-file" class="visually-hidden" accept=".txt,.zip,text/plain,application/zip">
+          </label>
+          <button type="button" id="imp-cloud-file" hidden></button>
+        </div>
+        <span class="hint" id="imp-file-name">上の設定を選んでからファイルを選ぶと、読み込んで次の画面へ進みます。</span>
+      </div>
       <fieldset id="imp-zip-entry-row" class="imp-zip-picker" hidden>
         <legend>ZIP内のTXT</legend>
-        <p class="hint">取り込むTXTを一つ選んでください。フォルダー内のTXTも一覧に表示します。</p>
+        <p class="hint">取り込むTXTを一つ選んでください。選ぶと読み込んで次の画面へ進みます。フォルダー内のTXTも一覧に表示します。</p>
         <div id="imp-zip-entry-list" class="imp-zip-entry-list"></div>
       </fieldset>
-      <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける（対応しない話は勝手に追加せず、エラーとして表示）</label>
       <p class="hint">TXTの読み取り方法と、取り込む原稿の投稿先は別々に選べます。既存作品を選ぶと、もう一方の投稿先のタイトルも使って対応するエピソードを探します。本文以外のプロット・フリーメモは変わりません。確定するまで作品は一切変更しません。</p>
       <div id="imp-decode-info" class="imp-info" hidden></div>
       </div>
@@ -995,11 +999,6 @@
       <label><input type="checkbox" data-ui="editor.file"> ファイル</label>
       <label><input type="checkbox" data-ui="editor.links"> リンク</label>
       <p class="hint">「戻す」「やり直す」「設定」は常に表示します。「編集エピソード保存」はエピソードの編集エリアに表示します。</p>
-    </fieldset>
-    <fieldset class="checks">
-      <legend>「ファイル」メニュー内</legend>
-      <label><input type="checkbox" data-ui="editor.new"> 新しい作品</label>
-      <p class="hint">「作品一覧」は「ファイル」を表示しているとき、メニューの先頭に常に表示します。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>小説全体（目次）</legend>

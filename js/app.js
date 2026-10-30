@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.30-7.7.1';
+const APP_VERSION = '2026.10.31-7.7.2';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2443,17 +2443,22 @@ async function loadBackupManager() {
   const gen = ++backupManagerGen;
   box.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: '一覧を読み込んでいます…' }));
   managedBackupLatest = null;
-  try { managedBackupFiles = await sync.listAll(); }
+  // 名前の形が違うファイル（「… (2).json」など）も出す。出ないと、ここから消せないため
+  try { managedBackupFiles = await sync.listManaged(); }
   catch (e) { if (gen === backupManagerGen) box.textContent = `一覧を読み込めませんでした：${e.message}`; return; }
   if (gen !== backupManagerGen) return;
-  managedBackupLatest = managedBackupFiles[0] || null;
+  managedBackupLatest = managedBackupFiles.find((f) => !f.nameless) || null;
   box.replaceChildren();
   if (!managedBackupFiles.length) { box.textContent = 'バックアップファイルはありません。'; return; }
   // まずファイル名と日時だけで一覧を出す（すぐに選べる・消せる）。
   // 中の管理情報は、あとから少しずつ読んで足す（全部を一度に読むと、ファイルが多いとき一覧が出てこないため）
   const progress = Object.assign(document.createElement('p'), { className: 'hint' });
   box.append(progress);
-  const fileMeta = (f, info) => `${f.name}\n${fmtTime(new Date(info?.desc?.createdAt || f.at).toISOString())}・${info?.desc ? backupDescriptionLine(info.desc) : `端末：${f.prefix || '不明'}${info ? '' : '・内容を確認中…'}`}${info?.size ? `・${Math.ceil(info.size / 1024).toLocaleString()}KB` : ''}${info?.error ? `・⚠ ${info.error}` : ''}`;
+  const when = (f, info) => {
+    const t = info?.desc?.createdAt ? Date.parse(info.desc.createdAt) : f.at;
+    return t ? fmtTime(new Date(t).toISOString()) : '日時不明';
+  };
+  const fileMeta = (f, info) => `${f.name}\n${when(f, info)}・${info?.desc ? backupDescriptionLine(info.desc) : `端末：${f.prefix || '不明'}${info ? '' : '・内容を確認中…'}`}${info?.size ? `・${Math.ceil(info.size / 1024).toLocaleString()}KB` : ''}${info?.error ? `・⚠ ${info.error}` : ''}`;
   const rows = managedBackupFiles.map((f) => {
     const input = Object.assign(document.createElement('input'), { type: 'checkbox', value: f.id });
     const row = Object.assign(document.createElement('label'), { className: 'file-row' });
@@ -2548,7 +2553,7 @@ function inspectBackupFile(f) {
 async function openBackupManager() {
   const usable = sync.getState() === 'on';
   $('backup-manage-hint').textContent = usable
-    ? `「${sync.folderName()}」にある、あや綴りのバックアップだけを表示します。`
+    ? `自動バックアップの保存先「${sync.folderName()}」にある .json ファイルを、すべて表示します。「バックアップパックを作成」などで別のフォルダに保存したファイルは、ここには出ません（そのフォルダは、保存の画面の上に出る場所で確かめられます）。`
     : '保存先が利用できません。サーバへの自動バックアップで保存先を設定してください。';
   $('backup-files-delete').disabled = !usable;
   $('backup-file-inspect').disabled = !usable;
@@ -2577,15 +2582,30 @@ async function deleteManagedBackups() {
   const files = selectedManagedFiles();
   if (!files.length) { toast('削除するファイルを選んでください', true); return; }
   const names = files.slice(0, 8).map((f) => `・${f.name}`).join('\n') + (files.length > 8 ? `\nほか${files.length - 8}件` : '');
-  if (!(await ask(`次のバックアップファイルを削除します。\n${names}\n\n削除後は、あや綴りから元に戻せません。`, { ok: `${files.length}件を削除`, danger: true }))) return;
-  let done = 0;
+  const where = sync.mode() === 'cloud' ? `${syncProvider()?.label || 'クラウド'}の「${sync.folderName()}」` : `フォルダ「${sync.folderName()}」`;
+  if (!(await ask(`${where}から、次の${files.length}件のファイルを完全に削除します。\n${names}\n\nごみ箱にも残さないため、削除したファイルは元に戻せません。削除してよろしいですか？`, { ok: `${files.length}件を完全に削除`, danger: true }))) return;
+  let deleted = 0;
+  let recycled = 0;
+  const failed = [];
   await withBusy('削除中…', async () => {
     for (const f of files) {
-      try { await sync.remove(f); done++; } catch (e) { console.warn(e); }
+      try {
+        if ((await sync.removeForever(f)) === 'recycled') recycled++; else deleted++;
+      } catch (e) {
+        console.warn(e);
+        failed.push(`・${f.name}：${e?.message || e}`);
+      }
     }
   });
+  backupInspections.clear();
   await loadBackupManager();
-  toast(`${done}件のバックアップファイルを削除しました${done < files.length ? `（${files.length - done}件は削除できませんでした）` : ''}`, done < files.length);
+  const lines = [];
+  if (deleted) lines.push(`${deleted}件のファイルを完全に削除しました`);
+  // 個人用 OneDrive などは、完全削除をアプリに許していない。ごみ箱に移ったことを伝える
+  if (recycled) lines.push(`${recycled}件は、このクラウドでは完全に削除できないため、ごみ箱に移しました（ごみ箱を空にすると完全に消えます）`);
+  if (failed.length) lines.push(`${failed.length}件は削除できませんでした：\n${failed.slice(0, 3).join('\n')}`);
+  if (failed.length || recycled) await inform(lines.join('\n'));
+  else toast(lines.join('\n'));
 }
 
 function syncStatusShort() {
@@ -3823,7 +3843,7 @@ const SIMPLE_PRESET = {
   'show.foreword': false, 'show.afterword': false,
   'copy.ep-title': false, 'copy.foreword': false, 'copy.afterword': false, 'copy.free-memo': false, 'copy.main-to-sub': false,
   'max.title': false, 'max.foreword': false, 'max.afterword': false,
-  'editor.new': false, 'editor.links': false,
+  'editor.links': false,
   'show.report': false, 'novel.workcodes': false,
   'count.novel-title': false, 'count.ep-title': false, 'count.foreword': false, 'count.afterword': false, 'count.plot': false, 'count.free-memo': false,
   episodes: 'list',
@@ -3886,7 +3906,6 @@ function renderUiProfileEditor(profile = uiEditing || uiActive()) {
 
 // 表示・非表示を切り替える部品（キー → 要素）
 const UI_TARGETS = {
-  'editor.new': () => document.querySelector('.actions [data-action="new-project"]'),
   'editor.file': () => document.querySelector('.actions details.menu:not(#links-menu)'),
   'editor.links': () => $('links-menu'),
   'novel.synopsis': () => document.querySelector('.nav-item[data-view="synopsis"]'),
