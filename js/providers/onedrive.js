@@ -407,6 +407,8 @@ export const onedrive = {
 
   // フォルダを作る（parentId がなければ一番上）。同じ場所に同じ名前のフォルダがあれば、作らずにそれを返す（existed: true）
   async makeFolder(name, parentId = null) {
+    // 一番上は、アプリのフォルダの ID で指定する（special/approot のままではフォルダを作れないことがある）
+    parentId = parentId || await appRootId();
     const existing = await getItem(`${byPath(parentId, name).replace(/:$/, '')}?$select=id,name,folder,parentReference`);
     if (existing?.folder) return { ...toFolder(existing), existed: true };
     if (existing) throw new Error(`同じ場所に「${name}」という名前のファイルがあるので、フォルダを作れません`);
@@ -447,7 +449,7 @@ export const onedrive = {
         if (e.status !== 404) throw e; // 消されていたら新しく作る
       }
     }
-    const parent = folderId || chosenFolder()?.id || null;
+    const parent = folderId || chosenFolder()?.id || await appRootId();
     const ext = (name.match(/\.[a-z0-9]+$/i) || [''])[0];
     const base = ext ? name.slice(0, -ext.length) : name;
     let finalName = name;

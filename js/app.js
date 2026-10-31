@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.31-7.7.4';
+const APP_VERSION = '2026.10.31-7.7.6';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -650,34 +650,9 @@ function jumpToSearchHit(i) {
   toast(`${h.label}（${searchCursor.n + 1}／${hits.length}件目）${hits.length > 1 ? '　もう一度押すと次へ' : ''}`);
 }
 
-// 「表示」の章・エピソードを「リスト」にしたとき：エピソードを選ぶ一覧（章ごとにまとめる）。
-// プルダウンは iPhone で今のエピソードに✓が付き、同じものを選び直しても何も起きないため、ボタンの一覧にする。
-// どれを押しても（今のエピソードでも）本文の編集画面へ移る。今のエピソードは色で示す（✓は付けない）
-function renderEpisodePick() {
-  const box = $('ep-pick');
-  const btn = (i) => {
-    const b = Object.assign(document.createElement('button'), { type: 'button', className: 'ep-pick-item', textContent: `${i + 1}. ${episodeName(project.episodes[i], project.site)}` });
-    b.dataset.ep = i;
-    if (view === 'episode' && i === epIndex) { b.classList.add('current'); b.setAttribute('aria-current', 'true'); }
-    return b;
-  };
-  box.replaceChildren();
-  // 並べ方は目次と同じ（章あり／章なし・並び順・昇順／降順。隠していても、最後に選んだ設定で並べる）
-  if (!epSort.grouped || !project.chapters.length) { box.append(...sortedEpisodeIndexes().map(btn)); return; }
-  const groups = episodeGroups().filter((x) => x.indexes.length);
-  const chapterGroups = groups.filter((g) => g.chapter);
-  if (epSort.dir === 'desc') chapterGroups.reverse();
-  for (const g of [...chapterGroups, ...groups.filter((g) => !g.chapter)]) {
-    box.append(Object.assign(document.createElement('div'), { className: 'ep-pick-chapter', textContent: g.chapter ? chapterName(g.chapter) : '未分類' }), ...sortedEpisodeIndexes(g.indexes).map(btn));
-  }
-}
-
 function renderEpisodeList() {
-  renderEpisodePick();
   const list = $('episode-list');
   list.replaceChildren();
-  // 「ボタンの一覧」でも、検索しているときは検索結果（押すと見つけた場所へ）を出す
-  document.body.classList.toggle('ep-searching', !!epSearch);
   if (epSearch) { renderSearchResults(list); return; }
   const sort = EP_SORTS[epSort.key];
   // 「章なし」は章を抜きにして、全エピソードを選択した条件で並べる
@@ -3846,7 +3821,8 @@ function applyPrefs() {
 
 // ---------- 表示（「簡易」「詳細」の2つを登録して切り替える。作品データには入れない） ----------
 // prefs 'uiProfiles' = { simple: {…}, detail: {…} }、'uiActive' = 'simple' | 'detail'
-// 各表示の中身：'show.foreword' などのチェックは false のときだけ隠す（未設定は表示）。font・fontSize・episodes は値。
+// 各表示の中身：'show.foreword' などのチェックは false のときだけ隠す（未設定は表示）。font・fontSize は値。
+// （7.7.5 で「ボタンの一覧」をやめたので、保存済みの episodes の値は読まない。残っていても害はない）
 const UI_PROFILES = { simple: '簡易', detail: '詳細' };
 // 「編集機能」で出し分ける本文の上のボタン（data-max-tool の名前）
 const EDIT_TOOLS = ['ruby', 'dots', 'image', 'symbols', 'indent', 'find', 'replace', 'image-list'];
@@ -3860,7 +3836,7 @@ const SIMPLE_PRESET = {
   'editor.links': false,
   'show.report': false, 'novel.workcodes': false,
   'count.novel-title': false, 'count.ep-title': false, 'count.foreword': false, 'count.afterword': false, 'count.plot': false, 'count.free-memo': false,
-  episodes: 'list',
+  ...Object.fromEntries(NAV_PARTS.map((p) => [p, false])),
 };
 let uiEditing = null; // 設定画面で編集している表示
 
@@ -3917,7 +3893,7 @@ function renderUiProfileEditor(profile = uiEditing || uiActive()) {
   const active = uiActive();
   document.querySelectorAll('[name="ui-active"]').forEach((r) => { r.checked = r.value === active; });
   document.querySelectorAll('[data-ui]').forEach((c) => { c.checked = uiPref(c.dataset.ui, profile); });
-  const defaults = { font: 'serif', fontSize: '18', episodes: 'full' };
+  const defaults = { font: 'serif', fontSize: '18' };
   document.querySelectorAll('[data-uiv]').forEach((s) => { s.value = String(uiValue(s.dataset.uiv, defaults[s.dataset.uiv], profile)); });
   $('ui-prof-note').textContent = `「${UI_PROFILES[profile]}」の表示項目を設定しています。変更はすぐに画面へ反映されます。`;
 }
@@ -3951,7 +3927,6 @@ function applyUiPrefs() {
   const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo' }[view];
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
   if (reportMode && !uiPref('show.report')) setReportMode(false);
-  document.body.classList.toggle('ep-list-mode', uiValue('episodes', 'full') === 'list');
   // iPhone の「簡易」表示では、左の一覧を開くボタンを「作品」と呼ぶ（作品の資料とエピソードを選ぶ場所のため）
   const drawerName = isIPhone() && uiActive() === 'simple' ? '作品' : '目次';
   const drawerBtn = document.querySelector('.drawer-toggle');

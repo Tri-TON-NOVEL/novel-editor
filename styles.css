@@ -416,18 +416,6 @@ body.hide-plot .plot-memo-splitter, body.hide-memo .plot-memo-splitter,
 
 /* 「表示」で隠した部品 */
 .ui-off { display: none !important; }
-/* 章・エピソード：「リスト」はプルダウンだけ */
-.ep-pick-box { display: none; }
-body.ep-list-mode .ep-pick-box { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
-.ep-pick-list { display: flex; flex-direction: column; gap: 2px; font-weight: 400; }
-.ep-pick-chapter { font-size: 12px; font-weight: 700; color: var(--muted); margin: 8px 0 2px; }
-.ep-pick-item { text-align: left; font-size: 16px; padding: 10px 12px; min-height: 44px; border-radius: 6px; width: 100%; overflow-wrap: anywhere; }
-/* 今のエピソードは色で示す（✓は付けない） */
-.ep-pick-item.current { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
-/* 「ボタンの一覧」では目次の代わりにボタンを並べる（検索中は検索結果を出す）。
-   上の操作（＋ 話・並び順・検索など）は、「表示」の章・エピソードのチェックで出し分ける */
-body.ep-list-mode:not(.ep-searching) #episode-list { display: none !important; }
-body.ep-list-mode.ep-searching .ep-pick-box { display: none !important; }
 /* 章・エピソードの部品を隠す（「表示」→「章・エピソード（目次）」） */
 body.hide-nav-ep-menu .episode-list .chapter-menu { display: none !important; }
 .ep-sort:not(:has(> :not(.ui-off))) { display: none; }

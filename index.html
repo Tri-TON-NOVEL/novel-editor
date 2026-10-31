@@ -107,9 +107,6 @@
         </select>
         <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
       </div>
-      <div class="ep-pick-box">
-        <div class="ep-pick-list" id="ep-pick" role="group" aria-label="編集するエピソード"></div>
-      </div>
       <div class="ep-search">
         <input type="search" id="ep-search" placeholder="検索（本文・タイトル・プロット・メモ）" aria-label="エピソードを検索" autocomplete="off" spellcheck="false" enterkeyhint="search">
       </div>
@@ -1015,13 +1012,7 @@
       <label><input type="checkbox" data-ui="nav.sort-dir"> 昇順／降順</label>
       <label><input type="checkbox" data-ui="nav.search"> 検索欄</label>
       <label><input type="checkbox" data-ui="nav.ep-menu"> 各話・各章の操作ボタン（…）</label>
-      <label class="inline-select">一覧の形
-        <select data-uiv="episodes">
-          <option value="full">目次（章を開閉できる）</option>
-          <option value="list">ボタンの一覧（押すと本文へ）</option>
-        </select>
-      </label>
-      <p class="hint">隠した項目も、最後に選んだ設定のまま使われます。たとえば「章あり／章なし」と「並び順」を隠しても、「昇順／降順」はそのとき選んであった章あり・なしと並び順（タイトルなど）で並べ替えます。「ボタンの一覧」は、押すとそのエピソードの本文の編集画面へ移ります。</p>
+      <p class="hint">隠した項目も、最後に選んだ設定のまま使われます。たとえば「章あり／章なし」と「並び順」を隠しても、「昇順／降順」はそのとき選んであった章あり・なしと並び順（タイトルなど）で並べ替えます。</p>
     </fieldset>
     <fieldset class="checks" id="show-settings">
       <legend>エピソード画面に表示する項目</legend>
