@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.31-7.7.2';
+const APP_VERSION = '2026.10.31-7.7.3';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -662,9 +662,13 @@ function renderEpisodePick() {
     return b;
   };
   box.replaceChildren();
-  if (!project.chapters.length) { box.append(...project.episodes.map((_, i) => btn(i))); return; }
-  for (const g of episodeGroups().filter((x) => x.indexes.length)) {
-    box.append(Object.assign(document.createElement('div'), { className: 'ep-pick-chapter', textContent: g.chapter ? chapterName(g.chapter) : '未分類' }), ...g.indexes.map(btn));
+  // 並べ方は目次と同じ（章あり／章なし・並び順・昇順／降順。隠していても、最後に選んだ設定で並べる）
+  if (!epSort.grouped || !project.chapters.length) { box.append(...sortedEpisodeIndexes().map(btn)); return; }
+  const groups = episodeGroups().filter((x) => x.indexes.length);
+  const chapterGroups = groups.filter((g) => g.chapter);
+  if (epSort.dir === 'desc') chapterGroups.reverse();
+  for (const g of [...chapterGroups, ...groups.filter((g) => !g.chapter)]) {
+    box.append(Object.assign(document.createElement('div'), { className: 'ep-pick-chapter', textContent: g.chapter ? chapterName(g.chapter) : '未分類' }), ...sortedEpisodeIndexes(g.indexes).map(btn));
   }
 }
 
@@ -672,6 +676,8 @@ function renderEpisodeList() {
   renderEpisodePick();
   const list = $('episode-list');
   list.replaceChildren();
+  // 「ボタンの一覧」でも、検索しているときは検索結果（押すと見つけた場所へ）を出す
+  document.body.classList.toggle('ep-searching', !!epSearch);
   if (epSearch) { renderSearchResults(list); return; }
   const sort = EP_SORTS[epSort.key];
   // 「章なし」は章を抜きにして、全エピソードを選択した条件で並べる
@@ -1181,7 +1187,7 @@ function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', work
     $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
     $('drive-hint').textContent = p.browseHint || '';
     $('drive-dialog').showModal();
-    loadDriveFolders().catch((e) => { finishDrive(null); fail(e); });
+    withBusy('一覧を読み込み中…', loadDriveFolders).catch((e) => { finishDrive(null); fail(e); });
   });
 }
 
@@ -1210,7 +1216,7 @@ async function loadDriveFolders() {
   // ログイン画面は、押したとき以外は出せない（iPhone・iPad）。ログインしていなければボタンを出す
   if (!ui.p.canSaveSilently()) {
     list.replaceChildren(listItem('フォルダを見るには、ログインが必要です', '', [
-      button('ログインして続ける', async () => { await ui.p.signIn(); if (driveUi === ui) await loadDriveFolders(); }),
+      button('ログインして続ける', async () => { await ui.p.signIn(); if (driveUi === ui) await withBusy('一覧を読み込み中…', loadDriveFolders); }),
     ]));
     $('drive-ok').disabled = true;
     return;
@@ -1267,7 +1273,10 @@ function goDriveFolder(id) {
   if (!ui) return;
   ui.cur = id;
   if (ui.lazy && !ui.loaded.has(id ?? '')) $('drive-list').replaceChildren(li('empty', '読み込み中…'));
-  ensureDriveChildren(ui, id).then(() => { if (driveUi === ui) return renderDrive(); }).catch(fail);
+  withBusy('一覧を読み込み中…', async () => {
+    await ensureDriveChildren(ui, id);
+    if (driveUi === ui) await renderDrive();
+  }).catch(fail);
 }
 
 async function renderDrive() {
@@ -2444,7 +2453,8 @@ async function loadBackupManager() {
   box.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: '一覧を読み込んでいます…' }));
   managedBackupLatest = null;
   // 名前の形が違うファイル（「… (2).json」など）も出す。出ないと、ここから消せないため
-  try { managedBackupFiles = await sync.listManaged(); }
+  // 一覧を読み終わるまで、読み込み中の画面を出す（中身の情報は、そのあと一覧の中で少しずつ足す）
+  try { managedBackupFiles = await withBusy('バックアップの一覧を読み込み中…', () => sync.listManaged()); }
   catch (e) { if (gen === backupManagerGen) box.textContent = `一覧を読み込めませんでした：${e.message}`; return; }
   if (gen !== backupManagerGen) return;
   managedBackupLatest = managedBackupFiles.find((f) => !f.nameless) || null;
@@ -2684,7 +2694,10 @@ async function runSyncCheck({ manual = false } = {}) {
   }
   let r;
   try {
-    r = await sync.findNewer({ ignoreSeen: manual });
+    // 押して確かめるときは、終わるまで読み込み中の画面を出す（起動時の確認は裏で行う）
+    r = manual
+      ? await withBusy('他の端末の更新を確認中…', () => sync.findNewer({ ignoreSeen: manual }))
+      : await sync.findNewer({ ignoreSeen: manual });
   } catch (e) {
     renderSyncState();
     if (manual) fail(e);
@@ -2954,7 +2967,8 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
     try { syncFromFile(mode).then((done) => { if (done) { decide(); dialog.close(); } }).catch(fail); } catch (err) { fail(err); }
   };
   try {
-    files = await sync.listAll();
+    // 一覧を読み終わるまで、読み込み中の画面を出す（バックアップの保存のときと同じ）
+    files = await withBusy('バックアップの一覧を読み込み中…', () => sync.listAll());
   } catch (e) {
     list.replaceChildren(li('empty', '一覧を読み込めませんでした：' + e.message + '（「ファイルから選ぶ」は使えます）'));
     return;
@@ -3838,6 +3852,10 @@ function applyPrefs() {
 // prefs 'uiProfiles' = { simple: {…}, detail: {…} }、'uiActive' = 'simple' | 'detail'
 // 各表示の中身：'show.foreword' などのチェックは false のときだけ隠す（未設定は表示）。font・fontSize・episodes は値。
 const UI_PROFILES = { simple: '簡易', detail: '詳細' };
+// 「編集機能」で出し分ける本文の上のボタン（data-max-tool の名前）
+const EDIT_TOOLS = ['ruby', 'dots', 'image', 'symbols', 'indent', 'find', 'replace', 'image-list'];
+// 章・エピソード（目次）の部品。以前の版の「リスト」は、これらをまとめて隠していた
+const NAV_PARTS = ['nav.add-episode', 'nav.add-chapter', 'nav.grouping', 'nav.sort', 'nav.sort-dir', 'nav.search'];
 // 「簡易」の初期値（最初に作るときだけ使う。あとは自由に変えられる）
 const SIMPLE_PRESET = {
   'show.foreword': false, 'show.afterword': false,
@@ -3862,6 +3880,10 @@ function uiProfiles() {
   // 6.0 より前の「目次の活動報告」を隠していた表示は、「活動報告タブ」も隠す
   for (const k of Object.keys(UI_PROFILES)) {
     if (out[k]['show.report'] === undefined && out[k]['novel.report'] === false) out[k] = { ...out[k], 'show.report': false };
+    // 7.7.2 より前の「リスト」は、＋話・＋章・並べ替え・検索をまとめて隠していた。見た目を変えないよう、個別の設定にする
+    if (out[k].episodes === 'list' && NAV_PARTS.every((p) => out[k][p] === undefined)) {
+      out[k] = { ...out[k], ...Object.fromEntries(NAV_PARTS.map((p) => [p, false])) };
+    }
   }
   return out;
 }
@@ -3915,6 +3937,12 @@ const UI_TARGETS = {
   'novel.project-memo': () => document.querySelector('.nav-item[data-view="project-memo"]'),
   'novel.workcodes': () => $('work-codes'),
   'show.report': () => $('report-tab'),
+  'nav.add-episode': () => document.querySelector('.nav-add [data-action="add-episode"]'),
+  'nav.add-chapter': () => document.querySelector('.nav-add [data-action="add-chapter"]'),
+  'nav.grouping': () => $('ep-grouping'),
+  'nav.sort': () => $('ep-sort'),
+  'nav.sort-dir': () => $('ep-sort-dir'),
+  'nav.search': () => document.querySelector('.ep-search'),
   ...Object.fromEntries(['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo', 'x', 'narou-report-title', 'narou-report-body']
     .map((k) => ['count.' + k, () => $('count-' + k)])),
   ...Object.fromEntries(['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'project-memo', 'x-text', 'narou-report-title', 'narou-report-body']
@@ -3943,7 +3971,10 @@ function applyUiPrefs() {
   for (const k of ['title', 'body', 'foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-max-' + k, !uiPref('max.' + k));
   document.querySelectorAll('[data-max-tool]').forEach((tool) => {
     tool.classList.toggle('max-tool-off', !uiPref(`max.tool.${tool.dataset.maxTool}`));
+    // 編集機能（最大化していないとき）：ルビ〜画像だけ。全て選択・コピーなどは別のグループで設定する
+    tool.classList.toggle('edit-tool-off', EDIT_TOOLS.includes(tool.dataset.maxTool) && !uiPref(`tool.${tool.dataset.maxTool}`));
   });
+  cls.toggle('hide-nav-ep-menu', !uiPref('nav.ep-menu'));
   cls.toggle('hide-help-labels', !uiPref('other.hints'));
   cls.toggle('hide-status', !uiPref('other.status'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ

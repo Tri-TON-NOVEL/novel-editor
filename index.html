@@ -62,7 +62,6 @@
       <div class="field-head">
         <label for="novel-title">小説タイトル</label>
         <span class="count" id="count-novel-title"></span>
-        <button type="button" class="tool" data-find="novel-title">検索</button>
         <button type="button" class="copy" data-copy="novel-title">コピー</button>
       </div>
       <input id="novel-title" type="text" autocomplete="off" placeholder="作品タイトル">
@@ -109,7 +108,6 @@
         <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
       </div>
       <div class="ep-pick-box">
-        <div class="ep-pick-head">章・エピソード</div>
         <div class="ep-pick-list" id="ep-pick" role="group" aria-label="編集するエピソード"></div>
       </div>
       <div class="ep-search">
@@ -1009,15 +1007,22 @@
       <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
       <label><input type="checkbox" data-ui="novel.workcodes"> 小説投稿サイト情報</label>
     </fieldset>
-    <fieldset>
+    <fieldset class="checks">
       <legend>章・エピソード（目次）</legend>
-      <label>表し方
+      <label><input type="checkbox" data-ui="nav.add-episode"> ＋ 話</label>
+      <label><input type="checkbox" data-ui="nav.add-chapter"> ＋ 章</label>
+      <label><input type="checkbox" data-ui="nav.grouping"> 章あり／章なし</label>
+      <label><input type="checkbox" data-ui="nav.sort"> 並び順（ファイル順・タイトルなど）</label>
+      <label><input type="checkbox" data-ui="nav.sort-dir"> 昇順／降順</label>
+      <label><input type="checkbox" data-ui="nav.search"> 検索欄</label>
+      <label><input type="checkbox" data-ui="nav.ep-menu"> 各話・各章の操作ボタン（…）</label>
+      <label class="inline-select">一覧の形
         <select data-uiv="episodes">
-          <option value="full">全項目（章・並べ替え・検索・一覧）</option>
-          <option value="list">リスト（エピソードを選ぶプルダウンだけ）</option>
+          <option value="full">目次（章を開閉できる）</option>
+          <option value="list">ボタンの一覧（押すと本文へ）</option>
         </select>
       </label>
-      <p class="hint">「リスト」では、プルダウンで選んだエピソードを編集します。章・話の追加や並べ替え・検索は「全項目」で行います。</p>
+      <p class="hint">隠した項目も、最後に選んだ設定のまま使われます。たとえば「章あり／章なし」と「並び順」を隠しても、「昇順／降順」はそのとき選んであった章あり・なしと並び順（タイトルなど）で並べ替えます。「ボタンの一覧」は、押すとそのエピソードの本文の編集画面へ移ります。</p>
     </fieldset>
     <fieldset class="checks" id="show-settings">
       <legend>エピソード画面に表示する項目</legend>
@@ -1083,6 +1088,18 @@
       <label><input type="checkbox" data-ui="max.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="max.plot"> プロット</label>
       <label><input type="checkbox" data-ui="max.memo"> フリーメモ</label>
+    </fieldset>
+    <fieldset class="checks">
+      <legend>編集機能</legend>
+      <label><input type="checkbox" data-ui="tool.ruby"> ルビ</label>
+      <label><input type="checkbox" data-ui="tool.dots"> 傍点</label>
+      <label><input type="checkbox" data-ui="tool.image"> 挿絵</label>
+      <label><input type="checkbox" data-ui="tool.symbols"> 記号</label>
+      <label><input type="checkbox" data-ui="tool.indent"> 字下げ</label>
+      <label><input type="checkbox" data-ui="tool.find"> 検索</label>
+      <label><input type="checkbox" data-ui="tool.replace"> 置換</label>
+      <label><input type="checkbox" data-ui="tool.image-list"> 画像</label>
+      <p class="hint">本文の上に並ぶボタンです。最大化しているときは「本文の最大化中」の設定に従います。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>本文の最大化中</legend>

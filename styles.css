@@ -424,7 +424,16 @@ body.ep-list-mode .ep-pick-box { display: flex; flex-direction: column; gap: 4px
 .ep-pick-item { text-align: left; font-size: 16px; padding: 10px 12px; min-height: 44px; border-radius: 6px; width: 100%; overflow-wrap: anywhere; }
 /* 今のエピソードは色で示す（✓は付けない） */
 .ep-pick-item.current { background: var(--accent); color: #fff; border-color: var(--accent); font-weight: 700; }
-body.ep-list-mode .nav-head, body.ep-list-mode .ep-sort, body.ep-list-mode .ep-search, body.ep-list-mode #episode-list { display: none !important; }
+/* 「ボタンの一覧」では目次の代わりにボタンを並べる（検索中は検索結果を出す）。
+   上の操作（＋ 話・並び順・検索など）は、「表示」の章・エピソードのチェックで出し分ける */
+body.ep-list-mode:not(.ep-searching) #episode-list { display: none !important; }
+body.ep-list-mode.ep-searching .ep-pick-box { display: none !important; }
+/* 章・エピソードの部品を隠す（「表示」→「章・エピソード（目次）」） */
+body.hide-nav-ep-menu .episode-list .chapter-menu { display: none !important; }
+.ep-sort:not(:has(> :not(.ui-off))) { display: none; }
+.nav-add:not(:has(> :not(.ui-off))) { display: none; }
+/* 編集機能（本文の上のボタン）を隠す。最大化中は「本文の最大化中」の設定に従う */
+.field:not(.maximized) .editor-tools .edit-tool-off { display: none !important; }
 body.hide-foreword [data-field="foreword"],
 body.hide-afterword [data-field="afterword"],
 body.hide-plot [data-field="plot"],
@@ -1140,6 +1149,8 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 /* バックアップの作成：選べない項目は薄くして、押せないことが見て分かるようにする */
 .dialog fieldset:disabled { opacity: 0.45; }
 .dialog fieldset.checks .sub-check { grid-column: 1 / -1; padding-left: 28px; }
+.dialog fieldset.checks label.inline-select { grid-column: 1 / -1; flex-wrap: wrap; }
+.dialog fieldset.checks label.inline-select select { width: auto; max-width: 100%; }
 .dialog fieldset.checks label.disabled { opacity: 0.45; }
 #backup-pack-name { word-break: break-all; color: var(--text); }
 .list .item-meta, .backup-file-list .file-meta { white-space: pre-line; }
