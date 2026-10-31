@@ -1,8 +1,12 @@
 // OneDrive 接続（Microsoft ID プラットフォーム：認可コード＋PKCE ／ Microsoft Graph v1.0）
 // gdrive.js と同じ形のオブジェクト。各自が Microsoft Entra で登録した自分のアプリ（クライアントID）で、自分の OneDrive に使う。
-// サーバーは使わない（ブラウザだけで動く）。権限は Files.ReadWrite（自分の OneDrive のファイル）と offline_access（ログインの更新）。
+// サーバーは使わない（ブラウザだけで動く）。
+// 権限は Files.ReadWrite.AppFolder（OneDrive の「アプリ\<アプリの名前>」フォルダの中だけ）と offline_access（ログインの更新）。
+//   7.7.4 より前は Files.ReadWrite（OneDrive 全体）。権限が変わった前の版の鍵は使わず、ログインし直してもらう。
+//   アプリのフォルダ（approot）は、初めて使うときに OneDrive が自動で作る。名前は Microsoft Entra で登録したアプリの名前。
+//   フォルダ選択画面の「一番上」は、OneDrive の一番上ではなく、このアプリのフォルダ。
 //
-// エディターが勝手にフォルダを作ることはない。フォルダは使う人が自分で作り（名前も自由）、それを選ぶ。
+// アプリのフォルダの中のフォルダは、使う人が自分で作り（名前も自由）、それを選ぶ。
 //   「ファイル」で最初に開くフォルダ（端末ごと）  … localStorage `novel-editor:onedrive.folder` = { id, name }（未指定は一番上）
 //   自動バックアップのフォルダ（端末ごと）        … `novel-editor:onedrive.backupFolder` = { id, name }（選ぶまでは保存しない）
 //
@@ -15,7 +19,9 @@ import { prefs } from '../db.js';
 
 const AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
-const SCOPES = 'Files.ReadWrite offline_access';
+const SCOPES = 'Files.ReadWrite.AppFolder offline_access';
+// アプリのフォルダ（一番上）
+const APPROOT = '/me/drive/special/approot';
 // 自動バックアップのファイル名（プレフィックス＋日時）
 const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
 // これより大きいファイルは分けて送る（アップロード セッション）。分ける大きさは 320KiB の倍数にする決まり
@@ -36,11 +42,20 @@ const PKCE_KEY = 'novel-editor-session:onedrive.pkce';
 let silent = 0;
 let beforeRedirect = async () => {};
 
-// { access, expiresAt, refresh, clientId }
+// 前の版（権限が違う）の鍵が残っていたか。アプリ側で一度だけ、ログインし直しとフォルダの移動を案内する
+let scopeChanged = false;
+// { access, expiresAt, refresh, clientId, scope }
 let token = (() => {
   try {
     const t = JSON.parse(localStorage.getItem(TOKEN_KEY));
-    return t && t.clientId === clientId() ? t : null;
+    if (!t || t.clientId !== clientId()) return null;
+    // 権限（scope）が変わった前の版の鍵は使わない（更新用の鍵も、前の権限のものなので捨てる）
+    if (t.scope !== SCOPES) {
+      scopeChanged = true;
+      localStorage.removeItem(TOKEN_KEY);
+      return null;
+    }
+    return t;
   } catch { return null; }
 })();
 function setToken(t) {
@@ -50,8 +65,9 @@ function setToken(t) {
     else localStorage.removeItem(TOKEN_KEY);
   } catch { /* 残せなくても続行 */ }
 }
-const accessValid = () => !!token && token.clientId === clientId() && Date.now() < token.expiresAt - 60_000;
-const canRefresh = () => !!token?.refresh && token.clientId === clientId();
+const tokenOk = () => !!token && token.clientId === clientId() && token.scope === SCOPES;
+const accessValid = () => tokenOk() && Date.now() < token.expiresAt - 60_000;
+const canRefresh = () => tokenOk() && !!token.refresh;
 
 class NeedLoginError extends Error {
   constructor() { super('OneDrive へのログインが必要です'); this.name = 'NeedLoginError'; }
@@ -112,6 +128,7 @@ async function tokenRequest(params) {
     expiresAt: Date.now() + (Number(j.expires_in) || 3600) * 1000,
     refresh: j.refresh_token || token?.refresh || '',
     clientId: clientId(),
+    scope: SCOPES,
   });
   return token.access;
 }
@@ -186,10 +203,22 @@ async function api(path, options = {}, retry = true) {
 }
 
 const enc = (name) => encodeURIComponent(name);
-// 置き場所の指定：フォルダの中の名前で（parentId がなければ一番上）／ファイルの ID で
-const byPath = (parentId, name) => (parentId ? `/me/drive/items/${enc(parentId)}:/${enc(name)}:` : `/me/drive/root:/${enc(name)}:`);
+// 置き場所の指定：フォルダの中の名前で（parentId がなければ一番上＝アプリのフォルダ）／ファイルの ID で
+const byPath = (parentId, name) => (parentId ? `/me/drive/items/${enc(parentId)}:/${enc(name)}:` : `${APPROOT}:/${enc(name)}:`);
 const byId = (id) => `/me/drive/items/${enc(id)}`;
-const childrenOf = (parentId) => (parentId ? `/me/drive/items/${enc(parentId)}/children` : '/me/drive/root/children');
+const childrenOf = (parentId) => (parentId ? `/me/drive/items/${enc(parentId)}/children` : `${APPROOT}/children`);
+
+// アプリのフォルダの ID（フォルダの並びを、どこまでさかのぼるかに使う）。初めて呼んだときに OneDrive がフォルダを作る
+let appRootPromise = null;
+function appRootId() {
+  if (!appRootPromise) {
+    appRootPromise = api(`${APPROOT}?$select=id`).then((r) => r.json()).then((j) => j.id)
+      .catch((e) => { appRootPromise = null; throw e; });
+  }
+  return appRootPromise;
+}
+// アプリのフォルダの外（前の版で選んだフォルダなど）は、この権限では見えない（403）。見つからないのと同じに扱う
+const outsideAppFolder = (e) => e?.status === 403 || e?.status === 404;
 const SELECT = '$select=id,name,folder,file,parentReference,lastModifiedDateTime,deleted';
 
 // フォルダの中身すべて（ページをまたいで）
@@ -261,10 +290,15 @@ async function upload(target, text, mime = 'application/json', conflict = 'repla
   return last.json();
 }
 
-// 選んだフォルダが使えるか（消されていない）
+// 選んだフォルダが使えるか（消されていない・アプリのフォルダの中にある）
 async function folderUsable(id) {
-  const it = await getItem(`${byId(id)}?$select=id,folder,deleted`);
-  return !!it && !!it.folder && !it.deleted;
+  try {
+    const it = await getItem(`${byId(id)}?$select=id,folder,deleted`);
+    return !!it && !!it.folder && !it.deleted;
+  } catch (e) {
+    if (outsideAppFolder(e)) return false;
+    throw e;
+  }
 }
 
 // 自動バックアップのフォルダ（選んだフォルダそのもの）。選んでいない・使えないときはエラー（勝手に別の場所へは保存しない）
@@ -272,7 +306,7 @@ async function backupFolderId() {
   const chosen = chosenBackupFolder();
   if (!chosen?.id) throw new Error('自動バックアップのフォルダが決まっていません。「設定」→「自動バックアップ」でフォルダを選んでください');
   if (!(await folderUsable(chosen.id))) {
-    throw new Error(`自動バックアップのフォルダ「${chosen.name}」が見つかりません（ごみ箱に入れた・消した）。「設定」→「自動バックアップ」でフォルダを選び直してください`);
+    throw new Error(`自動バックアップのフォルダ「${chosen.name}」が使えません。消したか、OneDrive の「アプリ」の中のあや綴りのフォルダの外にあります（7.7.4 からは、そのフォルダの中しか使えません）。フォルダをその中へ移すか、「設定」→「自動バックアップ」でフォルダを選び直してください`);
   }
   return chosen.id;
 }
@@ -289,8 +323,10 @@ async function sameWork(item, workId) {
 export const onedrive = {
   id: 'onedrive',
   label: 'OneDrive',
-  rootName: 'OneDrive',
-  browseHint: 'あなたの OneDrive のフォルダが出ます（共有されたフォルダは出ません）。',
+  rootName: 'アプリのフォルダ',
+  browseHint: 'OneDrive の「アプリ」の中にある、あや綴り用のフォルダの中だけが出ます（それより外のフォルダは、この権限では見えません）。パソコンの OneDrive では「アプリ」（Apps）の中にあります。',
+  // 前の版の権限の鍵が残っていた（ログインし直しが必要）
+  get scopeChanged() { return scopeChanged; },
 
   isConfigured() { return !!clientId(); },
   isSignedIn() { return accessValid() || canRefresh(); },
@@ -310,7 +346,7 @@ export const onedrive = {
       key: 'onedrive.clientId',
       label: 'OneDrive（Microsoft）アプリケーション（クライアント）ID',
       placeholder: '00000000-0000-0000-0000-000000000000',
-      hint: 'Microsoft Entra 管理センターの「アプリの登録」で作ったアプリの ID。リダイレクト URI に公開 URL を「シングルページ アプリケーション」として登録し、API のアクセス許可に Microsoft Graph の Files.ReadWrite と offline_access を追加してください（手順は README）。',
+      hint: 'Microsoft Entra 管理センターの「アプリの登録」で作ったアプリの ID。リダイレクト URI に公開 URL を「シングルページ アプリケーション」として登録し、API のアクセス許可に Microsoft Graph の Files.ReadWrite.AppFolder と offline_access を追加してください（手順は README）。',
     },
   ],
 
@@ -323,7 +359,7 @@ export const onedrive = {
   // ---------- 「ファイル」で最初に開くフォルダ ----------
   folderInfo() {
     const f = chosenFolder();
-    return f ? { ...f, isDefault: false } : { id: '', name: 'OneDrive（一番上）', isDefault: true };
+    return f ? { ...f, isDefault: false } : { id: '', name: 'アプリのフォルダ（一番上）', isDefault: true };
   },
   resetFolder() { prefs.set('onedrive.folder', null); },
   setFolder(folder) { prefs.set('onedrive.folder', folder ? { id: folder.id, name: folder.name } : null); },
@@ -336,20 +372,30 @@ export const onedrive = {
     return (await children(parentId)).filter((it) => it.folder && !it.deleted).map(toFolder);
   },
 
-  // 一番上からそのフォルダまでの並び（一番上は含まない）。見つからなければ null
+  // 一番上（アプリのフォルダ）からそのフォルダまでの並び（一番上は含まない）。
+  // 見つからない・アプリのフォルダの外（前の版で選んだフォルダなど）なら null
   async folderPath(id) {
+    const rootId = await appRootId();
+    if (id === rootId) return [];
     const path = [];
     let cur = id;
     for (let i = 0; cur && i < 30; i++) {
-      const it = await getItem(`${byId(cur)}?$select=id,name,folder,parentReference,root,deleted`);
-      if (!it || it.deleted || (!it.folder && !it.root)) return null;
-      if (it.root) break;
+      let it;
+      try {
+        it = await getItem(`${byId(cur)}?$select=id,name,folder,parentReference,root,deleted`);
+      } catch (e) {
+        if (outsideAppFolder(e)) return null;
+        throw e;
+      }
+      // OneDrive の一番上まで来た＝アプリのフォルダの外
+      if (!it || it.deleted || it.root || !it.folder) return null;
       path.unshift(toFolder(it));
-      // 親が一番上（/drive/root:）なら終わり
-      if (!it.parentReference?.id || /^\/drive\/root:?$/.test(it.parentReference.path || '')) break;
+      // 親がアプリのフォルダなら終わり
+      if (it.parentReference?.id === rootId) return path;
+      if (!it.parentReference?.id) return null;
       cur = it.parentReference.id;
     }
-    return path;
+    return null;
   },
 
   // フォルダの中のファイル（フォルダは除く。新しい順）。戻り値: [{ id, name, modifiedTime }]

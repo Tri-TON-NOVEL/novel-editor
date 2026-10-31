@@ -1,8 +1,10 @@
 // Google Drive 接続（Google Identity Services + Drive API v3）
-// 権限は drive（ログインした人のマイドライブ全体）。このソフトは使う人専用なので、各自が自分のクライアントID で自分のドライブに使う。
-// どの方法で置いたファイル・フォルダ（パソコン版 Google ドライブの同期フォルダなど）も見える。
+// 権限は drive.file（このアプリ＝同じクライアントID で作ったファイル・フォルダだけ）。各自が自分のクライアントID で自分のドライブに使う。
+//   7.7.4 より前は drive（マイドライブ全体）。権限が変わった前の版の鍵は使わず、ログインし直してもらう。
+//   ブラウザの Google ドライブやパソコン版の同期フォルダで、自分で作った・置いたファイルやフォルダは見えない。
+//   あや綴りで作ったもの（フォルダ選択画面の「＋ 新しいフォルダ」・保存・自動バックアップ）は、どの端末からでも見える。
 //
-// エディターが勝手にフォルダを作ることはない。フォルダは使う人が自分で作り（名前も自由）、それを選ぶ。
+// フォルダは使う人があや綴りの画面で作り（名前も自由）、それを選ぶ。
 //
 // 「ファイル」で最初に開くフォルダ（端末ごと。localStorage `novel-editor:gdrive.folder` = { id, name }）
 //   未指定 … マイドライブ直下
@@ -18,7 +20,7 @@
 //   リダイレクトには、Google Cloud Console の「承認済みのリダイレクト URI」に公開 URL の登録が必要。
 import { prefs } from '../db.js';
 
-const SCOPE = 'https://www.googleapis.com/auth/drive';
+const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 // 自動バックアップのファイル名（プレフィックス＋日時）
 const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
 const API = 'https://www.googleapis.com/drive/v3';
@@ -46,10 +48,13 @@ const isStandalone = window.matchMedia?.('(display-mode: standalone)').matches |
 // 全体バックアップ（novel-editor: で始まる設定）には入らない名前にしている。
 const TOKEN_KEY = 'novel-editor-session:gdrive.token';
 const STATE_KEY = 'novel-editor-session:gdrive.state';
+// 前の版（権限が違う）の鍵が残っていたか。アプリ側で一度だけ、ログインし直しを案内する
+let scopeChanged = false;
 let token = (() => {
   try {
     const t = JSON.parse(localStorage.getItem(TOKEN_KEY));
     // 権限（scope）が変わった前の版の鍵は使わない（ログインし直してもらう）
+    if (t && t.clientId === clientId() && t.scope !== SCOPE) { scopeChanged = true; localStorage.removeItem(TOKEN_KEY); return null; }
     return t && t.clientId === clientId() && t.scope === SCOPE && Date.now() < t.expiresAt ? t : null;
   } catch { return null; }
 })(); // { value, expiresAt, clientId, scope }
@@ -75,7 +80,8 @@ async function startRedirectLogin() {
   const state = Array.from(crypto.getRandomValues(new Uint8Array(16)), (b) => b.toString(16).padStart(2, '0')).join('');
   try { localStorage.setItem(STATE_KEY, state); } catch { /* 無視 */ }
   const url = new URL('https://accounts.google.com/o/oauth2/v2/auth');
-  const params = { client_id: clientId(), redirect_uri: redirectUri(), response_type: 'token', scope: SCOPE, include_granted_scopes: 'true', state };
+  // 前の版で許可した広い権限（drive）を引き継がないよう、include_granted_scopes は付けない（false）
+  const params = { client_id: clientId(), redirect_uri: redirectUri(), response_type: 'token', scope: SCOPE, include_granted_scopes: 'false', state };
   for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
   await beforeRedirect().catch(() => {});
   location.href = url.toString();
@@ -128,7 +134,7 @@ async function getToken() {
   if (isStandalone) return startRedirectLogin();
   await loadGis();
   if (!tokenClient || tokenClient._id !== clientId()) {
-    tokenClient = window.google.accounts.oauth2.initTokenClient({ client_id: clientId(), scope: SCOPE, callback: () => {} });
+    tokenClient = window.google.accounts.oauth2.initTokenClient({ client_id: clientId(), scope: SCOPE, include_granted_scopes: false, callback: () => {} });
     tokenClient._id = clientId();
   }
   return new Promise((resolve, reject) => {
@@ -183,7 +189,7 @@ async function backupFolderId() {
   const chosen = chosenBackupFolder();
   if (!chosen?.id) throw new Error('自動バックアップのフォルダが決まっていません。「設定」→「自動バックアップ」でフォルダを選んでください');
   if (!(await folderUsable(chosen.id))) {
-    throw new Error(`自動バックアップのフォルダ「${chosen.name}」が見つかりません（ゴミ箱に入れた・消した）。「設定」→「自動バックアップ」でフォルダを選び直してください`);
+    throw new Error(`自動バックアップのフォルダ「${chosen.name}」が使えません。消したか、あや綴りで作ったフォルダではありません（7.7.4 からは、あや綴りで作ったフォルダしか使えません）。「設定」→「自動バックアップ」でフォルダを選び直すか、「＋ 新しいフォルダ」で作ってください`);
   }
   return chosen.id;
 }
@@ -227,7 +233,9 @@ export const gdrive = {
   label: 'Google ドライブ',
   // エディター内のフォルダ選択画面の表示
   rootName: 'マイドライブ',
-  browseHint: 'マイドライブのフォルダが出ます（共有されたフォルダは出ません）。',
+  browseHint: 'あや綴りで作ったフォルダ・ファイルだけが出ます（ブラウザの Google ドライブなどで自分で作ったものは、この権限では見えません）。新しいフォルダは「＋ 新しいフォルダ」で作ってください。',
+  // 前の版の権限の鍵が残っていた（ログインし直しが必要）
+  get scopeChanged() { return scopeChanged; },
 
   isConfigured() { return !!clientId(); },
   isSignedIn() { return !!token && Date.now() < token.expiresAt; },
@@ -248,7 +256,7 @@ export const gdrive = {
       key: 'gdrive.clientId',
       label: 'Google OAuth クライアントID',
       placeholder: 'xxxxxxxx.apps.googleusercontent.com',
-      hint: 'Google Cloud Console で作成した「ウェブ アプリケーション」のクライアントID。「承認済みの JavaScript 生成元」と「承認済みのリダイレクト URI」に公開 URL を登録し、スコープに …/auth/drive を追加してください（手順は README）。',
+      hint: 'Google Cloud Console で作成した「ウェブ アプリケーション」のクライアントID。「承認済みの JavaScript 生成元」と「承認済みのリダイレクト URI」に公開 URL を登録し、スコープに …/auth/drive.file を追加してください（手順は README）。',
     },
   ],
 

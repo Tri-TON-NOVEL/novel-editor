@@ -25,7 +25,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.10.31-7.7.3';
+const APP_VERSION = '2026.10.31-7.7.4';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1521,8 +1521,6 @@ function updatePackForm() {
   const env = form.elements.environment.checked;
   // 「小説を含める」を外したら、範囲の選択は見た目でも押せなくする（選んでいた範囲は残しておき、付け直すと元に戻る）
   $('backup-pack-novel-data').disabled = !includeNovel;
-  form.elements.includeClientId.disabled = !env;
-  $('backup-pack-clientid-row').classList.toggle('disabled', !env);
   $('backup-pack-project-row').hidden = scope === 'all';
   $('backup-pack-custom').hidden = scope !== 'episodes';
   $('backup-pack-scope-hint').textContent = PACK_SCOPE_HINT[scope] || '';
@@ -1552,7 +1550,6 @@ async function openBackupPackCreate() {
   form.elements.project.value = project.id;
   form.elements.scope.value = 'project';
   form.elements.environment.checked = false;
-  form.elements.includeClientId.checked = false; // 既定は含めない
   form.elements.includeNovel.checked = true;
   form.elements.autoTargets.checked = true;
   setTaskError($('backup-pack-dialog'), '');
@@ -1574,7 +1571,6 @@ async function createBackupPack(btn = $('backup-pack-save')) {
     const scope = form.elements.includeNovel.checked ? form.elements.scope.value : 'none';
     const plan = {
       environment: form.elements.environment.checked,
-      environmentOptions: { includeClientId: form.elements.environment.checked && form.elements.includeClientId.checked },
       scope,
       projectId: form.elements.project.value,
       episodeIds: scope === 'episodes' ? [...$('backup-pack-episodes').querySelectorAll('input:checked')].map((x) => x.value) : [],
@@ -2655,7 +2651,7 @@ function renderSyncState() {
     ? `${cloudLabel}の、自分で作ったフォルダ（名前は自由）を選ぶと、そのフォルダに直接保存します。選ぶ画面で新しいフォルダも作れます。端末どうしで同期するときは、すべての端末で同じクラウド・同じフォルダを選んでください。`
       + (cloud?.id === 'onedrive' ? 'ログインは約1日続きます（使っているあいだは自動で更新します）。切れたら上に出るボタンを押してください。' : 'ログインは約1時間で切れます。切れたら上に出るボタンを押してください。')
     : m === 'folder'
-      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。PC のネットワークドライブ（NAS など）や、OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（クラウド方式）と同期するときは、パソコン版のアプリの同期フォルダの中の、iPhone・iPad と同じフォルダを選んでください。'
+      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。PC のネットワークドライブ（NAS など）や、OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（クラウド方式）と同期するときは、OneDrive なら、パソコン版 OneDrive の「アプリ」（Apps）の中のあや綴りのフォルダの中の、iPhone・iPad と同じフォルダを選んでください。Google ドライブは、パソコン版の同期フォルダで書いたファイルを iPhone・iPad のあや綴りから読めないため、PC もクラウド方式にしてください。'
       : sync.folderSupported
         ? `iPhone・iPad と同期するときは「${cloudLabel}」がおすすめです（「クラウド」タブで選んで、接続IDを入れると使えます）。`
         : `この端末では「${cloudLabel}」を選べます（「クラウド」タブで選んで、接続IDを入れると使えます）。`;
@@ -4969,6 +4965,19 @@ async function migrate() {
 window.addEventListener('error', (e) => toast('エラー：' + (e.message || '不明なエラー'), true));
 window.addEventListener('unhandledrejection', (e) => toast('エラー：' + (e.reason?.message || String(e.reason)), true));
 
+// 7.7.4 でクラウドの権限を変えたことの案内（前の版の鍵が残っていたときに一度だけ出す）
+const SCOPE_NOTICE = {
+  onedrive: 'この版から、OneDrive の権限を「あや綴り用のフォルダだけ」（Files.ReadWrite.AppFolder）にしました。\n\n'
+    + '・OneDrive にログインし直してください（「設定」→「クラウド」、または上に出るボタン）。\n'
+    + '・使えるのは、OneDrive の「アプリ」（Apps）の中にできる、あや綴りのフォルダの中だけです。フォルダの名前は、Microsoft Entra で登録したアプリの名前になります。\n'
+    + '・今までのバックアップのフォルダがその外にあるときは、OneDrive（ブラウザやパソコン）で、フォルダごとその中へ移してください。移せば、選び直さなくてもそのまま使えます。\n'
+    + '・フォルダを選ぶ画面の「一番上」は、そのアプリのフォルダになります。',
+  gdrive: 'この版から、Google ドライブの権限を「あや綴りで作ったファイル・フォルダだけ」（drive.file）にしました。\n\n'
+    + '・Google ドライブにログインし直してください（「設定」→「クラウド」、または上に出るボタン）。\n'
+    + '・あや綴りで作ったフォルダ・保存したファイル・自動バックアップは、今までどおり使えます。\n'
+    + '・ブラウザの Google ドライブなどで自分で作ったフォルダや、自分で置いたファイルは見えなくなります。そのフォルダを保存先にしていたときは、あや綴りの「＋ 新しいフォルダ」で作り直して選んでください。',
+};
+
 async function init() {
   // ブラウザーが設定（localStorage）だけを消していたら、自動保存していた環境を戻す（小説のデータとは別に控えている）
   const restoredEnvAt = await restoreEnvironmentIfLost().catch(() => null);
@@ -5025,6 +5034,9 @@ async function init() {
   if (!login && !restored && !report) setTimeout(() => remindBackup().catch(() => {}), 1500);
   // 読み込み・復元の結果を知らせてから、他の端末の更新を確認する（画面が重ならないように）
   if (report) await inform(report, { ok: 'OK' });
+  // 7.7.4：クラウドの権限を狭くした。前の版の鍵が残っていた（＝初めてこの版を開いた）ときだけ、一度知らせる
+  const narrowed = activeProvider();
+  if (narrowed?.scopeChanged) await inform(SCOPE_NOTICE[narrowed.id] || '', { ok: 'OK' });
   runSyncCheck().catch((e) => console.warn('他の端末の更新の確認に失敗', e));
 
   if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

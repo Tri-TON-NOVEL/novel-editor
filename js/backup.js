@@ -84,7 +84,7 @@ export async function makeBackup({ device = null } = {}) {
       ...(device ? { device } : {}),
       projects,
       versions: allVersions,
-      prefs: withoutClientIds(sharedPrefs(prefs.entries())), // クライアントIDは入れない（環境バックアップで選んだときだけ）
+      prefs: withoutClientIds(sharedPrefs(prefs.entries())), // クライアントIDは入れない
       devicePrefs: portableDevicePrefs(prefs.entries()), // 「環境」を読み込むときだけ使う
     }, null, 1),
     count: projects.length,
@@ -224,19 +224,18 @@ const safePart = (value, max = 36) => String(value || '')
 const CLOUD_PREFS = /^(cloud\.provider|gdrive\.(folder|backupFolder)|onedrive\.(folder|backupFolder)|sync\.mode)$/;
 // 表示の設定のうち、端末の記録として外していたもの（折りたたみの状態）
 const DISPLAY_DEVICE_PREFS = /^fold\./;
-// OAuth のクライアントID。「OAuth Client IDを環境バックアップに含める」を選んだときだけ入れる
+// OAuth のクライアントID。7.7.4 からはどのバックアップにも入れない（前の版で入れたファイルは、今までどおり読める）
 export const CLIENT_ID_PREFS = ['gdrive.clientId', 'onedrive.clientId'];
 const withoutClientIds = (entries) => Object.fromEntries(Object.entries(entries || {}).filter(([k]) => !CLIENT_ID_PREFS.includes(k)));
 
-function environmentPayload({ includeClientId = false } = {}) {
+function environmentPayload() {
   const all = prefs.entries();
-  const shared = sharedPrefs(all);
   const pick = (re) => Object.fromEntries(Object.entries(all).filter(([k]) => re.test(k)));
   return {
-    prefs: includeClientId ? shared : withoutClientIds(shared),
+    prefs: withoutClientIds(sharedPrefs(all)),
     devicePrefs: { ...portableDevicePrefs(all), ...pick(DISPLAY_DEVICE_PREFS) },
     cloud: pick(CLOUD_PREFS),
-    clientIdIncluded: !!includeClientId,
+    clientIdIncluded: false,
   };
 }
 
@@ -348,7 +347,7 @@ export async function makePack(plan = {}) {
     createdAt,
     reason: plan.reason || 'manual-pack',
     device: plan.device || null,
-    environment: plan.environment ? environmentPayload(plan.environmentOptions) : null,
+    environment: plan.environment ? environmentPayload() : null,
     items,
   };
   // 一覧の表示とファイル名のための管理情報（読み込みには使わない。なくても読める）
