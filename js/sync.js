@@ -346,7 +346,7 @@ async function backupOnce({ force = false, build = null, auto = false } = {}) {
       return false;
     }
     made = build ? await build() : autoBuilder ? await autoBuilder() : await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
-    const text = made.text;
+    const text = made.blob || made.text; // パックは Blob（大きくても一つの文字列にしない）
     const name = made.name || `${prefix()}${stamp()}.json`;
     try {
       await t.write(name, text);

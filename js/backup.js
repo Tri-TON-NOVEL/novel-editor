@@ -86,7 +86,7 @@ export async function makeBackup({ device = null } = {}) {
       versions: allVersions,
       prefs: withoutClientIds(sharedPrefs(prefs.entries())), // クライアントIDは入れない
       devicePrefs: portableDevicePrefs(prefs.entries()), // 「環境」を読み込むときだけ使う
-    }, null, 1),
+    }), // 字下げはしない（大きい作品では字下げだけで何割も増え、iPhone のメモリを圧迫するため。読み込みには関係しない）
     count: projects.length,
     versionCount: allVersions.length,
   };
@@ -296,9 +296,11 @@ export async function makePack(plan = {}) {
   const projects = (await db.all()).map((p) => normalize(p));
   const allVersions = await versions.all();
   const items = [];
+  // 作品全体は大きい（稿・変更履歴・復元ポイントを全部含む）ので、写しを作らずにそのまま入れる。
+  // db.all()・versions.all() はどちらも読み出したばかりの別の物なので、ここで書き換えられる心配はない（iPhone のメモリを節約するため）
   const addWhole = (p) => items.push({
-    key: `project:${p.workId}`, type: 'project', project: clone(p),
-    versions: clone(allVersions.filter((v) => v.projectId === p.id)),
+    key: `project:${p.workId}`, type: 'project', project: p,
+    versions: allVersions.filter((v) => v.projectId === p.id),
   });
   const addMaterials = (p) => items.push({
     key: `materials:${p.workId}`, type: 'materials', project: projectIdentity(p), data: projectMaterials(p),
@@ -355,7 +357,27 @@ export async function makePack(plan = {}) {
   // 一覧の表示とファイル名のための管理情報（読み込みには使わない。なくても読める）
   const { works, ...meta } = packMeta(pack);
   pack.meta = { ...meta, scope: items.length ? (plan.scope || meta.scope) : null };
-  return { pack, text: JSON.stringify(pack, null, 1), itemCount: items.length };
+  // 保存には blob を使う（全作品のような大きいパックでも、巨大な文字列を一度に作らない。iPhone はメモリが少なく、ここで失敗していた）。
+  // text は、文字列が要るときだけ作る
+  const blob = packBlob(pack);
+  return { pack, blob, get text() { return JSON.stringify(pack); }, itemCount: items.length };
+}
+
+// パックを JSON のファイルの中身（Blob）にする。項目・稿ごとに小さな文字列にして並べるので、
+// 全体を一つの文字列にしたときの何倍ものメモリを使わずに済む。中身は JSON.stringify(pack) と同じ
+export function packBlob(pack) {
+  const { items = [], ...head } = pack;
+  const parts = [JSON.stringify(head).slice(0, -1), ',"items":['];
+  items.forEach((item, i) => {
+    if (i) parts.push(',');
+    const { versions, ...rest } = item;
+    if (!Array.isArray(versions)) { parts.push(JSON.stringify(item)); return; }
+    parts.push(JSON.stringify(rest).slice(0, -1), ',"versions":[');
+    versions.forEach((v, j) => { if (j) parts.push(','); parts.push(JSON.stringify(v)); });
+    parts.push(']}');
+  });
+  parts.push(']}');
+  return new Blob(parts, { type: 'application/json' });
 }
 
 export function isPack(text) {

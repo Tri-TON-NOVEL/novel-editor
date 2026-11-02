@@ -83,7 +83,13 @@ function fmtTime(iso) {
 
 let toastTimer = null;
 function toast(msg, isError = false) {
-  const t = $('toast');
+  let t = $('toast');
+  // 万一お知らせの欄がなくなっていても作り直す（お知らせを出せないせいで、処理全体がエラーにならないように）
+  if (!t) {
+    t = Object.assign(document.createElement('div'), { id: 'toast', className: 'toast' });
+    t.setAttribute('role', 'status');
+    t.setAttribute('aria-live', 'polite');
+  }
   // 設定画面などの「最前面の画面（showModal）」が開いていると、その後ろに隠れて見えないので、いちばん上の画面の中に置く
   const host = [...document.querySelectorAll('dialog[open]')].filter((d) => d.matches(':modal')).pop() || document.body;
   if (t.parentNode !== host) host.append(t);
@@ -108,18 +114,35 @@ function fail(e) {
 // ファイルやバックアップを実際に読み込んでいる間は、開始したことが分かる表示を最前面に出す。
 // 入れ子の処理（クラウドから取得 → 復元など）でも、最後の処理が終わるまで閉じない。
 let busyDepth = 0;
+const BUSY_MIN_MS = 700;
+// 処理中は画面が暗くならないようにする（iPhone で、大きいバックアップの保存中に画面が消えて通信が止まらないように）。使えない環境では何もしない
+let busyWakeLock = null;
+function keepScreenOn(on) {
+  if (on && !busyWakeLock && navigator.wakeLock?.request) {
+    busyWakeLock = navigator.wakeLock.request('screen').catch(() => null);
+  } else if (!on && busyWakeLock) {
+    const lock = busyWakeLock;
+    busyWakeLock = null;
+    lock.then((l) => l?.release()).catch(() => {});
+  }
+}
 async function withBusy(message, work) {
   const dialog = $('busy-dialog');
   busyDepth++;
   $('busy-message').textContent = message || '読み込み中…';
   if (!dialog.open) dialog.showModal();
+  keepScreenOn(true);
   // 表示が描かれてから始める。アプリが裏に回っていると描画が止まるので、少し待っても描かれなければそのまま始める
   await new Promise((resolve) => { requestAnimationFrame(() => requestAnimationFrame(resolve)); setTimeout(resolve, 150); });
+  const started = Date.now();
   try {
     return await work();
   } finally {
+    // すぐ終わる処理でも、表示が一瞬で消えて「動いたのか分からない」とならないよう、少しのあいだは出しておく
+    if (busyDepth === 1) await new Promise((resolve) => setTimeout(resolve, Math.max(0, BUSY_MIN_MS - (Date.now() - started))));
     busyDepth = Math.max(0, busyDepth - 1);
     if (!busyDepth && dialog.open) dialog.close();
+    if (!busyDepth) keepScreenOn(false);
   }
 }
 
@@ -1472,7 +1495,10 @@ async function saveTextTo(text, name, { title, force = false, workId = '', kind 
   // iPhone・iPad では共有メニューが出るので、「"ファイル"に保存」を選んでもらう
   if (localFile.saveMethod === 'share') toast('共有メニューが開きます。「"ファイル"に保存」を選ぶと、保存先（iCloud Drive・OneDrive など）を選べます');
   // 保存先を選んだあと、実際に書き込む間だけ処理中の文言を出す
-  const r = await localFile.saveAs(text, name, FILE_KINDS[kind].types, FILE_KINDS[kind].mime, (write) => withBusy(busyText, write));
+  // iPhone では、大きいファイルを作っている間に「押した直後」の扱いが切れ、共有メニューを出せないことがある。
+  // そのときは、もう一度押してもらってから共有メニューを出す
+  const askTap = () => ask('保存するファイルの準備ができました。\n下のボタンを押すと共有メニューが開きます（「"ファイル"に保存」を選んでください）。', { ok: '共有メニューを開く' });
+  const r = await localFile.saveAs(text, name, FILE_KINDS[kind].types, FILE_KINDS[kind].mime, (write) => withBusy(busyText, write), askTap);
   if (!r) return null;
   prefs.set('file.lastDestination', 'local');
   return typeof r === 'string' ? { type: 'local', handle: null, how: r, name } : { type: 'local', handle: r, how: 'picker', name: r.name };
@@ -1728,17 +1754,18 @@ async function createBackupPack(btn = $('backup-pack-save')) {
       reason: 'manual-pack', appVersion: APP_VERSION,
       device: { prefix: sync.prefix(), id: sync.deviceId() },
     };
-    const made = await makePack(plan);
+    // 全作品などの大きいパックは、作るだけで時間がかかる（iPhone では数十秒のことも）。その間も処理中と分かるようにする
+    const made = await withBusy('バックアップを準備中…（大きいときは時間がかかります。ほかのアプリに切り替えないでください）', () => makePack(plan));
     let r;
     if (mode === 'pack') {
       // 自動バックアップと同じフォルダへ。ほかのバックアップが動いていれば、終わってから順に保存する
       const name = packFileName(made.pack, { device: sync.prefix() });
-      const done = await withBusy('バックアップ作成中…', () => sync.savePack(name, made.text));
+      const done = await withBusy('バックアップ作成中…', () => sync.savePack(name, made.blob));
       r = { type: 'pack', name: done.name, folder: done.folder };
     } else {
       let name = form.elements.fileName.value.trim() || packFileName(made.pack, { device: sync.prefix() });
       if (!/\.json$/i.test(name)) name += '.json';
-      r = await saveTextTo(made.text, fileName(name.replace(/\.json$/i, ''), '.json'), { title: `${cloudName()}に保存（バックアップパックと同じ形式）`, busyText: '保存中…' });
+      r = await saveTextTo(made.blob, fileName(name.replace(/\.json$/i, ''), '.json'), { title: `${cloudName()}に保存（バックアップパックと同じ形式）`, busyText: '保存中…' });
       if (!r) return false; // 保存先を選ぶ画面を閉じた（やめた）
     }
     recordSaved(made.pack, await allProjects());
@@ -1807,7 +1834,8 @@ function renderBackupInspection(pack, name = '', { acknowledge = null } = {}) {
 }
 
 async function inspectBackupText(text, name = '', options = {}) {
-  try { renderBackupInspection(parseAnyBackup(text), name, options); }
+  // 大きいファイルは中身を調べるのに時間がかかる（iPhone では止まったように見える）ので、処理中の表示を出す
+  try { renderBackupInspection(await withBusy('バックアップの内容を確認中…', () => parseAnyBackup(text)), name, options); }
   catch (e) { await inform(`バックアップを確認できませんでした。\n${e.message}`); }
 }
 
@@ -2767,8 +2795,9 @@ function applyBackupView() {
   if (note.textContent) box.prepend(note); else note.remove();
 }
 
-// 保存先のファイルの中身を読むのは、同時に3件まで（一覧を開いたときに通信が詰まらないように）
-const BACKUP_READ_LIMIT = 3;
+// 保存先のファイルの中身を読むのは、同時に3件まで（一覧を開いたときに通信が詰まらないように）。
+// iPhone はメモリが少ないので1件ずつ（全作品のパックのような大きいファイルを同時に読むと、アプリが落ちることがある）
+const BACKUP_READ_LIMIT = /iPhone|iPod/.test(navigator.userAgent) ? 1 : 3;
 let backupReading = 0;
 let backupReadQueue = [];
 let backupManagerGen = 0;

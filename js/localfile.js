@@ -93,7 +93,8 @@ export const localFile = {
 
   // 戻り値: 保存先のハンドル / 'shared'（共有メニューで渡した） / 'downloaded'（ダウンロード） / キャンセル時は null
   // whileWriting：保存先を選んだあと、実際に書き込む間だけ「保存中…」を出すための包み（アプリ側から渡す）
-  async saveAs(text, suggestedName, types, mime, whileWriting = (fn) => fn()) {
+  // askTap：共有メニューが「押した直後でない」ために断られたとき、もう一度押してもらう確認（true で続ける）。text は文字列か Blob
+  async saveAs(text, suggestedName, types, mime, whileWriting = (fn) => fn(), askTap = null) {
     if (hasFsa) {
       try {
         const handle = await window.showSaveFilePicker({ suggestedName, types });
@@ -113,7 +114,17 @@ export const localFile = {
           return 'shared';
         } catch (e) {
           if (isAbort(e)) return null; // 共有メニューを閉じた
-          // 押してから時間がたって共有できないときなどは、ダウンロードにする
+          // 大きいファイルを作っている間に、押してから時間がたちすぎた（NotAllowedError）。もう一度押してもらって出し直す。
+          // （ダウンロードにすると、ホーム画面のアプリでは何も起きないように見えるため）
+          if (e?.name === 'NotAllowedError' && askTap) {
+            if (!(await askTap())) return null;
+            try {
+              await navigator.share({ files: [file] });
+              return 'shared';
+            } catch (e2) {
+              if (isAbort(e2)) return null;
+            }
+          }
         }
       }
     }

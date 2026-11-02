@@ -212,20 +212,59 @@ function saveFolderId() {
   return chosenFolder()?.id || 'root';
 }
 
-// mime：中身の種類（AYATUZURI のファイルは application/json、テキストは text/plain）
+// mime：中身の種類（AYATUZURI のファイルは application/json、テキストは text/plain）。text は文字列か Blob
+// （Blob のまま組み立てる。大きいバックアップを一つの文字列につなげると、iPhone ではメモリが足りなくなるため）
 function multipart(metadata, text, mime = 'application/json') {
   const boundary = 'novel-editor-' + Math.random().toString(36).slice(2);
-  const body =
-    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n` +
-    `--${boundary}\r\nContent-Type: ${mime}; charset=UTF-8\r\n\r\n${text}\r\n` +
-    `--${boundary}--`;
+  const body = new Blob([
+    `--${boundary}\r\nContent-Type: application/json; charset=UTF-8\r\n\r\n${JSON.stringify(metadata)}\r\n`,
+    `--${boundary}\r\nContent-Type: ${mime}; charset=UTF-8\r\n\r\n`, text, '\r\n',
+    `--${boundary}--`,
+  ]);
   return { body, headers: { 'Content-Type': `multipart/related; boundary=${boundary}` } };
 }
 
+// Google ドライブの「1回で送る」方式（multipart）は 5MB まで。それより大きいファイルは「再開可能アップロード」で送る
+const MULTIPART_MAX = 5 * 1024 * 1024;
+
+/**
+ * ファイルを作る（fileId なし）か、中身を差し替える（fileId あり）。戻り値：fileId
+ * metadata：作るときは { name, mimeType, parents, appProperties }、差し替えるときは { name, appProperties }
+ */
+async function sendFile(fileId, metadata, text, mime = 'application/json') {
+  const blob = text instanceof Blob ? text : new Blob([text]);
+  const where = fileId ? `${UPLOAD}/files/${encodeURIComponent(fileId)}` : `${UPLOAD}/files`;
+  const method = fileId ? 'PATCH' : 'POST';
+  if (blob.size <= MULTIPART_MAX) {
+    const { body, headers } = multipart(metadata, blob, mime);
+    const res = await api(`${where}?uploadType=multipart&fields=id`, { method, headers, body });
+    return (await res.json()).id;
+  }
+  // 再開可能アップロード：先に送り先（セッション）を作り、そこへ中身を送る。通信が切れたら、同じ送り先へもう一度送る
+  const start = await api(`${where}?uploadType=resumable&fields=id`, {
+    method,
+    headers: { 'Content-Type': 'application/json; charset=UTF-8', 'X-Upload-Content-Type': `${mime}; charset=UTF-8`, 'X-Upload-Content-Length': String(blob.size) },
+    body: JSON.stringify(metadata),
+  });
+  const session = start.headers.get('Location');
+  if (!session) throw new Error('Google Drive エラー: 大きいファイルの送り先を作れませんでした');
+  let lastError = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const res = await fetch(session, { method: 'PUT', headers: { 'Content-Type': `${mime}; charset=UTF-8` }, body: blob });
+      if (res.ok) return (await res.json()).id;
+      lastError = new Error('Google Drive エラー: 大きいファイルの書き込みに失敗しました（' + res.status + '）');
+      if (res.status < 500 && res.status !== 429) break; // 送り直しても変わらない失敗
+    } catch (e) {
+      lastError = e; // 通信が切れた：少し待ってから送り直す
+    }
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+  }
+  throw lastError;
+}
+
 async function patchFile(fileId, text, name, workId, mime) {
-  const { body, headers } = multipart({ name, appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } }, text, mime);
-  const res = await api(`${UPLOAD}/files/${encodeURIComponent(fileId)}?uploadType=multipart&fields=id`, { method: 'PATCH', headers, body });
-  return (await res.json()).id;
+  return sendFile(fileId, { name, appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } }, text, mime);
 }
 
 export const gdrive = {
@@ -369,9 +408,7 @@ export const gdrive = {
       finalName = `${base} (${n})${ext}`;
     }
     const meta = { name: finalName, mimeType: mime, parents: [parent], appProperties: { [APP_KEY]: 'work', ...(workId ? { workId } : {}) } };
-    const { body, headers } = multipart(meta, text, mime);
-    const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
-    return (await res.json()).id;
+    return sendFile(null, meta, text, mime);
   },
 
   // ---------- 自動バックアップ（同期）用 ----------
@@ -395,9 +432,7 @@ export const gdrive = {
       // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
       const folder = await backupFolderId();
       const meta = { name, mimeType: 'application/json', parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
-      const { body, headers } = multipart(meta, text);
-      const res = await api(`${UPLOAD}/files?uploadType=multipart&fields=id`, { method: 'POST', headers, body });
-      return (await res.json()).id;
+      return sendFile(null, meta, text);
     },
     // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
     async listAny() {

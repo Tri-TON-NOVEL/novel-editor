@@ -8,6 +8,14 @@
 // 消す・入れ替えるなど、取り消しにくい操作の確認は、OK ボタンを赤くし、最初にキャンセルを選んでおく
 const DANGER = /削除|消し|消え|消す|入れ替え|上書き|破棄|止め/;
 
+// 画面を消す前に、中に置かれたお知らせ（#toast）を外へ戻す。
+// 消した画面の close の知らせは、ページから外れたあとに届くため、アプリ側の「閉じたら戻す」が間に合わない。
+// 戻さないとお知らせごと消え、それ以降のお知らせ（「復元が完了しました」など）がすべてエラーになっていた
+function removeDialog(dlg) {
+  for (const t of dlg.querySelectorAll('#toast')) document.body.append(t);
+  dlg.remove();
+}
+
 function open({ message, value = null, ok = 'OK', cancel = 'キャンセル', danger }) {
   return new Promise((resolve) => {
     const dlg = document.createElement('dialog');
@@ -31,7 +39,7 @@ function open({ message, value = null, ok = 'OK', cancel = 'キャンセル', da
       if (answered) return;
       answered = true;
       if (dlg.open) dlg.close();
-      dlg.remove();
+      removeDialog(dlg);
       resolve(result);
     };
     form.addEventListener('submit', (e) => {
@@ -84,7 +92,7 @@ export function choose(message, choices, { cancel = 'キャンセル', select = 
       if (answered) return;
       answered = true;
       if (dlg.open) dlg.close();
-      dlg.remove();
+      removeDialog(dlg);
       resolve(result);
     };
     const cancelBtn = Object.assign(document.createElement('button'), { type: 'button', textContent: cancel });

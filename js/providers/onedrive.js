@@ -260,6 +260,7 @@ async function download(id, { bytes = false } = {}) {
 
 // 書き込む。target は byPath() か byId()。conflict：'replace'（上書き）／'fail'（同じ名前があればエラー）
 async function upload(target, text, mime = 'application/json', conflict = 'replace') {
+  // text は文字列か Blob（大きいバックアップは Blob のまま受け取り、一つの文字列にしない）
   const blob = new Blob([text], { type: `${mime};charset=utf-8` });
   if (blob.size <= SIMPLE_UPLOAD_MAX) {
     const res = await api(`${target}/content?@microsoft.graph.conflictBehavior=${conflict}`, {
@@ -276,14 +277,27 @@ async function upload(target, text, mime = 'application/json', conflict = 'repla
   let last = null;
   for (let start = 0; start < blob.size; start += CHUNK) {
     const end = Math.min(start + CHUNK, blob.size);
-    const res = await fetch(session.uploadUrl, {
-      method: 'PUT',
-      headers: { 'Content-Range': `bytes ${start}-${end - 1}/${blob.size}` },
-      body: blob.slice(start, end),
-    });
-    if (!res.ok) {
+    // 一つ分の送信は、通信が切れても3回までやり直す（スマートフォンの回線では、途中で一瞬切れることがある）
+    let res = null;
+    let error = null;
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        res = await fetch(session.uploadUrl, {
+          method: 'PUT',
+          headers: { 'Content-Range': `bytes ${start}-${end - 1}/${blob.size}` },
+          body: blob.slice(start, end),
+        });
+        if (res.ok || (res.status < 500 && res.status !== 429)) break;
+      } catch (e) {
+        res = null;
+        error = e;
+      }
+      await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    }
+    if (!res?.ok) {
       fetch(session.uploadUrl, { method: 'DELETE' }).catch(() => {});
-      throw new Error('OneDrive エラー: 大きいファイルの書き込みに失敗しました（' + res.status + '）');
+      if (!res && error) throw error;
+      throw new Error('OneDrive エラー: 大きいファイルの書き込みに失敗しました（' + (res?.status ?? '通信エラー') + '）');
     }
     last = res;
   }
