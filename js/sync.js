@@ -277,7 +277,9 @@ export async function listManaged() {
 }
 
 export async function read(entry) {
-  return target().read(entry.id);
+  const t = target();
+  if (!t) throw new Error('自動バックアップの保存先が使えません（設定 → バックアップで確認してください）');
+  return t.read(entry.id);
 }
 
 export async function remove(entry) {
@@ -370,8 +372,14 @@ async function backupOnce({ force = false, build = null, auto = false } = {}) {
     prefs.set('sync.mine', mine.slice(0, keep));
     const old = new Set(mine.slice(keep));
     if (old.size) {
-      const files = await t.list();
-      for (const f of files) if (old.has(f.name)) await t.remove(f.id);
+      // 古いものを消せなくても、保存はできている（失敗と知らせない。消し残しは次の保存のときにまた消す）
+      try {
+        const files = await t.list();
+        for (const f of files) if (old.has(f.name)) await t.remove(f.id);
+      } catch (e) {
+        prefs.set('sync.mine', mine.slice(0, keep).concat([...old]));
+        console.warn('古い自動バックアップを消せませんでした', e);
+      }
     }
     listener();
     resultHandler({ ok: true, auto, name, label: made.label || '', where: mode() });

@@ -140,7 +140,6 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 - 外部に送るのは、自分で Google ドライブか OneDrive を使うと決めたときだけです（使うクラウドは端末ごとに1つ選びます）。
   - Google ドライブの権限は `drive.file`（あや綴りで作ったファイル・フォルダだけ）です。ブラウザの Google ドライブなどで自分で作ったフォルダや置いたファイルは見えません。
   - OneDrive の権限は `Files.ReadWrite.AppFolder`（OneDrive の「アプリ」（Apps）の中にできる、あや綴り用のフォルダの中だけ）と `offline_access`（ログインを自動で更新するため）です。フォルダの名前は、Microsoft Entra で登録したアプリの名前になります。
-  - 7.7.4 より前は、Google ドライブは `drive`（マイドライブ全体）、OneDrive は `Files.ReadWrite`（OneDrive 全体）でした。移り方は「[7.7.4 でのクラウドの権限の変更](#774-でのクラウドの権限の変更)」を見てください。
   - このソフトは使う人専用で、各自が自分で登録したクライアントID で、自分のクラウドに使う前提です。
   - エディターが消すのは、自分の端末のプレフィックスの古い自動バックアップだけです。
 - iPhone・iPad では、Safari で開いたときとホーム画面のアプリで開いたときで、データが別々になります。
@@ -173,7 +172,6 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
    - [ブランディング](https://console.cloud.google.com/auth/branding)：アプリ名・サポートメール
    - [対象](https://console.cloud.google.com/auth/audience)：「外部」・「テスト中」のまま、テストユーザーに自分の Gmail
    - [データアクセス](https://console.cloud.google.com/auth/scopes)：スコープ `https://www.googleapis.com/auth/drive.file`（「スコープを追加または削除」→ 一覧で「.../auth/drive.file」にチェック。見つからなければ、一覧の下の「スコープを手動で追加」に貼り付け）
-     - 前の版の手順で `https://www.googleapis.com/auth/drive` を追加していたら、外してかまいません。
 3. [クライアント](https://console.cloud.google.com/auth/clients) → **ウェブ アプリケーション** を作り、次の2つを登録します。
    - **承認済みの JavaScript 生成元**：`https://tri-ton-novel.github.io`
    - **承認済みのリダイレクト URI**：`https://tri-ton-novel.github.io/novel-editor/`（最後の `/` まで同じにします）
@@ -201,7 +199,6 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 3. 登録したアプリの「**API のアクセス許可**」→「アクセス許可の追加」→「Microsoft Graph」→「**委任されたアクセス許可**」で、次の2つを追加します。
    - `Files.ReadWrite.AppFolder`
    - `offline_access`
-   - 前の版の手順で追加した `Files.ReadWrite` があれば、「…」→「アクセス許可の削除」で外します（残っていると、ログインの鍵に広い権限が付いたままになります）。
 4. 「**概要**」に表示された「**アプリケーション (クライアント) ID**」をコピーします。
 5. エディターの「設定」→「クラウド」で、使うクラウドを「**OneDrive**」にし（画面を読み直します）、「OneDrive の接続の設定」に ID を入れて保存します。
    - すべての端末で同じ ID・同じ Microsoft アカウントを使えば、どの端末で保存したファイルも、ほかの端末から開けます。
@@ -210,26 +207,6 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 - ログインは約1日続きます（1時間ごとの更新は、画面を出さずに自動で行います）。切れると画面の上にログインのボタンが出ます。
 - 大きなバックアップ（4MB 超）も、分けて送るので保存できます。
 - あや綴りが使えるのは、OneDrive の「アプリ」（Apps）の中にできる、登録したアプリの名前のフォルダの中だけです。初めて使うときに OneDrive が自動で作ります。フォルダを選ぶ画面の「一番上」がこのフォルダです。
-
-## 7.7.4 でのクラウドの権限の変更
-
-7.7.4 から、クラウドの権限を狭くしました。初めて 7.7.4 を開くと案内が出るので、ログインし直してください。
-
-**OneDrive（`Files.ReadWrite` → `Files.ReadWrite.AppFolder`）**
-
-1. Microsoft Entra のアプリの「API のアクセス許可」に `Files.ReadWrite.AppFolder` を追加し、`Files.ReadWrite` を外します（上の手順 3）。
-2. あや綴りで OneDrive にログインし直します。OneDrive の「アプリ」（Apps）の中に、アプリの名前のフォルダができます。
-3. 今までのバックアップのフォルダ（例：「小説」→「バックアップ」）を、OneDrive（ブラウザやパソコン）で、そのアプリのフォルダの中へ**フォルダごと移動**します。
-   - 移動ならフォルダの ID が変わらないので、各端末で選び直さなくても、そのまま使えます。コピーした場合は、各端末で選び直してください。
-4. 前の権限の許可を消すときは、[Microsoft アカウントのアプリのアクセス許可](https://account.live.com/consent/Manage) で、このアプリを削除してからログインし直します（個人用アカウントの場合）。
-
-**Google ドライブ（`drive` → `drive.file`）**
-
-1. Google Cloud Console の「データアクセス」に `.../auth/drive.file` を追加します（`.../auth/drive` は外してかまいません）。
-2. あや綴りで Google ドライブにログインし直します。
-3. あや綴りの「＋ 新しいフォルダ」で作ったフォルダ・あや綴りで保存したファイル・自動バックアップは、今までどおり使えます。
-4. ブラウザの Google ドライブなどで自分で作ったフォルダを保存先にしていたときは、そのフォルダが見えなくなります。あや綴りの「＋ 新しいフォルダ」で作り直して、各端末で選び直してください。中にあった自分で置いたファイル（TXT など）は、あや綴りから見えないので、取り込むときは「この端末・その他から選ぶ…」を使ってください。
-5. 前の権限の許可を消すときは、[Google アカウントのサードパーティ製アプリへのアクセス](https://myaccount.google.com/connections) で、このアプリへのアクセスを削除してからログインし直します。
 
 ## 開発
 
@@ -257,7 +234,7 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 | `js/dialogs.js` | 確認・入力・選択の画面（どの OS でも同じボタンの並び） |
 | `js/providers/` | クラウド接続（`gdrive.js`：Google ドライブ、`onedrive.js`：OneDrive、`index.js`：使うクラウドの切り替え） |
 | `sw.js` / `manifest.webmanifest` | オフライン対応・ホーム画面アイコン |
-| `docs/` | 使い方と、改修の記録（保存形式の比較は `docs/保存形式の比較（7.7調査）.md`） |
+| `docs/` | 簡易マニュアル（逆引き）・設定マニュアル・使い方 |
 | `tests/` | 自動テスト（`tests/index.html` をブラウザで開く）、OneDrive のテスト用の偽物（`mock_onedrive.js`） |
 
 - フレームワークやビルドは使っていません。HTML・CSS・JavaScript（ES モジュール）だけで動きます。

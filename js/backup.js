@@ -186,6 +186,8 @@ export async function restoreBackup(backup, mode) {
   }
   const saved = sharedPrefs(backup.prefs);
   for (const [key, value] of Object.entries(saved)) {
+    // 前の版のファイルに入っている空のクライアントIDで、この端末のクライアントIDを消さない（applyEnvironment と同じ）
+    if (CLIENT_ID_PREFS.includes(key) && !(typeof value === 'string' && value.trim())) continue;
     if (mode === 'merge' && LISTS_BY_ID.includes(key) && Array.isArray(value)) {
       // ひな型・TXTインポートの条件は、端末にあるものとまとめる（同じものはバックアップ側を使う）
       const mine = prefs.get(key, []) || [];

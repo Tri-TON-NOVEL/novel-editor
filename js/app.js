@@ -2629,6 +2629,11 @@ async function loadBackupManager() {
   const gen = ++backupManagerGen;
   box.replaceChildren(Object.assign(document.createElement('p'), { className: 'hint', textContent: '一覧を読み込んでいます…' }));
   managedBackupLatest = null;
+  // 前の一覧の行を残さない（一覧が空・読み込み失敗のときに、並び順を変えると前のファイルが出てしまうため）
+  backupRows = [];
+  managedBackupFiles = [];
+  $('backup-filter-device').querySelectorAll('label').forEach((l) => l.remove());
+  backupDeviceFilter = new Map();
   // 名前の形が違うファイル（「… (2).json」など）も出す。出ないと、ここから消せないため
   // 一覧を読み終わるまで、読み込み中の画面を出す（中身の情報は、そのあと一覧の中で少しずつ足す）
   try { managedBackupFiles = await withBusy('バックアップの一覧を読み込み中…', () => sync.listManaged()); }

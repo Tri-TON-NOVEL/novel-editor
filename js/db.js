@@ -13,6 +13,7 @@ const memoryVersions = new Map();
 let useMemory = false;
 
 let opening = null;
+let everOpened = false; // 一度でも開けたか（開き直しに失敗したときは、メモリ保存に切り替えずに失敗として返す）
 function openDb() {
   if (!dbPromise) {
     dbPromise = opening = new Promise((resolve, reject) => {
@@ -30,11 +31,15 @@ function openDb() {
         req.result.onversionchange = () => { req.result.close(); location.reload(); };
         // iPhone・iPad では、アプリを裏に回したときなどに接続が閉じられることがある。次に使うときに開き直す
         req.result.onclose = () => { if (dbPromise === opening) dbPromise = null; };
+        everOpened = true;
         resolve(req.result);
       };
       req.onerror = () => reject(req.error);
       req.onblocked = () => alert('このエディターが別のタブでも開かれています。\n他のタブを閉じるか再読み込みしてください。');
     }).catch((e) => {
+      // 使っている途中で開き直せなかったときは、メモリ保存に切り替えない（切り替えると、それ以降の保存が消えてしまう）。
+      // 失敗として返し、次に使うときにもう一度開き直す
+      if (everOpened) { dbPromise = null; throw e; }
       console.warn('IndexedDB が使えないためメモリ保存に切り替えます', e);
       useMemory = true;
       return null;
@@ -66,7 +71,7 @@ async function transact(storeName, mode, fn) {
   } catch (e) {
     if (!isLostConnection(e)) throw e;
     if (dbPromise === opening) { try { d.close(); } catch { /* 閉じていれば何もしない */ } dbPromise = null; }
-    const again = await openDb();
+    const again = await openDb().catch(() => null);
     if (useMemory || !again) throw e;
     return request(again, storeName, mode, fn);
   }
@@ -178,7 +183,9 @@ export const prefs = {
     try {
       for (let i = 0; i < localStorage.length; i++) {
         const k = localStorage.key(i);
-        if (k.startsWith('novel-editor:')) out[k.slice('novel-editor:'.length)] = JSON.parse(localStorage.getItem(k));
+        if (!k.startsWith('novel-editor:')) continue;
+        // 1件読めなくても、ほかの設定は読む（全部が空に見えると、「設定が消えた」と思って控えで上書きしてしまうため）
+        try { out[k.slice('novel-editor:'.length)] = JSON.parse(localStorage.getItem(k)); } catch { /* その1件だけ飛ばす */ }
       }
     } catch { /* 読めなければ空 */ }
     return out;
