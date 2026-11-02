@@ -322,9 +322,16 @@ export function exclusive(fn) {
 }
 export function isBusy() { return queued > 0; }
 
+// 自動バックアップを一時停止しているか（アプリが決める。設定・バックアップの画面を開いている間など）
+let pausedCheck = () => false;
+export function setPauseCheck(fn) { pausedCheck = fn || (() => false); }
+export function isPaused() { try { return !!pausedCheck(); } catch { return false; } }
+
 export function backupNow(opts = {}) {
   // 自動のときは、ほかのバックアップが動いていれば今回は見送る（変更の印は残るので、次の確認で保存する）
   if (opts.auto && (running || queued)) return Promise.resolve(false);
+  // 一時停止中も見送る（変更の印は残るので、画面を閉じたあとの確認で保存する）
+  if (opts.auto && isPaused()) return Promise.resolve(false);
   return exclusive(() => backupOnce(opts));
 }
 
@@ -425,6 +432,8 @@ export function savePack(name, text) {
       const at = parseName(name)?.at || Date.now();
       prefs.set('sync.seen', name);
       prefs.set('sync.seenAt', Math.max(Number(prefs.get('sync.seenAt', 0)) || 0, at));
+      // 自分で置いたパックの名前を覚えておく（他の端末の更新を確かめるとき、中身を読まずに外せるように）。新しいものから50件
+      prefs.set('sync.myPacks', [name, ...prefs.get('sync.myPacks', []).filter((n) => n !== name)].slice(0, 50));
       prefs.set('lastBackupAt', new Date().toISOString());
       return { name, where: mode(), folder: folderName() };
     } finally {
@@ -467,6 +476,16 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   const last = lastBackup();
   if (!newest || newest.mine) return null;
   if (last && newest.name === last.name) return null;
+  // この端末が置いたバックアップパック（中身を読まずに分かる）
+  if (prefs.get('sync.myPacks', []).includes(newest.name)) return null;
+  // 中身を読まなくても分かるもの（前回の同期より古い・もう確かめた）は、ここで終える。
+  // 先に中身を読んでいたので、全作品のパックのような大きいファイルが一番新しいと、自動バックアップのたびに
+  // そのファイルを丸ごと読み込んでいた（iPhone で、メモリが足りずに落ちる原因になっていた）
+  const lastAt = last ? parseName(last.name)?.at || Date.parse(last.at) : 0;
+  if (newest.at <= lastAt) return null;
+  const seenAt = Number(prefs.get('sync.seenAt', 0)) || 0;
+  if (!ignoreSeen && newest.at <= seenAt) return null;
+  if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
   // ファイル名の記録が失われても、中にある端末IDが同じなら自分のバックアップ。
   try {
     const data = JSON.parse(await read(newest));
@@ -479,11 +498,6 @@ export async function findNewer({ ignoreSeen = false } = {}) {
       return null;
     }
   } catch { /* 読めないときは従来どおり日時で判定する */ }
-  const lastAt = last ? parseName(last.name)?.at || Date.parse(last.at) : 0;
-  if (newest.at <= lastAt) return null;
-  const seenAt = Number(prefs.get('sync.seenAt', 0)) || 0;
-  if (!ignoreSeen && newest.at <= seenAt) return null;
-  if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
   return { entry: newest, localChanged: dirty };
 }
 

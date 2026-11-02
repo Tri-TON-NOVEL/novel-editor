@@ -3186,8 +3186,14 @@ async function syncFromFile(mode) {
   return loadBackupAs(src.text, src.name, { newest });
 }
 
+// 開いている間は自動バックアップを一時停止する画面（設定と、バックアップの各画面）
+const AUTO_BACKUP_PAUSE_DIALOGS = ['settings-dialog', 'backup-pack-dialog', 'backup-manage-dialog', 'backup-inspect-dialog', 'sync-restore-dialog', 'restore-dialog'];
+let syncCheckDeferred = false;
+
 // 許可・ログインが戻っていれば、起動時の確認をする
 async function syncResumeIfReady() {
+  // 設定・バックアップの画面を開いている間は確かめない（閉じたときに確かめる）
+  if (sync.isPaused()) { syncCheckDeferred = true; return; }
   await sync.refresh();
   if (sync.getState() === 'on' && !sync.isChecked() && !syncPending) await runSyncCheck();
 }
@@ -5470,7 +5476,19 @@ async function init() {
   await Promise.all(providers.map((cp) => cp.ready?.().catch(() => {})));
   sync.onChange(renderSyncState);
   // 自動バックアップしようとしたら他の端末のほうが新しかった：画面が見えていれば、その場で確認する
-  sync.onNewer(() => { if (document.visibilityState === 'visible') runSyncCheck().catch(fail); });
+  sync.onNewer(() => {
+    if (sync.isPaused()) { syncCheckDeferred = true; return; }
+    if (document.visibilityState === 'visible') runSyncCheck().catch(fail);
+  });
+  // 設定・バックアップの画面を開いている間は、自動バックアップと他の端末の更新の確認を一時停止する
+  // （iPhone で、バックアップパックを作っている途中などに裏で自動バックアップが動くと、メモリが足りなくなって落ちることがあった）。
+  // 自分で押した保存・読み込みは止めない。閉じたら、見送った確認をする（自動バックアップは次の定期の確認で保存する）
+  sync.setPauseCheck(() => AUTO_BACKUP_PAUSE_DIALOGS.some((id) => $(id)?.open));
+  document.addEventListener('close', (e) => {
+    if (!AUTO_BACKUP_PAUSE_DIALOGS.includes(e.target?.id) || sync.isPaused() || !syncCheckDeferred) return;
+    syncCheckDeferred = false;
+    syncResumeIfReady().catch(() => {});
+  }, true);
   // 自動バックアップの結果は、画面の下に短く知らせる（作業は止めない）。手動の保存は、それぞれの画面で知らせる
   sync.onBackupResult((r) => {
     if (r.checking) { setBusyMessage('処理結果を確認しています…'); return; }

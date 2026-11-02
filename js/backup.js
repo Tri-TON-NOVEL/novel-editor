@@ -345,26 +345,29 @@ function episodeItem(p, ep, allVersions) {
  */
 export async function makePack(plan = {}) {
   const projects = (await db.all()).map((p) => normalize(p));
-  const allVersions = await versions.all();
+  // 稿・履歴は、入れる作品の分だけ読む（自動バックアップのような1話分のパックでも、端末の全作品の稿を読み込んでいた。iPhone のメモリを節約するため）
+  const versionsOf = async (p) => versions.list(p.id);
   const items = [];
   // 作品全体は大きい（稿・変更履歴・復元ポイントを全部含む）ので、写しを作らずにそのまま入れる。
-  // db.all()・versions.all() はどちらも読み出したばかりの別の物なので、ここで書き換えられる心配はない（iPhone のメモリを節約するため）
-  const addWhole = (p) => items.push({
+  // db.all()・versions.list() はどちらも読み出したばかりの別の物なので、ここで書き換えられる心配はない（iPhone のメモリを節約するため）
+  const addWhole = async (p) => items.push({
     key: `project:${p.workId}`, type: 'project', project: p,
-    versions: allVersions.filter((v) => v.projectId === p.id),
+    versions: await versionsOf(p),
   });
   const addMaterials = (p) => items.push({
     key: `materials:${p.workId}`, type: 'materials', project: projectIdentity(p), data: projectMaterials(p),
   });
-  const addEpisodes = (p, ids) => {
+  const addEpisodes = async (p, ids) => {
     const wanted = new Set(ids || []);
-    for (const ep of p.episodes) if (wanted.has(ep.id)) items.push(episodeItem(p, ep, allVersions));
+    if (!p.episodes.some((ep) => wanted.has(ep.id))) return;
+    const list = await versionsOf(p);
+    for (const ep of p.episodes) if (wanted.has(ep.id)) items.push(episodeItem(p, ep, list));
   };
 
-  if (plan.scope === 'all') projects.forEach(addWhole);
+  if (plan.scope === 'all') for (const p of projects) await addWhole(p);
   if (plan.scope === 'project') {
     const p = projects.find((x) => x.id === plan.projectId);
-    if (p) addWhole(p);
+    if (p) await addWhole(p);
   }
   // 作品資料だけ／エピソードだけ（エピソードは複数選べる）。'custom' は前の版の画面（資料とエピソードを一緒に選ぶ）
   if (plan.scope === 'materials') {
@@ -373,13 +376,13 @@ export async function makePack(plan = {}) {
   }
   if (plan.scope === 'episodes') {
     const p = projects.find((x) => x.id === plan.projectId);
-    if (p) addEpisodes(p, plan.episodeIds);
+    if (p) await addEpisodes(p, plan.episodeIds);
   }
   if (plan.scope === 'custom') {
     const p = projects.find((x) => x.id === plan.projectId);
     if (p) {
       if (plan.materials) addMaterials(p);
-      addEpisodes(p, plan.episodeIds);
+      await addEpisodes(p, plan.episodeIds);
     }
   }
   if (plan.scope === 'targets') {
@@ -388,7 +391,7 @@ export async function makePack(plan = {}) {
       if (!p) continue;
       // 作品資料が変わっていれば一緒に入れる（自動バックアップ・編集エピソード保存）
       if (target.materials) addMaterials(p);
-      addEpisodes(p, target.episodeIds);
+      await addEpisodes(p, target.episodeIds);
     }
   }
 
@@ -413,7 +416,6 @@ export async function makePack(plan = {}) {
   // 保存には blob を使う（全作品のような大きいパックでも、巨大な文字列を一度に作らない。iPhone はメモリが少なく、ここで失敗していた）。
   // 中身は Blob に書き出したそばから手放し、アップロードの間は Blob だけがメモリに残るようにする（iPhone で、アップロード中に落ちていた）
   projects.length = 0;
-  allVersions.length = 0;
   const blob = packBlob(pack, { release: true });
   return { pack: brief, blob, itemCount: items.length };
 }
