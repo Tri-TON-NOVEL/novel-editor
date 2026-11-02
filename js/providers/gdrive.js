@@ -18,7 +18,9 @@
 //   ブラウザ               … ポップアップ。開けなければ、ページごと Google に移動して戻ってくる（リダイレクト）
 //   ホーム画面のアプリ（PWA）… 最初からリダイレクト（PWA ではポップアップのログイン結果がアプリに戻らないことがあるため）
 //   リダイレクトには、Google Cloud Console の「承認済みのリダイレクト URI」に公開 URL の登録が必要。
+
 import { prefs } from '../db.js';
+import { readStart } from './stream.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 // 自動バックアップのファイル名（プレフィックス＋日時）
@@ -449,6 +451,10 @@ export const gdrive = {
       const res = await api(`${API}/files/${encodeURIComponent(id)}?alt=media`);
       return res.text();
     },
+    // 先頭の maxBytes ほどだけ読む（バックアップの一覧用）。戻り値：{ text, complete }
+    async readStart(id, maxBytes) {
+      return readStart(await api(`${API}/files/${encodeURIComponent(id)}?alt=media`), maxBytes);
+    },
     async write(name, text) {
       // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
       const folder = await backupFolderId();
@@ -458,9 +464,9 @@ export const gdrive = {
     // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
     async listAny() {
       const id = await backupFolderId();
-      return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`, 'id,name,modifiedTime'))
+      return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`, 'id,name,modifiedTime,size'))
         .filter((f) => /\.json$/i.test(f.name))
-        .map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime }));
+        .map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime, size: f.size ? Number(f.size) : undefined }));
     },
     async remove(id) {
       // 自動整理（残す件数を超えた分）は、誤って消しても戻せるよう完全削除ではなくゴミ箱へ移す

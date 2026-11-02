@@ -1,6 +1,6 @@
 // 全体バックアップ：端末内のすべての作品・ひな型・設定を1つのファイルにまとめる
 import { db, meta, prefs, versions } from './db.js';
-import { normalize, newProject, makeId, SCHEMA_VERSION } from './format.js';
+import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION } from './format.js';
 
 // ファイルの形式。形を変えたら、その形式の VERSION を上げる。
 // 中に入る作品データの形式は、format.js の SCHEMA_VERSION（どのファイルにも schemaVersion として記録する）。
@@ -143,8 +143,16 @@ function blobWriter() {
   };
 }
 
+// ファイルの種類（先頭の "format"）。大きいファイルを丸ごと JSON として読まずに見分ける（iPhone で、読み込みのたびに何度も丸ごと読んで落ちていた）。
+// あや綴りのファイルは "format" を先頭に書いている。先頭になければ、丸ごと読んで確かめる
+export function fileFormat(text) {
+  const m = /^\uFEFF?\s*\{\s*"format"\s*:\s*"([^"\\]*)"/.exec(String(text).slice(0, 200));
+  if (m) return m[1];
+  try { return JSON.parse(text)?.format ?? null; } catch { return null; }
+}
+
 export function isBackup(text) {
-  try { return JSON.parse(text)?.format === BACKUP_FORMAT; } catch { return false; }
+  return fileFormat(text) === BACKUP_FORMAT;
 }
 
 export function parseBackup(text) {
@@ -410,7 +418,8 @@ export async function makePack(plan = {}) {
   };
   // 一覧の表示とファイル名のための管理情報（読み込みには使わない。なくても読める）
   const { works, ...meta } = packMeta(pack);
-  pack.meta = { ...meta, scope: items.length ? (plan.scope || meta.scope) : null };
+  // wholeCount：「作品全体」の数（同じ作品を別々に持っていることもあるので、作品の種類の数とは限らない。一覧で先頭だけ読むときに使う）
+  pack.meta = { ...meta, scope: items.length ? (plan.scope || meta.scope) : null, wholeCount: items.filter((x) => x.type === 'project').length };
   // 作ったあとに使うのは、ファイル名・一覧の表示・「保存済み」の記録だけ。そのための見出し（本文・稿・履歴を除いたもの）を先に作っておく
   const brief = { ...pack, items: items.map(briefItem) };
   // 保存には blob を使う（全作品のような大きいパックでも、巨大な文字列を一度に作らない。iPhone はメモリが少なく、ここで失敗していた）。
@@ -459,8 +468,55 @@ export function packBlob(pack, { release = false } = {}) {
   return w.finish();
 }
 
+// ファイルの先頭だけから、中身（items・projects）より前にある管理情報を読む。読めなければ null。
+// バックアップパックは管理情報（meta）を先頭に書いている（0.50 から）。全体バックアップは device などが先頭にある
+export function parseBackupHead(text) {
+  for (const marker of [',"items":[', ',"projects":[']) {
+    // 環境設定の中に同じ並びの文字があることもあるので、読めるところを順に試す
+    for (let i = text.indexOf(marker); i > 0; i = text.indexOf(marker, i + 1)) {
+      try {
+        const o = JSON.parse(text.slice(0, i) + '}');
+        if (o?.format === PACK_FORMAT || o?.format === BACKUP_FORMAT) return o;
+      } catch { /* 途中で切れている：次を試す */ }
+    }
+  }
+  return null;
+}
+
+// 先頭の管理情報（meta）だけから、一覧に出すための中身の見出しを作る（本文・稿は入らない）。作れなければ null
+export function packFromHead(head) {
+  if (head?.format !== PACK_FORMAT || !head.meta?.content) return null;
+  const m = head.meta;
+  const titles = new Map((m.projects || []).map((p) => [p.workId, p.title]));
+  const project = (workId) => ({ workId, title: titles.get(workId) || '無題' });
+  const items = [];
+  const episodes = m.episodes || [];
+  if (m.scope === 'all' || m.scope === 'project') {
+    for (const p of m.projects || []) items.push({ key: `project:${p.workId}`, type: 'project', project: project(p.workId) });
+    // 同じ作品を別々に持っているとき、作品全体の数が作品の種類より多い（数を合わせるだけの見出しを足す）
+    for (let i = items.length; i < (m.wholeCount || 0) && m.projects?.length; i++) {
+      const p = m.projects[i % m.projects.length];
+      items.push({ key: `project:${p.workId}`, type: 'project', project: project(p.workId) });
+    }
+  } else {
+    // 作品資料だけのもの（エピソードのない作品）
+    const withEpisodes = new Set(episodes.map((e) => e.workId));
+    for (const p of m.projects || []) {
+      if (!withEpisodes.has(p.workId)) items.push({ key: `materials:${p.workId}`, type: 'materials', project: project(p.workId) });
+    }
+    for (const e of episodes) {
+      items.push({
+        key: `episode:${e.workId}:${e.id}`, type: 'episode', project: project(e.workId),
+        // 名前は、エピソード名の出し方（なろう用の稿のタイトル）に合わせて入れる
+        order: Number.isInteger(e.no) ? e.no - 1 : undefined, episode: { id: e.id, drafts: e.title ? { narou: { title: e.title } } : {} },
+      });
+    }
+  }
+  return { ...head, items };
+}
+
 export function isPack(text) {
-  try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { return false; }
+  return fileFormat(text) === PACK_FORMAT;
 }
 
 export function parsePack(text) {
@@ -502,6 +558,8 @@ export function parseAnyBackup(text) {
 // ファイル名は人が見分けるためのもの。同じ作品・エピソードかどうかは、中の workId・エピソードの id で見分ける（名前では判断しない）。
 
 const episodeNo = (item) => (Number.isInteger(item.order) && item.order >= 0 ? item.order + 1 : null);
+// エピソードの名前（なろう用、なければアルファ用のタイトル）。ないときは空
+const episodeTitle = (ep) => (ep ? draftOf(ep, 'narou').title || draftOf(ep, 'alpha').title || '' : '');
 
 function episodesLabel(list) {
   const nos = list.map(episodeNo).filter((n) => n !== null).sort((a, b) => a - b);
@@ -539,7 +597,7 @@ export function packMeta(pack) {
     content: env && novel ? 'both' : env ? 'environment' : novel ? 'novel' : 'none',
     scope,
     projects: works.map((w) => ({ workId: w.workId, title: w.title })),
-    episodes: works.flatMap((w) => w.episodes.map((e) => ({ workId: w.workId, id: e.episode?.id || '', no: episodeNo(e), title: e.episode?.title || '' }))),
+    episodes: works.flatMap((w) => w.episodes.map((e) => ({ workId: w.workId, id: e.episode?.id || '', no: episodeNo(e), title: e.episode?.title || episodeTitle(e.episode) }))),
     auto: /^auto/.test(pack.reason || ''),
     works,
   };
@@ -760,7 +818,7 @@ export function makeEpisodeFile(ep, workTitle = '') {
 }
 
 export function isEpisodeFile(text) {
-  try { return JSON.parse(text)?.format === EPISODE_FORMAT; } catch { return false; }
+  return fileFormat(text) === EPISODE_FORMAT;
 }
 
 export function parseEpisodeFile(text) {

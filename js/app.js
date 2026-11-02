@@ -6,9 +6,9 @@ import {
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import {
-  makeBackup, savePreSyncState, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
+  makeBackup, savePreSyncState, fileFormat, isBackup, isPack, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
-  makePack, parseAnyBackup, packFileName, describePack, packSummary, restorePack, PACK_FORMAT, materialsSignature, environmentSignature,
+  makePack, parseAnyBackup, parseBackupHead, packFromHead, packFileName, describePack, packSummary, restorePack, PACK_FORMAT, materialsSignature, environmentSignature,
 } from './backup.js';
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
@@ -1943,7 +1943,7 @@ async function epOpen({ force = false } = {}) {
   const src = await openFrom('ファイルを開く', { force });
   if (!src) return;
   // 「ファイル」→「保存」・バックアップパック・全体のバックアップは、内容を確かめて選んだものを読み込む
-  if (isBackup(src.text) || (() => { try { return JSON.parse(src.text)?.format === PACK_FORMAT; } catch { return false; } })()) {
+  if (isBackup(src.text) || isPack(src.text)) {
     await inspectBackupText(src.text, src.name);
     return;
   }
@@ -2807,21 +2807,39 @@ function applyBackupView() {
 // 保存先のファイルの中身を読むのは、同時に3件まで（一覧を開いたときに通信が詰まらないように）。
 // iPhone はメモリが少ないので1件ずつ（全作品のパックのような大きいファイルを同時に読むと、アプリが落ちることがある）
 const BACKUP_READ_LIMIT = /iPhone|iPod/.test(navigator.userAgent) ? 1 : 3;
+// 一覧では、ファイルの先頭のこれだけを読む（管理情報は先頭にある。本文・稿は読まない）
+const BACKUP_HEAD_BYTES = 256 * 1024;
+// 管理情報が先頭にない古い形のファイルは、これより大きければ iPhone では一覧で中身を読まない（丸ごと読むと落ちることがあるため）
+const BACKUP_FULL_READ_MAX = BACKUP_READ_LIMIT === 1 ? 2 * 1024 * 1024 : Infinity;
 let backupReading = 0;
 let backupReadQueue = [];
 let backupManagerGen = 0;
-function queuedBackupRead(f) {
+// read：読み方（既定は丸ごと）
+function queuedBackupRead(f, read = (x) => sync.read(x)) {
   return new Promise((resolve, reject) => {
-    backupReadQueue.push({ f, resolve, reject });
+    backupReadQueue.push({ f, read, resolve, reject });
     pumpBackupReads();
   });
 }
 function pumpBackupReads() {
   while (backupReading < BACKUP_READ_LIMIT && backupReadQueue.length) {
-    const { f, resolve, reject } = backupReadQueue.shift();
+    const { f, read, resolve, reject } = backupReadQueue.shift();
     backupReading++;
-    sync.read(f).then(resolve, reject).finally(() => { backupReading--; pumpBackupReads(); });
+    Promise.resolve().then(() => read(f)).then(resolve, reject).finally(() => { backupReading--; pumpBackupReads(); });
   }
+}
+
+// 一覧用に、バックアップの中身の見出し（本文・稿を除いたもの）を読む。
+// まず先頭だけを読み、管理情報から作る。作れない古い形のファイルだけ丸ごと読む。戻り値：{ pack, size } ／ { tooLarge, size }
+async function readBackupSummary(f) {
+  const retry = (read) => queuedBackupRead(f, read).catch((e) => (e?.name === 'AbortError' ? Promise.reject(e) : queuedBackupRead(f, read)));
+  const head = await retry((x) => sync.readStart(x, BACKUP_HEAD_BYTES));
+  if (head.complete) return { pack: parseAnyBackup(head.text), size: f.size || new Blob([head.text]).size };
+  const fromHead = packFromHead(parseBackupHead(head.text));
+  if (fromHead) return { pack: fromHead, size: f.size };
+  if ((f.size || Infinity) > BACKUP_FULL_READ_MAX) return { tooLarge: true, size: f.size };
+  const text = await retry((x) => sync.read(x));
+  return { pack: parseAnyBackup(text), size: f.size || new Blob([text]).size };
 }
 // 一覧の画面を閉じたら、まだ読んでいないものは読まない
 function cancelQueuedBackupReads() {
@@ -2837,10 +2855,15 @@ function inspectBackupFile(f) {
   const key = `${f.id}|${f.name}`;
   if (!backupInspections.has(key)) {
     // 読めなかったときは一度だけ読み直す（iPhone で通信が一瞬切れたときなどに「不明」と出さないため）
-    const readOnce = () => queuedBackupRead(f).catch((e) => (e?.name === 'AbortError' ? Promise.reject(e) : queuedBackupRead(f)));
-    backupInspections.set(key, readOnce().then((text) => {
+    backupInspections.set(key, readBackupSummary(f).then(({ pack, size, tooLarge }) => {
+      if (tooLarge) {
+        return {
+          alias: f.name.replace(/\.json$/i, ''), priority: 5, size,
+          error: '前の版で作った大きいファイルのため、一覧では中身を読みません（「内容を確認」で読めます）',
+          desc: { kind: '不明', environment: '不明', novel: '不明', scope: '不明', project: '不明', episode: '不明', device: f.prefix || '不明' },
+        };
+      }
       // ファイル名ではなく中の管理情報から、利用者向けの別名と種類を作る
-      const pack = parseAnyBackup(text);
       const summary = packSummary(pack);
       const episodeItems = pack.items.filter((x) => x.type === 'episode');
       const projectItems = pack.items.filter((x) => x.type === 'project');
@@ -2854,7 +2877,7 @@ function inspectBackupFile(f) {
       else alias = '環境設定';
       const desc = describePack(pack);
       const kinds = { env: desc.environment === 'あり', project: projectItems.length > 0, materials: materialItems.length > 0, episode: episodeItems.length > 0 };
-      return { alias, priority, kinds, desc, size: new Blob([text]).size };
+      return { alias, priority, kinds, desc, size };
     }).catch((e) => {
       if (e?.name === 'AbortError') { backupInspections.delete(key); return null; }
       return {
@@ -3178,7 +3201,7 @@ async function loadEnvironmentFrom(backup, name, env) {
 async function syncFromFile(mode) {
   const src = await openFrom('バックアップのファイルを選ぶ');
   if (!src) return false;
-  const isNewPack = (() => { try { return JSON.parse(src.text)?.format === PACK_FORMAT; } catch { return false; } })();
+  const isNewPack = isPack(src.text);
   if (!isBackup(src.text) && !isNewPack) { toast('あや綴りのバックアップファイルではありません', true); return false; }
   if (isNewPack) { await inspectBackupText(src.text, src.name); return true; }
   if (mode === 'restore') { openRestoreDialog(src.text, src.name); return true; }
@@ -3301,8 +3324,10 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
       const act = button(isSync ? '読み込む' : '選ぶ', async () => {
         const read = await runTask('load', async () => {
           const text = await sync.read(f);
-          const isPack = (() => { try { return JSON.parse(text)?.format === PACK_FORMAT; } catch { throw new Error('ファイルの中身を読み取れませんでした（壊れているか、あや綴りのファイルではありません）'); } })();
-          return { text, isPack };
+          // 種類は先頭だけで見分ける（丸ごと読むのは、このあと内容を確かめるときの1回だけにする）
+          const format = fileFormat(text);
+          if (format === null) throw new Error('ファイルの中身を読み取れませんでした（壊れているか、あや綴りのファイルではありません）');
+          return { text, isPack: format === PACK_FORMAT };
         }, { button: act, dialog, busy: 'ファイルを読み込み中…', done: null, closeOnSuccess: false });
         if (!read) return;
         const { text, isPack } = read;

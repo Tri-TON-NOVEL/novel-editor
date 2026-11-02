@@ -15,7 +15,9 @@
 //   戻ってきたら、コードをログインの鍵（約1時間）と更新用の鍵（約24時間）に替える。更新用の鍵がある間は、画面を出さずに鍵を新しくできる。
 //   Microsoft Entra のアプリの登録で、公開 URL を「シングルページ アプリケーション（SPA）」のリダイレクト URI に登録する必要がある。
 //   Google ドライブ（gdrive.js）は # 以降で結果を受け取るので、こちらは ? 以降（response_mode=query）で受け取り、混ざらないようにする。
+
 import { prefs } from '../db.js';
+import { readStart } from './stream.js';
 
 const AUTH = 'https://login.microsoftonline.com/common/oauth2/v2.0';
 const GRAPH = 'https://graph.microsoft.com/v1.0';
@@ -219,7 +221,7 @@ function appRootId() {
 }
 // アプリのフォルダの外（前の版で選んだフォルダなど）は、この権限では見えない（403）。見つからないのと同じに扱う
 const outsideAppFolder = (e) => e?.status === 403 || e?.status === 404;
-const SELECT = '$select=id,name,folder,file,parentReference,lastModifiedDateTime,deleted';
+const SELECT = '$select=id,name,folder,file,parentReference,lastModifiedDateTime,deleted,size';
 
 // フォルダの中身すべて（ページをまたいで）
 async function children(parentId) {
@@ -256,6 +258,15 @@ async function download(id, { bytes = false } = {}) {
     res = await api(`${byId(id)}/content`);
   }
   return bytes ? res.arrayBuffer() : res.text();
+}
+
+// 先頭の maxBytes ほどだけ読む（バックアップの一覧用）。戻り値：{ text, complete }
+async function downloadStart(id, maxBytes) {
+  const it = await (await api(byId(id))).json();
+  const url = it['@microsoft.graph.downloadUrl'];
+  const res = url ? await fetch(url) : await api(`${byId(id)}/content`);
+  if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
+  return readStart(res, maxBytes);
 }
 
 // 書き込む。target は byPath() か byId()。conflict：'replace'（上書き）／'fail'（同じ名前があればエラー）
@@ -487,6 +498,7 @@ export const onedrive = {
         .map((it) => ({ id: it.id, name: it.name }));
     },
     async read(id) { return download(id); },
+    async readStart(id, maxBytes) { return downloadStart(id, maxBytes); },
     async write(name, text) {
       // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
       const folder = await backupFolderId();
@@ -496,7 +508,7 @@ export const onedrive = {
     async listAny() {
       const id = await backupFolderId();
       return (await children(id)).filter((it) => it.file && !it.deleted && /\.json$/i.test(it.name))
-        .map((it) => ({ id: it.id, name: it.name, modifiedTime: it.lastModifiedDateTime }));
+        .map((it) => ({ id: it.id, name: it.name, modifiedTime: it.lastModifiedDateTime, size: it.size }));
     },
     // 自動整理（残す件数を超えた分）：ごみ箱へ
     async remove(id) {

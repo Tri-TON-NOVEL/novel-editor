@@ -1,6 +1,6 @@
 // オフラインでも起動できるよう、アプリ本体をキャッシュする。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'v112';
+const VERSION = 'v113';
 const CACHE = 'novel-editor-' + VERSION;
 const SHELL = [
   './',
@@ -29,6 +29,7 @@ const SHELL = [
   'js/providers/index.js',
   'js/providers/gdrive.js',
   'js/providers/onedrive.js',
+  'js/providers/stream.js',
 ];
 
 self.addEventListener('install', (e) => {

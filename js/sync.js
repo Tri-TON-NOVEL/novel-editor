@@ -22,7 +22,7 @@
 //   読み込むときは作品ごとにまとめる（loadAndMerge）。両方で書き換えた作品だけ、どちらを使うか聞く。
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
 import { meta, prefs, db, versions } from './db.js';
-import { makeBackup, savePreSyncState, parseBackup, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
+import { makeBackup, savePreSyncState, parseBackup, parseBackupHead, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
 import { normalize } from './format.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
@@ -178,6 +178,10 @@ function target() {
         return out;
       },
       async read(id) { return (await (await dir.getFileHandle(id)).getFile()).text(); },
+      async readStart(id, maxBytes) {
+        const file = await (await dir.getFileHandle(id)).getFile();
+        return { text: await file.slice(0, maxBytes).text(), complete: file.size <= maxBytes };
+      },
       async write(name, text) {
         const f = await dir.getFileHandle(name, { create: true });
         const w = await f.createWritable();
@@ -190,7 +194,7 @@ function target() {
         for await (const [name, h] of dir.entries()) {
           if (h.kind !== 'file' || !/\.json$/i.test(name)) continue;
           const file = await h.getFile().catch(() => null);
-          out.push({ id: name, name, modifiedTime: file ? new Date(file.lastModified).toISOString() : '' });
+          out.push({ id: name, name, modifiedTime: file ? new Date(file.lastModified).toISOString() : '', size: file?.size });
         }
         return out;
       },
@@ -204,6 +208,7 @@ function target() {
       list: () => drive.silently(() => b.list()),
       listAny: () => drive.silently(() => (b.listAny ? b.listAny() : b.list())),
       read: (id) => drive.silently(() => b.read(id)),
+      readStart: (id, maxBytes) => drive.silently(async () => (b.readStart ? b.readStart(id, maxBytes) : { text: await b.read(id), complete: true })),
       write: (name, text) => drive.silently(() => b.write(name, text)),
       remove: (id) => drive.silently(() => b.remove(id)),
       removeForever: (id) => drive.silently(async () => (b.removeForever ? b.removeForever(id) : (await b.remove(id), 'recycled'))),
@@ -280,6 +285,13 @@ export async function read(entry) {
   const t = target();
   if (!t) throw new Error('自動バックアップの保存先が使えません（設定 → バックアップで確認してください）');
   return t.read(entry.id);
+}
+
+// 先頭の maxBytes ほどだけ読む（一覧に出す管理情報用）。戻り値：{ text, complete }
+export async function readStart(entry, maxBytes) {
+  const t = target();
+  if (!t) throw new Error('自動バックアップの保存先が使えません（設定 → バックアップで確認してください）');
+  return t.readStart(entry.id, maxBytes);
 }
 
 export async function remove(entry) {
@@ -488,7 +500,9 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
   // ファイル名の記録が失われても、中にある端末IDが同じなら自分のバックアップ。
   try {
-    const data = JSON.parse(await read(newest));
+    // 端末IDはファイルの先頭にあるので、先頭だけ読む（大きいファイルを丸ごと読まない）
+    const { text, complete } = await readStart(newest, 256 * 1024);
+    const data = complete ? JSON.parse(text) : parseBackupHead(text);
     if (data?.device?.id && data.device.id === deviceId()) {
       // この端末が置いたバックアップパックは、自動バックアップの件数には入れない（古いものとして消さない）
       if (data.reason === 'manual-pack') return null;
