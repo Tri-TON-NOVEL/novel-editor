@@ -136,7 +136,7 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 
 ## データの保存先とプライバシー
 
-- 作品は**使っている端末のブラウザの中（IndexedDB）**に保存されます。サーバーには送りません。
+- 作品は**使っている端末のブラウザの中**に保存されます。サーバーには送りません。
 - 外部に送るのは、自分で Google ドライブか OneDrive を使うと決めたときだけです（使うクラウドは端末ごとに1つ選びます）。
   - Google ドライブの権限は `drive.file`（あや綴りで作ったファイル・フォルダだけ）です。ブラウザの Google ドライブなどで自分で作ったフォルダや置いたファイルは見えません。
   - OneDrive の権限は `Files.ReadWrite.AppFolder`（OneDrive の「アプリ」（Apps）の中にできる、あや綴り用のフォルダの中だけ）と `offline_access`（ログインを自動で更新するため）です。フォルダの名前は、Microsoft Entra で登録したアプリの名前になります。
@@ -207,38 +207,6 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 - ログインは約1日続きます（1時間ごとの更新は、画面を出さずに自動で行います）。切れると画面の上にログインのボタンが出ます。
 - 大きなバックアップ（4MB 超）も、分けて送るので保存できます。
 - あや綴りが使えるのは、OneDrive の「アプリ」（Apps）の中にできる、登録したアプリの名前のフォルダの中だけです。初めて使うときに OneDrive が自動で作ります。フォルダを選ぶ画面の「一番上」がこのフォルダです。
-
-## 開発
-
-### Caddyでローカル確認する
-
-- Windowsで`start-local.bat`を実行すると、あや綴りのフォルダーをCaddyで配信し、`http://localhost:8765/`を開きます。ビルドや`dist`フォルダーは不要です。
-- 同じLANのスマートフォンやタブレットからPWAを確認するときは、最初に`allow-lan-firewall.bat`を管理者権限で実行し、その後`start-lan-https.bat`を実行します。
-- LAN版はアプリを`https://端末のIP:8766/`、Caddyのローカル証明書を`http://端末のIP:8767/root.crt`で公開します。証明書は、自分が管理するPCとプライベートLANだけで信頼してください。
-- LAN確認を終えて受信規則が不要になったら、`remove-lan-firewall.bat`で削除できます。
-- ルーターで8766・8767番ポートを外部公開しないでください。
-
-### ファイル構成
-
-| ファイル | 内容 |
-|---|---|
-| `index.html` / `styles.css` | 画面 |
-| `js/app.js` | 画面の動作・自動保存・章とエピソード・ファイル・設定など |
-| `js/format.js` | 作品のデータ形式（v3）・旧形式からの移行・文字数 |
-| `js/notation.js` | なろう／アルファの記法と変換・挿絵・X の文字数・ひな型 |
-| `js/importer.js` / `js/importui.js` / `js/zip.js` | TXT・ZIPインポートの解析と画面 |
-| `js/tables.js` | 分類つきの表（設定・登場人物）と全体プロット |
-| `js/db.js` | 端末内保存（IndexedDB）・設定（localStorage）と、その控え（環境設定の自動保存） |
-| `js/backup.js` / `js/sync.js` | 全体・エピソードのファイル形式と復元／自動バックアップと同期 |
-| `js/localfile.js` | 端末のファイルの読み書き（保存先を選ぶ画面・共有メニュー・ダウンロード） |
-| `js/dialogs.js` | 確認・入力・選択の画面（どの OS でも同じボタンの並び） |
-| `js/providers/` | クラウド接続（`gdrive.js`：Google ドライブ、`onedrive.js`：OneDrive、`index.js`：使うクラウドの切り替え） |
-| `sw.js` / `manifest.webmanifest` | オフライン対応・ホーム画面アイコン |
-| `docs/` | 簡易マニュアル（逆引き）・設定マニュアル・使い方 |
-| `tests/` | 自動テスト（`tests/index.html` をブラウザで開く）、OneDrive のテスト用の偽物（`mock_onedrive.js`） |
-
-- フレームワークやビルドは使っていません。HTML・CSS・JavaScript（ES モジュール）だけで動きます。
-- 更新したときは、`sw.js` の `VERSION` と `js/app.js` の `APP_VERSION` を上げてください（各端末に新しい版が届くようにするため）。
 
 ## 免責事項
 
