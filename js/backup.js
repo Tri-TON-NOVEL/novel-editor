@@ -357,27 +357,57 @@ export async function makePack(plan = {}) {
   // 一覧の表示とファイル名のための管理情報（読み込みには使わない。なくても読める）
   const { works, ...meta } = packMeta(pack);
   pack.meta = { ...meta, scope: items.length ? (plan.scope || meta.scope) : null };
+  // 作ったあとに使うのは、ファイル名・一覧の表示・「保存済み」の記録だけ。そのための見出し（本文・稿・履歴を除いたもの）を先に作っておく
+  const brief = { ...pack, items: items.map(briefItem) };
   // 保存には blob を使う（全作品のような大きいパックでも、巨大な文字列を一度に作らない。iPhone はメモリが少なく、ここで失敗していた）。
-  // text は、文字列が要るときだけ作る
-  const blob = packBlob(pack);
-  return { pack, blob, get text() { return JSON.stringify(pack); }, itemCount: items.length };
+  // 中身は Blob に書き出したそばから手放し、アップロードの間は Blob だけがメモリに残るようにする（iPhone で、アップロード中に落ちていた）
+  projects.length = 0;
+  allVersions.length = 0;
+  const blob = packBlob(pack, { release: true });
+  return { pack: brief, blob, itemCount: items.length };
+}
+
+// パックの項目の見出し（ファイル名・一覧の表示・「保存済み」の記録に使う分だけ）
+function briefItem({ key, type, order, project, episode }) {
+  return {
+    key, type, order,
+    project: project ? { id: project.id, workId: project.workId, title: project.title } : project,
+    ...(episode ? { episode: { id: episode.id, title: episode.title } } : {}),
+  };
 }
 
 // パックを JSON のファイルの中身（Blob）にする。項目・稿ごとに小さな文字列にして並べるので、
 // 全体を一つの文字列にしたときの何倍ものメモリを使わずに済む。中身は JSON.stringify(pack) と同じ
-export function packBlob(pack) {
+// 小さな文字列は 1MB ほどずつ Blob にまとめ、文字列のほうはすぐ手放せるようにする。
+// release：書き出した項目・稿をパックから外していく（作ったその場で保存するだけのとき。パックは使えなくなる）
+export function packBlob(pack, { release = false } = {}) {
   const { items = [], ...head } = pack;
-  const parts = [JSON.stringify(head).slice(0, -1), ',"items":['];
+  const chunks = [];
+  let parts = [];
+  let size = 0;
+  const flush = () => { if (parts.length) chunks.push(new Blob(parts)); parts = []; size = 0; };
+  const push = (s) => { parts.push(s); size += s.length; if (size > 1 << 20) flush(); };
+  push(JSON.stringify(head).slice(0, -1));
+  push(',"items":[');
   items.forEach((item, i) => {
-    if (i) parts.push(',');
+    if (i) push(',');
     const { versions, ...rest } = item;
-    if (!Array.isArray(versions)) { parts.push(JSON.stringify(item)); return; }
-    parts.push(JSON.stringify(rest).slice(0, -1), ',"versions":[');
-    versions.forEach((v, j) => { if (j) parts.push(','); parts.push(JSON.stringify(v)); });
-    parts.push(']}');
+    if (!Array.isArray(versions)) push(JSON.stringify(item));
+    else {
+      push(JSON.stringify(rest).slice(0, -1));
+      push(',"versions":[');
+      versions.forEach((v, j) => {
+        if (j) push(',');
+        push(JSON.stringify(v));
+        if (release) versions[j] = null;
+      });
+      push(']}');
+    }
+    if (release) items[i] = null;
   });
-  parts.push(']}');
-  return new Blob(parts, { type: 'application/json' });
+  push(']}');
+  flush();
+  return new Blob(chunks, { type: 'application/json' });
 }
 
 export function isPack(text) {

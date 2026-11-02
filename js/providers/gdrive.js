@@ -226,6 +226,8 @@ function multipart(metadata, text, mime = 'application/json') {
 
 // Google ドライブの「1回で送る」方式（multipart）は 5MB まで。それより大きいファイルは「再開可能アップロード」で送る
 const MULTIPART_MAX = 5 * 1024 * 1024;
+// 再開可能アップロードで一度に送る大きさ（256KB の倍数でないといけない）
+const RESUMABLE_CHUNK = 16 * 256 * 1024;
 
 /**
  * ファイルを作る（fileId なし）か、中身を差し替える（fileId あり）。戻り値：fileId
@@ -248,19 +250,38 @@ async function sendFile(fileId, metadata, text, mime = 'application/json') {
   });
   const session = start.headers.get('Location');
   if (!session) throw new Error('Google Drive エラー: 大きいファイルの送り先を作れませんでした');
-  let lastError = null;
-  for (let attempt = 0; attempt < 3; attempt++) {
+  // 一度に全部送らず、少しずつ送る（iPhone は大きい中身を一度に送ると、メモリが足りずに落ちることがある）。
+  // 途中で通信が切れたら、どこまで届いたかを問い合わせて、その続きから送る
+  const total = blob.size;
+  const nextFrom = (res, fallback) => {
+    const m = /bytes=0-(\d+)/.exec(res.headers.get('Range') || '');
+    return m ? Number(m[1]) + 1 : fallback;
+  };
+  let pos = 0;
+  let failures = 0;
+  while (true) {
+    const end = Math.min(pos + RESUMABLE_CHUNK, total);
+    let res = null;
     try {
-      const res = await fetch(session, { method: 'PUT', headers: { 'Content-Type': `${mime}; charset=UTF-8` }, body: blob });
-      if (res.ok) return (await res.json()).id;
-      lastError = new Error('Google Drive エラー: 大きいファイルの書き込みに失敗しました（' + res.status + '）');
-      if (res.status < 500 && res.status !== 429) break; // 送り直しても変わらない失敗
+      res = await fetch(session, { method: 'PUT', headers: { 'Content-Range': `bytes ${pos}-${end - 1}/${total}` }, body: blob.slice(pos, end) });
     } catch (e) {
-      lastError = e; // 通信が切れた：少し待ってから送り直す
+      res = null; // 通信が切れた
+      if (++failures > 3) throw e;
     }
-    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    if (res?.ok) return (await res.json()).id;
+    if (res?.status === 308) { pos = nextFrom(res, end); failures = 0; continue; }
+    if (res && res.status < 500 && res.status !== 429) {
+      throw new Error('Google Drive エラー: 大きいファイルの書き込みに失敗しました（' + res.status + '）'); // 送り直しても変わらない失敗
+    }
+    if (res && ++failures > 3) throw new Error('Google Drive エラー: 大きいファイルの書き込みに失敗しました（' + res.status + '）');
+    // 少し待ってから、どこまで届いたかを問い合わせる（分からなければ、今の分から送り直す）
+    await new Promise((r) => setTimeout(r, 1500 * failures));
+    try {
+      const q = await fetch(session, { method: 'PUT', headers: { 'Content-Range': `bytes */${total}` } });
+      if (q.ok) return (await q.json()).id;
+      if (q.status === 308) pos = nextFrom(q, pos);
+    } catch { /* 問い合わせもできなければ、今の分から送り直す */ }
   }
-  throw lastError;
 }
 
 async function patchFile(fileId, text, name, workId, mime) {
