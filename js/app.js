@@ -3978,17 +3978,6 @@ function addTemplateField() {
   renderTemplateFieldEditors();
 }
 
-// 今の文章をもとに新しいひな型を作る
-function templateFromCurrent(kind) {
-  const t = {
-    x: { kind, name: '', title: '', body: el.xText.value },
-    narou: { kind, name: '', title: el.nrTitle.value, body: el.nrBody.value },
-    foreword: { kind, name: '', title: '', body: el.foreword.value },
-    afterword: { kind, name: '', title: '', body: el.afterword.value },
-  }[kind];
-  editTemplate({ id: null, ...t });
-}
-
 function saveEditedTemplate() {
   const form = $('template-edit-form');
   const t = { ...editingTemplate, name: form.name.value.trim() || '無題のひな型', title: form.title.value, body: form.body.value };
@@ -4879,7 +4868,6 @@ const actions = {
   'open-import': () => importScreen.open(),
   'toggle-sort-dir': () => setEpisodeSort({ dir: epSort.dir === 'asc' ? 'desc' : 'asc' }),
   'project-version-save': openVersionSave,
-  'manage-templates': () => openSettings('templates'), // ひな型の管理は「設定」→「ひな型」
   'open-x': () => openReportLink('x'),
   'open-narou-report': () => openReportLink('narou'),
   'auto-indent': runAutoIndent,
@@ -5105,8 +5093,6 @@ function bindEvents() {
       closeMenus();
     } else if (d.tplApply) {
       applyTemplate(d.tplApply).catch(fail);
-    } else if (d.tplSave) {
-      templateFromCurrent(d.tplSave);
     }
     if (!e.target.closest('details.menu')) closeMenus();
   });

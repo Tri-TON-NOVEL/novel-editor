@@ -650,8 +650,6 @@ body.report-mode #view-episode > .panes,
 body.report-mode #view-episode > .max-restore,
 body.report-mode #copy-main-to-sub,
 body.report-mode .ep-version { display: none !important; }
-.report-bar { display: flex; flex-wrap: wrap; align-items: end; gap: 8px 12px; }
-.report-bar label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; flex: 1; min-width: 200px; max-width: 420px; }
 .report-grid {
   flex: 1;
   min-height: 0;
