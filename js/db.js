@@ -1,6 +1,7 @@
 // 端末内の作品保存（IndexedDB）。使えない環境ではメモリ上に保持する。
 // v1: works（1作品＝1原稿）  v2: projects（1作品＝複数エピソード）  v3: versions（作品のバージョン）
 // v4: meta（自動バックアップ先フォルダなど、localStorage に置けない値）
+// v5: versions に projectId＋id の複合索引（巨大な履歴を作品ごとに少しずつ読む）
 const DB_NAME = 'novel-editor';
 const STORE = 'projects';
 const VERSIONS = 'versions';
@@ -17,13 +18,16 @@ let everOpened = false; // 一度でも開けたか（開き直しに失敗し�
 function openDb() {
   if (!dbPromise) {
     dbPromise = opening = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 4);
+      const req = indexedDB.open(DB_NAME, 5);
       req.onupgradeneeded = () => {
         const d = req.result;
         if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: 'id' });
+        let versionStore;
         if (!d.objectStoreNames.contains(VERSIONS)) {
-          d.createObjectStore(VERSIONS, { keyPath: 'id' }).createIndex('projectId', 'projectId');
-        }
+          versionStore = d.createObjectStore(VERSIONS, { keyPath: 'id' });
+          versionStore.createIndex('projectId', 'projectId');
+        } else versionStore = req.transaction.objectStore(VERSIONS);
+        if (!versionStore.indexNames.contains('projectIdId')) versionStore.createIndex('projectIdId', ['projectId', 'id']);
         if (!d.objectStoreNames.contains(META)) d.createObjectStore(META);
       };
       req.onsuccess = () => {
@@ -152,6 +156,19 @@ export const versions = {
       return ids.filter((id) => after === null || id > after).slice(0, size).map((id) => memoryVersions.get(id));
     }
     return runVersions('readonly', (s) => s.getAll(after === null ? null : IDBKeyRange.lowerBound(after, true), size));
+  },
+  // 一つの作品の稿・履歴を id 順に少しずつ読む。600MB級でも全件を同時にメモリへ載せない。
+  async pageProject(projectId, after = null, size = 25) {
+    if (useMemory) {
+      const values = [...memoryVersions.values()]
+        .filter((v) => v.projectId === projectId && (after === null || v.id > after))
+        .sort((a, b) => a.id.localeCompare(b.id));
+      return values.slice(0, size);
+    }
+    const lower = [projectId, after === null ? '' : after];
+    const upper = [projectId, '\uffff'];
+    const range = IDBKeyRange.bound(lower, upper, after !== null, false);
+    return runVersions('readonly', (s) => s.index('projectIdId').getAll(range, size));
   },
   async get(id) {
     return useMemory ? memoryVersions.get(id) : runVersions('readonly', (s) => s.get(id));

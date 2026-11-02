@@ -25,7 +25,7 @@ const SCOPES = 'Files.ReadWrite.AppFolder offline_access';
 // アプリのフォルダ（一番上）
 const APPROOT = '/me/drive/special/approot';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
 // これより大きいファイルは分けて送る（アップロード セッション）。分ける大きさは 320KiB の倍数にする決まり
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024;
 const CHUNK = 320 * 1024 * 10;
@@ -269,6 +269,17 @@ async function downloadStart(id, maxBytes) {
   return readStart(res, maxBytes);
 }
 
+// 大きいバックアップの必要な範囲だけ読む（end は含まない）。
+async function downloadRange(id, start, end) {
+  const it = await (await api(byId(id))).json();
+  const url = it['@microsoft.graph.downloadUrl'];
+  const opts = { headers: { Range: `bytes=${start}-${end - 1}` } };
+  const res = url ? await fetch(url, opts) : await api(`${byId(id)}/content`, opts);
+  if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
+  const bytes = await res.arrayBuffer();
+  return res.status === 206 ? bytes : bytes.slice(start, end);
+}
+
 // 書き込む。target は byPath() か byId()。conflict：'replace'（上書き）／'fail'（同じ名前があればエラー）
 async function upload(target, text, mime = 'application/json', conflict = 'replace') {
   // text は文字列か Blob（大きいバックアップは Blob のまま受け取り、一つの文字列にしない）
@@ -458,6 +469,7 @@ export const onedrive = {
 
   async load(fileId) { return download(fileId); },
   async loadBytes(fileId) { return download(fileId, { bytes: true }); },
+  async loadRange(fileId, start, end) { return downloadRange(fileId, start, end); },
 
   /**
    * fileId があれば上書き、なければ保存先フォルダに新しく作る。戻り値: { id, name }（name は実際に保存した名前）
@@ -499,15 +511,16 @@ export const onedrive = {
     },
     async read(id) { return download(id); },
     async readStart(id, maxBytes) { return downloadStart(id, maxBytes); },
+    async readRange(id, start, end) { return downloadRange(id, start, end); },
     async write(name, text) {
       // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
       const folder = await backupFolderId();
-      return (await upload(byPath(folder, name), text, 'application/json', 'replace')).id;
+      return (await upload(byPath(folder, name), text, 'application/x-ayatuzuri-backup', 'replace')).id;
     },
-    // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
+    // 「バックアップファイルの管理」用：新しい .ayabackup だけ
     async listAny() {
       const id = await backupFolderId();
-      return (await children(id)).filter((it) => it.file && !it.deleted && /\.json$/i.test(it.name))
+      return (await children(id)).filter((it) => it.file && !it.deleted && /\.ayabackup$/i.test(it.name))
         .map((it) => ({ id: it.id, name: it.name, modifiedTime: it.lastModifiedDateTime, size: it.size }));
     },
     // 自動整理（残す件数を超えた分）：ごみ箱へ

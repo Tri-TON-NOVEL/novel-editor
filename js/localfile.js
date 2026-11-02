@@ -13,6 +13,7 @@ function canShareFile(file) {
 
 export const WORK_TYPES = [{ description: '小説ファイル', accept: { 'application/json': ['.json'] } }];
 export const TEXT_TYPES = [{ description: 'テキスト', accept: { 'text/plain': ['.txt'] } }];
+export const BACKUP_TYPES = [{ description: 'あや綴りバックアップ', accept: { 'application/x-ayatuzuri-backup': ['.ayabackup'] } }];
 
 function isAbort(e) { return e && e.name === 'AbortError'; }
 
@@ -42,6 +43,7 @@ export const localFile = {
     const accepts = {
       json: { 'application/json': ['.json'] },
       txt: { 'text/plain': ['.txt'] },
+      backup: { 'application/x-ayatuzuri-backup': ['.ayabackup'] },
       any: { 'application/json': ['.json'], 'text/plain': ['.txt'] },
     }[kind];
     if (hasFsa) {
@@ -53,7 +55,7 @@ export const localFile = {
         throw e;
       }
       const file = await handle.getFile();
-      return { name: file.name, text: await readFile(file), handle: /\.json$/i.test(file.name) ? handle : null, file };
+      return { name: file.name, text: await readFile(file), handle: /\.(json|ayabackup)$/i.test(file.name) ? handle : null, file };
     }
     // Safari は、画面に置いていない input では選んだあとの知らせ（change）が来ないことがあるので、見えない形で置く
     return new Promise((resolve, reject) => {

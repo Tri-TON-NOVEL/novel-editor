@@ -583,7 +583,7 @@ export function packMeta(pack) {
     else if (item.type === 'episode') row.episodes.push(item);
   }
   const works = [...byWork.values()];
-  const env = !!pack.environment && Object.keys(pack.environment).some((k) => Object.keys(pack.environment[k] || {}).length);
+  const env = !!pack.environment && (pack.environment.present === true || Object.keys(pack.environment).some((k) => Object.keys(pack.environment[k] || {}).length));
   const novel = items.length > 0;
   let scope = pack.meta?.scope || null;
   if (!scope && novel) {
@@ -643,12 +643,12 @@ export function packLabel(pack) {
 }
 
 /**
- * パックのファイル名：[対象]_[範囲]_[日時].json（例：小説話_星の庭_第126話_20261030-073000.json）
+ * パックのファイル名：[対象]_[範囲]_[日時].ayabackup
  * device を渡したとき（自動バックアップの共有フォルダ）は、どの端末のものか一覧で分かるよう「@端末名」を日時の前に付ける
  */
 export function packFileName(pack, { device = '' } = {}) {
   const who = safePart(String(device || '').replace(/_+$/, ''), 20);
-  return `${packLabel(pack)}${who ? '@' + who : ''}_${fileStamp(pack.createdAt || new Date())}.json`;
+  return `${packLabel(pack)}${who ? '@' + who : ''}_${fileStamp(pack.createdAt || new Date())}.ayabackup`;
 }
 export function packSummary(pack) {
   const projects = new Map();
@@ -661,12 +661,13 @@ export function packSummary(pack) {
     const row = projects.get(workId);
     if (item.type === 'project') {
       row.whole = true;
-      row.episodes = item.project?.episodes?.length || 0;
-      row.editions += (item.versions || []).filter((v) => v.kind === 'episode').length;
+      row.episodes = item.summary?.episodeCount ?? item.project?.episodes?.length ?? 0;
+      row.editions += item.summary?.versionCount ?? (item.versions || []).filter((v) => v.kind === 'episode').length;
+      episodes += row.episodes;
     } else if (item.type === 'materials') row.materials = true;
     else if (item.type === 'episode') {
       row.episodes++;
-      row.editions += (item.versions || []).filter((v) => v.kind === 'episode').length;
+      row.editions += item.summary?.versionCount ?? (item.versions || []).filter((v) => v.kind === 'episode').length;
       episodes++;
     }
   }

@@ -21,9 +21,8 @@
 //   同じ → 何もしない。他の端末のほうが新しい → 読み込むかを聞く（画面はアプリ側）。
 //   読み込むときは作品ごとにまとめる（loadAndMerge）。両方で書き換えた作品だけ、どちらを使うか聞く。
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
-import { meta, prefs, db, versions } from './db.js';
-import { makeBackup, savePreSyncState, parseBackup, parseBackupHead, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
-import { normalize } from './format.js';
+import { meta, prefs } from './db.js';
+import { makeArchive, openArchive } from './archive.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
 export const DEFAULT_KEEP = 200;
@@ -33,7 +32,7 @@ const IDLE_MS = 20_000;        // 自動バックアップは、入力がこれ�
 const IDLE_MAX_MS = 30 * 60_000; // 打ち続けていても、保存間隔からこれ以上は待たない
 const DIR_KEY = 'autoBackupDir';
 // 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.json。端末の時刻）の両方を読む
-const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
+const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
 
 export const folderSupported = 'showDirectoryPicker' in window;
 
@@ -182,6 +181,10 @@ function target() {
         const file = await (await dir.getFileHandle(id)).getFile();
         return { text: await file.slice(0, maxBytes).text(), complete: file.size <= maxBytes };
       },
+      async readRange(id, start, end) {
+        const file = await (await dir.getFileHandle(id)).getFile();
+        return file.slice(start, end).arrayBuffer();
+      },
       async write(name, text) {
         const f = await dir.getFileHandle(name, { create: true });
         const w = await f.createWritable();
@@ -192,7 +195,7 @@ function target() {
       async listAny() {
         const out = [];
         for await (const [name, h] of dir.entries()) {
-          if (h.kind !== 'file' || !/\.json$/i.test(name)) continue;
+          if (h.kind !== 'file' || !/\.ayabackup$/i.test(name)) continue;
           const file = await h.getFile().catch(() => null);
           out.push({ id: name, name, modifiedTime: file ? new Date(file.lastModified).toISOString() : '', size: file?.size });
         }
@@ -209,6 +212,7 @@ function target() {
       listAny: () => drive.silently(() => (b.listAny ? b.listAny() : b.list())),
       read: (id) => drive.silently(() => b.read(id)),
       readStart: (id, maxBytes) => drive.silently(async () => (b.readStart ? b.readStart(id, maxBytes) : { text: await b.read(id), complete: true })),
+      readRange: (id, start, end) => drive.silently(() => b.readRange(id, start, end)),
       write: (name, text) => drive.silently(() => b.write(name, text)),
       remove: (id) => drive.silently(() => b.remove(id)),
       removeForever: (id) => drive.silently(async () => (b.removeForever ? b.removeForever(id) : (await b.remove(id), 'recycled'))),
@@ -294,6 +298,14 @@ export async function readStart(entry, maxBytes) {
   return t.readStart(entry.id, maxBytes);
 }
 
+// バックアップの指定範囲だけをバイト列で読む（end は含まない）。
+export async function readRange(entry, start, end) {
+  const t = target();
+  if (!t) throw new Error('自動バックアップの保存先が使えません（設定 → バックアップで確認してください）');
+  if (!t.readRange) throw new Error('この保存先は新しいバックアップの部分読み込みに対応していません');
+  return t.readRange(entry.id, start, end);
+}
+
 export async function remove(entry) {
   const t = target();
   if (!t) throw new Error('バックアップの保存先が使えません');
@@ -364,9 +376,9 @@ async function backupOnce({ force = false, build = null, auto = false } = {}) {
       newerHandler();
       return false;
     }
-    made = build ? await build() : autoBuilder ? await autoBuilder() : await makeBackup({ device: { prefix: prefix(), id: deviceId() } });
+    made = build ? await build() : autoBuilder ? await autoBuilder() : await makeArchive({ environment: true, scope: 'all', reason: 'auto', device: { prefix: prefix(), id: deviceId() } });
     const text = made.blob || made.text; // パックは Blob（大きくても一つの文字列にしない）
-    const name = made.name || `${prefix()}${stamp()}.json`;
+    const name = made.name || `${prefix()}${stamp()}.ayabackup`;
     try {
       await t.write(name, text);
     } catch (e) {
@@ -498,11 +510,10 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   const seenAt = Number(prefs.get('sync.seenAt', 0)) || 0;
   if (!ignoreSeen && newest.at <= seenAt) return null;
   if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
-  // ファイル名の記録が失われても、中にある端末IDが同じなら自分のバックアップ。
+    // ファイル名の記録が失われても、索引にある端末IDが同じなら自分のバックアップ。
   try {
-    // 端末IDはファイルの先頭にあるので、先頭だけ読む（大きいファイルを丸ごと読まない）
-    const { text, complete } = await readStart(newest, 256 * 1024);
-    const data = complete ? JSON.parse(text) : parseBackupHead(text);
+    const opened = await openArchive({ readRange: (start, end) => readRange(newest, start, end) });
+    const data = opened.index;
     if (data?.device?.id && data.device.id === deviceId()) {
       // この端末が置いたバックアップパックは、自動バックアップの件数には入れない（古いものとして消さない）
       if (data.reason === 'manual-pack') return null;
@@ -536,95 +547,3 @@ export function markLoaded(name) {
   listener();
 }
 
-/**
- * バックアップを読み込んで、作品ごとにまとめる。
- * onConflict(local, remote) … 両方で書き換えた作品について、'remote' か 'local' を返す
- * 戻り値: { added, updated, kept }
- */
-export async function loadAndMerge(entry, onConflict, opts = {}) {
-  return mergeText(await read(entry), entry.name, onConflict, opts);
-}
-
-/**
- * バックアップの中身（文字列）を、この端末の作品と合わせる。一覧にないファイル（「ファイルから選ぶ」）にも使う。
- *
- * 起動時の自動の確認（explicit: false）
- *   作品ごとに更新日時の新しいほうを使う。ファイル側が新しく、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く（onConflict）。
- *
- * 一覧やファイルから、人が選んだとき（explicit: true）
- *   選んだファイルの内容を使う。ただし、この端末のほうが新しい作品があれば、置き換えるかを一度だけ聞く（onOlder）。
- *   onOlder(list) … list = [{ local, remote }]。'file'（ファイルの内容にする）／'local'（その作品はこの端末のまま）／null（やめる）
- *
- * どちらも、この端末にしかない作品は消さない。読み込む前の状態は「同期の前の状態」に残す。
- * name がバックアップの名前の形（プレフィックス＋日時）なら、それを「前回同期したもの」として記録する。
- * 戻り値: { added, updated, kept, addedList, updatedList, keptList }（List は [{ id, title }]）／null（やめた）
- */
-export async function mergeText(text, name, onConflict, { explicit = false, onOlder = null, beforePackRestore = null } = {}) {
-  if (isPack(text)) {
-    const pack = parsePack(text);
-    // パックの自動同期でも、画面から手動で読み込むときと同じ退避処理を通す。
-    // 実際の退避内容（現在の稿・作品の復元ポイント・端末全体）は app.js 側で作る。
-    if (beforePackRestore) await beforePackRestore(pack, name);
-    const result = await restorePack(pack, { environmentMode: 'merge' });
-    markLoaded(name);
-    return result;
-  }
-  const backup = parseBackup(text);
-  const last = lastBackup();
-  // この端末で書き換えたか：前回同期した時刻（この端末の時計）とくらべる（端末どうしの時計のずれに左右されないように）
-  const localSince = last ? (last.syncedAt || parseName(last.name)?.at || Date.parse(last.at)) : null;
-  const time = (p) => Date.parse(p?.updatedAt || 0) || 0;
-
-  // まず、作品ごとにどうするかを決める（書き込みは、全部決まってから）
-  const plan = []; // { r, take: true|false, isNew }
-  const older = []; // この端末のほうが新しい作品（explicit のとき）
-  for (const r of backup.projects || []) {
-    if (!r?.id) continue;
-    const l = await db.get(r.id);
-    if (!l) { plan.push({ r, take: true, isNew: true }); continue; }
-    const rT = time(r);
-    const lT = time(l);
-    if (rT === lT) continue;
-    if (explicit) {
-      if (rT > lT) plan.push({ r, take: true });
-      else { const item = { r, take: false, l }; plan.push(item); older.push(item); }
-      continue;
-    }
-    let useRemote = rT > lT; // 作品ごとに新しいほう
-    // ファイル側が新しくても、この端末でも前回の同期のあとに書き換えていたら、どちらを使うか聞く
-    if (useRemote && localSince !== null && lT > localSince) useRemote = (await onConflict(normalize(l), normalize(r))) === 'remote';
-    plan.push({ r, take: useRemote });
-  }
-  if (explicit && older.length && onOlder) {
-    const answer = await onOlder(older.map((o) => ({ local: normalize(o.l), remote: normalize(o.r) })));
-    if (answer === null) return null;
-    if (answer === 'file') for (const o of older) o.take = true;
-  }
-
-  // 読み込む前の状態を残しておく（設定 → 自動バックアップ「同期の前の状態を書き出す」）
-  await savePreSyncState(name);
-
-  const taken = new Set();
-  // どの作品がどうなったか（画面で知らせ、変わった作品を開くため）：[{ id, title }]
-  const addedList = [];
-  const updatedList = [];
-  const keptList = [];
-  const item = (p) => ({ id: p.r.id, title: p.r.title || '無題' });
-  for (const p of plan) {
-    if (!p.take) { keptList.push(item(p)); continue; }
-    await db.put(normalize(p.r));
-    taken.add(p.r.id);
-    (p.isNew ? addedList : updatedList).push(item(p));
-  }
-  // 取り込んだ作品の版も入れる（同じ版はそのまま）
-  for (const v of backup.versions || []) {
-    if (v?.id && taken.has(v.projectId)) await versions.put(v);
-  }
-  // ひな型・リンク・アカウント・書き出しの選び方などの設定もまとめる（この端末の設定は消さない）
-  mergeSharedPrefs(backup.prefs);
-  const parsed = parseName(name || '');
-  if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
-  else if (last) prefs.set('sync.last', { ...last, syncedAt: Date.now() });
-  checked = true;
-  return { added: addedList.length, updated: updatedList.length, kept: keptList.length, addedList, updatedList, keptList };
-}

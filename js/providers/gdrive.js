@@ -24,7 +24,7 @@ import { readStart } from './stream.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.json$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -400,6 +400,13 @@ export const gdrive = {
     return res.arrayBuffer();
   },
 
+  // 大きいバックアップの必要な範囲だけ読む（end は含まない）。
+  async loadRange(fileId, start, end) {
+    const res = await api(`${API}/files/${encodeURIComponent(fileId)}?alt=media`, { headers: { Range: `bytes=${start}-${end - 1}` } });
+    const bytes = await res.arrayBuffer();
+    return res.status === 206 ? bytes : bytes.slice(start, end);
+  },
+
   /**
    * fileId があれば上書き、なければ保存先フォルダに新しく作る。戻り値: fileId
    * 新しく作るとき、同じフォルダに同じ名前のファイルがあれば：
@@ -455,17 +462,23 @@ export const gdrive = {
     async readStart(id, maxBytes) {
       return readStart(await api(`${API}/files/${encodeURIComponent(id)}?alt=media`), maxBytes);
     },
+    async readRange(id, start, end) {
+      const res = await api(`${API}/files/${encodeURIComponent(id)}?alt=media`, { headers: { Range: `bytes=${start}-${end - 1}` } });
+      const bytes = await res.arrayBuffer();
+      return res.status === 206 ? bytes : bytes.slice(start, end);
+    },
     async write(name, text) {
       // 保存の前に、選んだフォルダが使えるか確かめる（使えなければエラー。勝手に別の場所へは保存しない）
       const folder = await backupFolderId();
-      const meta = { name, mimeType: 'application/json', parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
-      return sendFile(null, meta, text);
+      const mime = 'application/x-ayatuzuri-backup';
+      const meta = { name, mimeType: mime, parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
+      return sendFile(null, meta, text, mime);
     },
-    // 「バックアップファイルの管理」用：フォルダの中の .json すべて（名前の形を問わない）
+    // 「バックアップファイルの管理」用：新しい .ayabackup だけ
     async listAny() {
       const id = await backupFolderId();
       return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`, 'id,name,modifiedTime,size'))
-        .filter((f) => /\.json$/i.test(f.name))
+        .filter((f) => /\.ayabackup$/i.test(f.name))
         .map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime, size: f.size ? Number(f.size) : undefined }));
     },
     async remove(id) {
