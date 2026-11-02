@@ -1823,13 +1823,16 @@ function renderBackupInspection(pack, name = '', { acknowledge = null } = {}) {
     tree.append(row);
   };
   if (pack.environment) add('environment', '環境設定', environmentSummary(pack.environment).join('\n') || '環境設定');
+  // エピソードは、同じ作品の「作品全体」も入っているときだけ、最初はチェックを外す（作品全体にそのエピソードも入っているため）。
+  // エピソードだけのパックで外していると、何も選ばれていない画面になり、「読み込む」を押しても何も起きないように見えていた
+  const wholeWorks = new Set((pack.items || []).filter((x) => x.type === 'project').map((x) => x.project?.workId));
   for (const item of pack.items || []) {
     const label = item.type === 'project' ? `作品全体：${item.project?.title || '無題'}`
       : item.type === 'materials' ? `作品資料：${item.project?.title || '無題'}`
         : `エピソード：${item.project?.title || '無題'}／${episodeName(item.episode)}`;
-    add(item.key, label, itemDetail(item), item.type !== 'episode');
+    add(item.key, label, itemDetail(item), item.type !== 'episode' || !wholeWorks.has(item.project?.workId));
   }
-  $('backup-inspect-detail').textContent = '左の項目を押すと詳細を表示します。チェックした項目だけを読み込めます。';
+  $('backup-inspect-detail').textContent = '項目を押すと詳細を表示します。チェックした項目だけを読み込めます。';
   $('backup-inspect-dialog').showModal();
 }
 
@@ -1881,7 +1884,14 @@ async function protectBeforeRestore(pack, selected, name = '') {
 async function restoreInspected(asNew = false, btn = null) {
   if (!inspectedBackup) return;
   const selected = [...$('backup-inspect-tree').querySelectorAll('input:checked')].map((x) => x.value);
-  if (!selected.length) { setTaskError($('backup-inspect-dialog'), '⚠ 読み込む内容を、左の一覧で一つ以上選んでください。'); return; }
+  if (!selected.length) {
+    // iPhone では画面が縦に並び、下のほうに出した文言が見えないことがある。お知らせでも出し、文言の所まで動かす
+    const msg = '読み込む内容を、一覧のチェックで一つ以上選んでください';
+    setTaskError($('backup-inspect-dialog'), `⚠ ${msg}`);
+    $('backup-inspect-dialog').querySelector('.task-error')?.scrollIntoView({ block: 'center' }); // 下のボタンの裏に隠れないよう、真ん中へ
+    toast(msg, true);
+    return;
+  }
   const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？'
     : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
       + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
