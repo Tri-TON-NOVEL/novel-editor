@@ -91,9 +91,10 @@ async function decompress(bytes, codec) {
   return new Uint8Array(await new Response(stream).arrayBuffer());
 }
 
+// 稿・履歴のブロックの見出し。版の種類は versionKind に入れる（kind はブロックの種類 'version' で、上書きしない）
 function blockMeta(v) {
   return {
-    versionId: v.id, kind: v.kind || '', episodeId: v.episodeId || '', site: v.site || '',
+    versionId: v.id, versionKind: v.kind || '', episodeId: v.episodeId || '', site: v.site || '',
     name: v.name || '', createdAt: v.createdAt || '', updatedAt: v.updatedAt || '',
   };
 }
@@ -120,7 +121,7 @@ export async function makeArchive(plan = {}) {
     const bytes = encoder.encode(JSON.stringify(value));
     const zipped = await compress(bytes);
     const id = `b${nextBlock++}`;
-    blocks.push({ id, kind, itemKey, offset: dataOffset, size: zipped.blob.size, rawSize: bytes.byteLength, codec: zipped.codec, crc32: crc32(bytes), ...metaInfo });
+    blocks.push({ ...metaInfo, id, kind, itemKey, offset: dataOffset, size: zipped.blob.size, rawSize: bytes.byteLength, codec: zipped.codec, crc32: crc32(bytes) });
     blockBlobs.push(zipped.blob);
     dataOffset += zipped.blob.size;
     return id;
@@ -254,6 +255,39 @@ export function archiveSourceFromBlob(blob) {
   };
 }
 
+/** 新しい形式（.ayabackup）か。先頭の数バイトだけ読んで見分ける（前の版の .json なら false） */
+export async function isArchiveSource(source) {
+  const head = decoder.decode(asBytes(await source.readRange(0, MAGIC.length)));
+  return head === MAGIC;
+}
+
+/**
+ * 復元のとき、ブロックを一つずつ通信で取りに行くと、数千回の通信になる（OneDrive は1回に2往復）。
+ * 先の部分までまとめて読んでおき、続くブロックはそこから渡す（ブロックはファイルの中で項目の順に並んでいる）。
+ */
+export function bufferedSource(source, windowBytes = 8 * 1024 * 1024) {
+  let cache = null; // { start, bytes }
+  return {
+    size: source.size,
+    async readRange(start, end) {
+      if (cache && start >= cache.start && end <= cache.start + cache.bytes.byteLength) {
+        return cache.bytes.slice(start - cache.start, end - cache.start);
+      }
+      let to = Math.max(end, start + windowBytes);
+      if (source.size) to = Math.min(to, Math.max(end, source.size));
+      const bytes = asBytes(await source.readRange(start, to));
+      cache = { start, bytes };
+      return bytes.slice(0, end - start);
+    },
+  };
+}
+
+// 0.51 の最初の版で作ったファイルでは、稿・履歴のブロックの kind が版の種類（'episode' など）で上書きされている。
+// versionId があれば稿・履歴として扱う（そのファイルも正しく戻せるように）
+const isVersionBlock = (b) => b.kind === 'version' || !!b.versionId;
+const blockKind = (b) => (isVersionBlock(b) ? 'version' : b.kind);
+const versionKindOf = (b) => b.versionKind ?? (b.kind === 'version' ? '' : b.kind);
+
 export async function openArchive(source) {
   if (!source?.readRange) throw new ArchiveFormatError('バックアップの読み込み元がありません');
   const headBytes = asBytes(await source.readRange(0, ARCHIVE_HEADER_BYTES));
@@ -274,7 +308,8 @@ export async function openArchive(source) {
 }
 
 export async function readArchiveBlock(archive, blockOrId) {
-  const block = typeof blockOrId === 'string' ? archive.index.blocks.find((b) => b.id === blockOrId) : blockOrId;
+  if (!archive.blockMap) archive.blockMap = new Map(archive.index.blocks.map((b) => [b.id, b]));
+  const block = typeof blockOrId === 'string' ? archive.blockMap.get(blockOrId) : blockOrId;
   if (!block) throw new ArchiveFormatError('バックアップ内のデータが見つかりません');
   const dataStart = ARCHIVE_HEADER_BYTES + archive.indexSize;
   const stored = asBytes(await archive.source.readRange(dataStart + block.offset, dataStart + block.offset + block.size));
@@ -294,7 +329,7 @@ function remapEditionIds(holder, map) {
 
 async function preserveLocalVersionNames(localProjectId, versionBlocks, episodeId = null) {
   const remoteIds = new Set(versionBlocks.map((b) => b.versionId));
-  const names = new Set(versionBlocks.filter((b) => b.kind === 'episode' && b.site).map((b) => `${b.episodeId}|${b.site}|${b.name}`));
+  const names = new Set(versionBlocks.filter((b) => versionKindOf(b) === 'episode' && b.site).map((b) => `${b.episodeId}|${b.site}|${b.name}`));
   for (let after = null; ;) {
     const page = await versions.pageProject(localProjectId, after, 25);
     for (const v of page) {
@@ -308,8 +343,7 @@ async function preserveLocalVersionNames(localProjectId, versionBlocks, episodeI
 }
 
 async function restoreVersions(archive, item, localProjectId, { remap = null, existing = false, episodeId = null } = {}) {
-  const ids = new Set(item.blockIds || []);
-  const blocks = archive.index.blocks.filter((b) => ids.has(b.id) && b.kind === 'version');
+  const blocks = blocksOf(archive, item).filter(isVersionBlock);
   if (existing) await preserveLocalVersionNames(localProjectId, blocks, episodeId);
   for (const block of blocks) {
     const v = await readArchiveBlock(archive, block);
@@ -319,8 +353,15 @@ async function restoreVersions(archive, item, localProjectId, { remap = null, ex
   }
 }
 
+// 項目のブロック（ファイルの中の順）
+function blocksOf(archive, item) {
+  if (!archive.blockMap) archive.blockMap = new Map(archive.index.blocks.map((b) => [b.id, b]));
+  return (item.blockIds || []).map((id) => archive.blockMap.get(id)).filter(Boolean);
+}
+
 /** 選択した項目を、ブロック単位で読みながら復元する。 */
-export async function restoreArchive(archive, { selected = null, asNew = false, environmentMode = 'merge' } = {}) {
+export async function restoreArchive(opened, { selected = null, asNew = false, environmentMode = 'merge' } = {}) {
+  const archive = { ...opened, source: bufferedSource(opened.source) };
   const keys = selected ? new Set(selected) : null;
   const use = (key) => !keys || keys.has(key);
   let environmentResult = null;
@@ -347,16 +388,15 @@ export async function restoreArchive(archive, { selected = null, asNew = false, 
 
   for (const item of archive.index.items || []) {
     if (!use(item.key)) continue;
-    const ids = new Set(item.blockIds || []);
-    const itemBlocks = archive.index.blocks.filter((b) => ids.has(b.id));
-    const versionBlocks = itemBlocks.filter((b) => b.kind === 'version');
+    const itemBlocks = blocksOf(archive, item);
+    const versionBlocks = itemBlocks.filter(isVersionBlock);
 
     if (item.type === 'project') {
-      const baseBlock = itemBlocks.find((b) => b.kind === 'project');
+      const baseBlock = itemBlocks.find((b) => blockKind(b) === 'project');
       if (!baseBlock) throw new ArchiveFormatError('作品データがありません');
       const src = normalize(await readArchiveBlock(archive, baseBlock));
       src.episodes = [];
-      for (const block of itemBlocks.filter((b) => b.kind === 'episode').sort((a, b) => a.order - b.order)) src.episodes.push(await readArchiveBlock(archive, block));
+      for (const block of itemBlocks.filter((b) => blockKind(b) === 'episode').sort((a, b) => a.order - b.order)) src.episodes.push(await readArchiveBlock(archive, block));
       const existing = !asNew ? byWork.get(src.workId) : null;
       const localId = existing?.id || makeId();
       const idMap = new Map(versionBlocks.map((b) => [b.versionId, (asNew || !existing) ? makeId() : b.versionId]));
@@ -369,13 +409,17 @@ export async function restoreArchive(archive, { selected = null, asNew = false, 
       continue;
     }
 
-    const { target, existing } = targetFor(item.project || {});
+    const { target } = targetFor(item.project || {});
+    // この読み込みで新しく作った作品は「この端末にあった作品」として扱わない（restorePack と同じ）
+    const existing = locals.some((p) => p.id === target.id);
     if (item.type === 'materials') {
-      const block = itemBlocks.find((b) => b.kind === 'materials');
+      const block = itemBlocks.find((b) => blockKind(b) === 'materials');
+      if (!block) throw new ArchiveFormatError('作品資料のデータがありません');
       const data = await readArchiveBlock(archive, block);
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
     } else if (item.type === 'episode') {
-      const block = itemBlocks.find((b) => b.kind === 'episode');
+      const block = itemBlocks.find((b) => blockKind(b) === 'episode');
+      if (!block) throw new ArchiveFormatError('エピソードのデータがありません');
       const ep = await readArchiveBlock(archive, block);
       const idMap = new Map(versionBlocks.map((b) => [b.versionId, (asNew || !existing) ? makeId() : b.versionId]));
       remapEditionIds({ episodes: [ep] }, idMap);

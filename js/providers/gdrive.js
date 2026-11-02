@@ -24,7 +24,7 @@ import { readStart } from './stream.js';
 
 const SCOPE = 'https://www.googleapis.com/auth/drive.file';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.(?:ayabackup|json)$/;
 const API = 'https://www.googleapis.com/drive/v3';
 const UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
 const FOLDER_MIME = 'application/vnd.google-apps.folder';
@@ -474,11 +474,11 @@ export const gdrive = {
       const meta = { name, mimeType: mime, parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
       return sendFile(null, meta, text, mime);
     },
-    // 「バックアップファイルの管理」用：新しい .ayabackup だけ
+    // 「バックアップファイルの管理」用：.ayabackup と、前の版の .json
     async listAny() {
       const id = await backupFolderId();
       return (await listAll(`${q(id)} in parents and mimeType!='${FOLDER_MIME}' and trashed=false`, 'id,name,modifiedTime,size'))
-        .filter((f) => /\.ayabackup$/i.test(f.name))
+        .filter((f) => /\.(ayabackup|json)$/i.test(f.name))
         .map((f) => ({ id: f.id, name: f.name, modifiedTime: f.modifiedTime, size: f.size ? Number(f.size) : undefined }));
     },
     async remove(id) {

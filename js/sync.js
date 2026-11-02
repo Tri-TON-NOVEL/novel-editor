@@ -23,6 +23,7 @@
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
 import { meta, prefs } from './db.js';
 import { makeArchive, openArchive } from './archive.js';
+import { parseBackupHead } from './backup.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
 export const DEFAULT_KEEP = 200;
@@ -31,8 +32,9 @@ const LEAVE_MIN_MS = 30_000;   // 画面を離れるときの保存の最短間�
 const IDLE_MS = 20_000;        // 自動バックアップは、入力がこれだけ止まってから
 const IDLE_MAX_MS = 30 * 60_000; // 打ち続けていても、保存間隔からこれ以上は待たない
 const DIR_KEY = 'autoBackupDir';
-// 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.json。端末の時刻）の両方を読む
-const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
+// 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.ayabackup。端末の時刻）の両方を読む。
+// 0.50 までの .json（…_20261030-073000.json）も、一覧に出して読めるようにする
+const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.(?:ayabackup|json)$/;
 
 export const folderSupported = 'showDirectoryPicker' in window;
 
@@ -195,7 +197,7 @@ function target() {
       async listAny() {
         const out = [];
         for await (const [name, h] of dir.entries()) {
-          if (h.kind !== 'file' || !/\.ayabackup$/i.test(name)) continue;
+          if (h.kind !== 'file' || !/\.(ayabackup|json)$/i.test(name)) continue;
           const file = await h.getFile().catch(() => null);
           out.push({ id: name, name, modifiedTime: file ? new Date(file.lastModified).toISOString() : '', size: file?.size });
         }
@@ -510,10 +512,16 @@ export async function findNewer({ ignoreSeen = false } = {}) {
   const seenAt = Number(prefs.get('sync.seenAt', 0)) || 0;
   if (!ignoreSeen && newest.at <= seenAt) return null;
   if (!ignoreSeen && prefs.get('sync.seen', '') === newest.name) return null;
-    // ファイル名の記録が失われても、索引にある端末IDが同じなら自分のバックアップ。
+  // ファイル名の記録が失われても、中にある端末IDが同じなら自分のバックアップ。
   try {
-    const opened = await openArchive({ readRange: (start, end) => readRange(newest, start, end) });
-    const data = opened.index;
+    // 新しい形式は索引だけ、前の版の .json は先頭だけを読む（大きいファイルを丸ごと読まない）
+    let data;
+    if (/\.json$/i.test(newest.name)) {
+      const { text, complete } = await readStart(newest, 256 * 1024);
+      data = complete ? JSON.parse(text) : parseBackupHead(text);
+    } else {
+      data = (await openArchive({ readRange: (start, end) => readRange(newest, start, end) })).index;
+    }
     if (data?.device?.id && data.device.id === deviceId()) {
       // この端末が置いたバックアップパックは、自動バックアップの件数には入れない（古いものとして消さない）
       if (data.reason === 'manual-pack') return null;

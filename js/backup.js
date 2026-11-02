@@ -663,7 +663,6 @@ export function packSummary(pack) {
       row.whole = true;
       row.episodes = item.summary?.episodeCount ?? item.project?.episodes?.length ?? 0;
       row.editions += item.summary?.versionCount ?? (item.versions || []).filter((v) => v.kind === 'episode').length;
-      episodes += row.episodes;
     } else if (item.type === 'materials') row.materials = true;
     else if (item.type === 'episode') {
       row.episodes++;

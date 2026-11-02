@@ -43,7 +43,8 @@ export const localFile = {
     const accepts = {
       json: { 'application/json': ['.json'] },
       txt: { 'text/plain': ['.txt'] },
-      backup: { 'application/x-ayatuzuri-backup': ['.ayabackup'] },
+      // 前の版の .json バックアップも開けるようにする
+      backup: { 'application/x-ayatuzuri-backup': ['.ayabackup'], 'application/json': ['.json'] },
       any: { 'application/json': ['.json'], 'text/plain': ['.txt'] },
     }[kind];
     if (hasFsa) {
@@ -61,7 +62,8 @@ export const localFile = {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
-      input.accept = Object.entries(accepts).flatMap(([mime, exts]) => [...exts, mime]).join(',');
+      // iPhone・iPad は、知らない拡張子（.ayabackup）を accept に入れると選べなくなることがあるので、バックアップでは絞らない
+      if (kind !== 'backup') input.accept = Object.entries(accepts).flatMap(([mime, exts]) => [...exts, mime]).join(',');
       input.hidden = true;
       document.body.appendChild(input);
       const done = (v) => { input.remove(); resolve(v); };

@@ -25,7 +25,7 @@ const SCOPES = 'Files.ReadWrite.AppFolder offline_access';
 // アプリのフォルダ（一番上）
 const APPROOT = '/me/drive/special/approot';
 // 自動バックアップのファイル名（プレフィックス＋日時）
-const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.ayabackup$/;
+const BACKUP_NAME_RE = /(\d{8}T\d{6}Z|\d{8}-\d{6})\.(?:ayabackup|json)$/;
 // これより大きいファイルは分けて送る（アップロード セッション）。分ける大きさは 320KiB の倍数にする決まり
 const SIMPLE_UPLOAD_MAX = 4 * 1024 * 1024;
 const CHUNK = 320 * 1024 * 10;
@@ -270,11 +270,20 @@ async function downloadStart(id, maxBytes) {
 }
 
 // 大きいバックアップの必要な範囲だけ読む（end は含まない）。
+// ダウンロード用のURLは1時間ほど使えるので、続けて読むあいだは使い回す（1回ごとに問い合わせると往復が倍になる）
+const DOWNLOAD_URL_MS = 10 * 60_000;
+const downloadUrls = new Map(); // id → { url, at }
 async function downloadRange(id, start, end) {
-  const it = await (await api(byId(id))).json();
-  const url = it['@microsoft.graph.downloadUrl'];
   const opts = { headers: { Range: `bytes=${start}-${end - 1}` } };
-  const res = url ? await fetch(url, opts) : await api(`${byId(id)}/content`, opts);
+  const cached = downloadUrls.get(id);
+  let res = cached && Date.now() - cached.at < DOWNLOAD_URL_MS ? await fetch(cached.url, opts).catch(() => null) : null;
+  if (!res?.ok) {
+    downloadUrls.delete(id);
+    const it = await (await api(byId(id))).json();
+    const url = it['@microsoft.graph.downloadUrl'];
+    if (url) downloadUrls.set(id, { url, at: Date.now() });
+    res = url ? await fetch(url, opts) : await api(`${byId(id)}/content`, opts);
+  }
   if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
   const bytes = await res.arrayBuffer();
   return res.status === 206 ? bytes : bytes.slice(start, end);
@@ -517,10 +526,10 @@ export const onedrive = {
       const folder = await backupFolderId();
       return (await upload(byPath(folder, name), text, 'application/x-ayatuzuri-backup', 'replace')).id;
     },
-    // 「バックアップファイルの管理」用：新しい .ayabackup だけ
+    // 「バックアップファイルの管理」用：.ayabackup と、前の版の .json
     async listAny() {
       const id = await backupFolderId();
-      return (await children(id)).filter((it) => it.file && !it.deleted && /\.ayabackup$/i.test(it.name))
+      return (await children(id)).filter((it) => it.file && !it.deleted && /\.(ayabackup|json)$/i.test(it.name))
         .map((it) => ({ id: it.id, name: it.name, modifiedTime: it.lastModifiedDateTime, size: it.size }));
     },
     // 自動整理（残す件数を超えた分）：ごみ箱へ
