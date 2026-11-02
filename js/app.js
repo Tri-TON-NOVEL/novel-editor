@@ -4001,7 +4001,7 @@ function saveEditedTemplate() {
   if (t.id) list[list.findIndex((x) => x.id === t.id)] = t;
   else list.push({ ...t, id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) });
   saveTemplates(list);
-  if ($('templates-dialog').open) renderTemplateList();
+  if ($('settings-dialog').open) renderTemplateList();
   toast(`ひな型「${t.name}」を保存しました`);
 }
 
@@ -4595,6 +4595,7 @@ function selectSettingsTab(name) {
     meta.get('preSyncBackup').then((v) => { $('sync-presync-row').hidden = !v; }).catch(() => {});
   }
   if (name === 'cloud') renderCloudActions();
+  if (name === 'templates') renderTemplateList();
 }
 
 function openSettings(tab = prefs.get('settingsTab', 'display')) {
@@ -4878,7 +4879,7 @@ const actions = {
   'open-import': () => importScreen.open(),
   'toggle-sort-dir': () => setEpisodeSort({ dir: epSort.dir === 'asc' ? 'desc' : 'asc' }),
   'project-version-save': openVersionSave,
-  'manage-templates': () => { renderTemplateList(); $('templates-dialog').showModal(); },
+  'manage-templates': () => openSettings('templates'), // ひな型の管理は「設定」→「ひな型」
   'open-x': () => openReportLink('x'),
   'open-narou-report': () => openReportLink('narou'),
   'auto-indent': runAutoIndent,

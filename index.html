@@ -957,15 +957,6 @@
   </form>
 </dialog>
 
-<dialog id="templates-dialog">
-  <form method="dialog" class="dialog">
-    <h2>ひな型の管理</h2>
-    <p class="hint">使える差し込み文字：<span id="template-vars"></span></p>
-    <ul class="list" id="template-list"></ul>
-    <div class="dialog-foot"><button value="close">閉じる</button></div>
-  </form>
-</dialog>
-
 <dialog id="template-edit-dialog">
   <form method="dialog" class="dialog" id="template-edit-form">
     <h2 id="template-edit-heading">ひな型</h2>
@@ -1007,6 +998,7 @@
       <button type="button" role="tab" data-stab="sites">投稿サイト</button>
       <button type="button" role="tab" data-stab="display">表示</button>
       <button type="button" role="tab" data-stab="links">リンク</button>
+      <button type="button" role="tab" data-stab="templates">ひな型</button>
       <button type="button" role="tab" data-stab="cloud">クラウド</button>
       <button type="button" role="tab" data-stab="file">ファイル</button>
       <button type="button" role="tab" data-stab="backup">バックアップ</button>
@@ -1253,6 +1245,16 @@
         「活動報告用」の X・なろう活動報告は、活動報告の画面の「X を開く」「なろう活動報告を開く」ボタンと見出しで開くリンクです（削除はできません。URL を自分のページに変えられます）。</p>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
+    </fieldset>
+    </div>
+
+    <!-- ひな型 -->
+    <div class="settings-panel" data-spanel="templates" role="tabpanel" hidden>
+    <fieldset>
+      <legend>ひな型の管理</legend>
+      <p class="hint">X・活動報告・前書き・後書きのひな型です（全作品共通）。それぞれの画面の「ひな型を使う」で差し込みます。</p>
+      <p class="hint">使える差し込み文字：<span id="template-vars"></span></p>
+      <ul class="list" id="template-list"></ul>
     </fieldset>
     </div>
 
