@@ -1,5 +1,5 @@
 // 全体バックアップ：端末内のすべての作品・ひな型・設定を1つのファイルにまとめる
-import { db, prefs, versions } from './db.js';
+import { db, meta, prefs, versions } from './db.js';
 import { normalize, newProject, makeId, SCHEMA_VERSION } from './format.js';
 
 // ファイルの形式。形を変えたら、その形式の VERSION を上げる。
@@ -89,6 +89,57 @@ export async function makeBackup({ device = null } = {}) {
     }), // 字下げはしない（大きい作品では字下げだけで何割も増え、iPhone のメモリを圧迫するため。読み込みには関係しない）
     count: projects.length,
     versionCount: allVersions.length,
+  };
+}
+
+// makeBackup と同じ中身を、Blob にして作る（読み込む前に残す「同期の前の状態」用）。
+// 稿・履歴は少しずつ読んでは書き出すので、端末の全データを一つの文字列にしない（iPhone で、復元中に落ちていた）
+export async function makeBackupBlob({ device = null } = {}) {
+  const w = blobWriter();
+  w.push(JSON.stringify({
+    format: BACKUP_FORMAT,
+    version: BACKUP_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    createdAt: new Date().toISOString(),
+    ...(device ? { device } : {}),
+  }).slice(0, -1));
+  const projects = await db.all();
+  const count = projects.length;
+  w.push(',"projects":[');
+  projects.forEach((p, i) => { w.push((i ? ',' : '') + JSON.stringify(p)); projects[i] = null; });
+  w.push('],"versions":[');
+  let versionCount = 0;
+  for (let after = null; ;) {
+    const page = await versions.page(after, 50);
+    for (const v of page) w.push((versionCount++ ? ',' : '') + JSON.stringify(v));
+    if (page.length < 50) break;
+    after = page.at(-1).id;
+  }
+  w.push(`],"prefs":${JSON.stringify(withoutClientIds(sharedPrefs(prefs.entries())))}`);
+  w.push(`,"devicePrefs":${JSON.stringify(portableDevicePrefs(prefs.entries()))}}`);
+  return { blob: w.finish(), count, versionCount };
+}
+
+// 読み込む前の端末全体の状態を「同期の前の状態」として残す（設定 → バックアップ の「同期の前の状態を書き出す」）。
+// 残せなくても読み込みは止めない（作品ごとの復元ポイント「バックアップ読み込み前（自動）」は別に残している）
+export async function savePreSyncState(from = '') {
+  try {
+    const { blob } = await makeBackupBlob();
+    await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from, text: blob });
+  } catch (e) {
+    console.warn('同期の前の状態を残せませんでした', e);
+  }
+}
+
+// 小さな文字列を 1MB ほどずつ Blob にまとめていく（文字列のほうはすぐ手放せる）
+function blobWriter() {
+  const chunks = [];
+  let parts = [];
+  let size = 0;
+  const flush = () => { if (parts.length) chunks.push(new Blob(parts)); parts = []; size = 0; };
+  return {
+    push(s) { parts.push(s); size += s.length; if (size > 1 << 20) flush(); },
+    finish() { flush(); return new Blob(chunks, { type: 'application/json' }); },
   };
 }
 
@@ -382,11 +433,8 @@ function briefItem({ key, type, order, project, episode }) {
 // release：書き出した項目・稿をパックから外していく（作ったその場で保存するだけのとき。パックは使えなくなる）
 export function packBlob(pack, { release = false } = {}) {
   const { items = [], ...head } = pack;
-  const chunks = [];
-  let parts = [];
-  let size = 0;
-  const flush = () => { if (parts.length) chunks.push(new Blob(parts)); parts = []; size = 0; };
-  const push = (s) => { parts.push(s); size += s.length; if (size > 1 << 20) flush(); };
+  const w = blobWriter();
+  const push = (s) => w.push(s);
   push(JSON.stringify(head).slice(0, -1));
   push(',"items":[');
   items.forEach((item, i) => {
@@ -406,8 +454,7 @@ export function packBlob(pack, { release = false } = {}) {
     if (release) items[i] = null;
   });
   push(']}');
-  flush();
-  return new Blob(chunks, { type: 'application/json' });
+  return w.finish();
 }
 
 export function isPack(text) {

@@ -145,6 +145,14 @@ export const versions = {
   async all() {
     return useMemory ? [...memoryVersions.values()] : runVersions('readonly', (s) => s.getAll());
   },
+  // 少しずつ読む（id の順に、after の次から size 件）。全部を一度に読むとメモリが足りない iPhone 向け
+  async page(after = null, size = 50) {
+    if (useMemory) {
+      const ids = [...memoryVersions.keys()].sort();
+      return ids.filter((id) => after === null || id > after).slice(0, size).map((id) => memoryVersions.get(id));
+    }
+    return runVersions('readonly', (s) => s.getAll(after === null ? null : IDBKeyRange.lowerBound(after, true), size));
+  },
   async get(id) {
     return useMemory ? memoryVersions.get(id) : runVersions('readonly', (s) => s.get(id));
   },

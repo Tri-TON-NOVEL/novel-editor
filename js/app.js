@@ -6,7 +6,7 @@ import {
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import {
-  makeBackup, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
+  makeBackup, savePreSyncState, isBackup, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName, requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
   makePack, parseAnyBackup, packFileName, describePack, packSummary, restorePack, PACK_FORMAT, materialsSignature, environmentSignature,
 } from './backup.js';
@@ -1877,8 +1877,7 @@ async function protectBeforeRestore(pack, selected, name = '') {
       data: JSON.parse(serialize(p)).project,
     });
   }
-  const before = await makeBackup();
-  await meta.set('preSyncBackup', { createdAt: now.toISOString(), from: name, text: before.text });
+  await savePreSyncState(name);
 }
 
 async function restoreInspected(asNew = false, btn = null) {

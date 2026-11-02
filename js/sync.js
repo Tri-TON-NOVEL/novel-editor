@@ -22,7 +22,7 @@
 //   読み込むときは作品ごとにまとめる（loadAndMerge）。両方で書き換えた作品だけ、どちらを使うか聞く。
 // 起動時の確認が済むまでは保存しない（先に保存すると、他の端末の新しいバックアップが隠れてしまうため）。
 import { meta, prefs, db, versions } from './db.js';
-import { makeBackup, parseBackup, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
+import { makeBackup, savePreSyncState, parseBackup, mergeSharedPrefs, isPack, parsePack, restorePack } from './backup.js';
 import { normalize } from './format.js';
 
 export const DEFAULT_INTERVAL_MIN = 10;
@@ -574,8 +574,7 @@ export async function mergeText(text, name, onConflict, { explicit = false, onOl
   }
 
   // 読み込む前の状態を残しておく（設定 → 自動バックアップ「同期の前の状態を書き出す」）
-  const before = await makeBackup();
-  await meta.set('preSyncBackup', { createdAt: new Date().toISOString(), from: name, text: before.text });
+  await savePreSyncState(name);
 
   const taken = new Set();
   // どの作品がどうなったか（画面で知らせ、変わった作品を開くため）：[{ id, title }]
