@@ -2,6 +2,7 @@
 // v1: works（1作品＝1原稿）  v2: projects（1作品＝複数エピソード）  v3: versions（作品のバージョン）
 // v4: meta（自動バックアップ先フォルダなど、localStorage に置けない値）
 // v5: versions に projectId＋id の複合索引（巨大な履歴を作品ごとに少しずつ読む）
+// v6: versions に projectId＋kind＋id の複合索引（稿だけを読む。作品全体の復元ポイントは大きく、iPhone で一緒に読むと落ちていた）
 const DB_NAME = 'novel-editor';
 const STORE = 'projects';
 const VERSIONS = 'versions';
@@ -18,7 +19,7 @@ let everOpened = false; // 一度でも開けたか（開き直しに失敗し�
 function openDb() {
   if (!dbPromise) {
     dbPromise = opening = new Promise((resolve, reject) => {
-      const req = indexedDB.open(DB_NAME, 5);
+      const req = indexedDB.open(DB_NAME, 6);
       req.onupgradeneeded = () => {
         const d = req.result;
         if (!d.objectStoreNames.contains(STORE)) d.createObjectStore(STORE, { keyPath: 'id' });
@@ -28,6 +29,7 @@ function openDb() {
           versionStore.createIndex('projectId', 'projectId');
         } else versionStore = req.transaction.objectStore(VERSIONS);
         if (!versionStore.indexNames.contains('projectIdId')) versionStore.createIndex('projectIdId', ['projectId', 'id']);
+        if (!versionStore.indexNames.contains('projectKindId')) versionStore.createIndex('projectKindId', ['projectId', 'kind', 'id']);
         if (!d.objectStoreNames.contains(META)) d.createObjectStore(META);
       };
       req.onsuccess = () => {
@@ -135,6 +137,9 @@ export const meta = {
 
 // 作品のバージョン（その時点の作品まるごとのコピー）。auto: true は自動で残したもの
 //   { id, projectId, name, memo, createdAt, chars, episodes, data }
+// 稿（エピソードの原稿の版）。それ以外（kind: 'project' や種類のない古いもの）は、作品全体の復元ポイント
+const isEditionKind = (kind) => kind === 'episode' || kind === 'episode-legacy';
+
 async function runVersions(mode, fn) {
   return transact(VERSIONS, mode, fn);
 }
@@ -170,6 +175,56 @@ export const versions = {
     const range = IDBKeyRange.bound(lower, upper, after !== null, false);
     return runVersions('readonly', (s) => s.index('projectIdId').getAll(range, size));
   },
+  // 一つの作品の稿（kind が 'episode'／'episode-legacy'）だけを、少しずつ読む。作品全体の復元ポイントは読まない。
+  // 索引の順は [kind, id]。after は前に読んだ最後の稿
+  async pageEditions(projectId, after = null, size = 25) {
+    if (useMemory) {
+      const key = (v) => `${v.kind}\u0000${v.id}`;
+      const values = [...memoryVersions.values()]
+        .filter((v) => v.projectId === projectId && isEditionKind(v.kind) && (after === null || key(v) > key(after)))
+        .sort((a, b) => key(a).localeCompare(key(b)));
+      return values.slice(0, size);
+    }
+    // 'episode' と 'episode-legacy' は索引で隣り合う（あいだに入る種類はない）
+    const lower = after === null ? [projectId, 'episode', ''] : [projectId, after.kind, after.id];
+    const range = IDBKeyRange.bound(lower, [projectId, 'episode-legacy', '￿'], after !== null, false);
+    return runVersions('readonly', (s) => s.index('projectKindId').getAll(range, size));
+  },
+  // 一つの作品の稿をすべて（稿は1件が1話分なので、作品全体の復元ポイントよりずっと小さい）
+  async editions(projectId) {
+    const out = [];
+    for (let after = null; ;) {
+      const page = await this.pageEditions(projectId, after, 200);
+      out.push(...page);
+      if (page.length < 200) break;
+      after = page.at(-1);
+    }
+    return out;
+  },
+  // 一つの作品の、作品全体の復元ポイントの一覧（中身の data は持たない。新しい順）。
+  // 1件ずつ読んでは中身を捨てるので、何百件あっても一度にメモリへ載せない。中身は get(id) で読む
+  async restorePoints(projectId) {
+    const light = ({ data, ...rest }) => rest;
+    let out = [];
+    if (useMemory) out = [...memoryVersions.values()].filter((v) => v.projectId === projectId && !isEditionKind(v.kind)).map(light);
+    else {
+      await runVersions('readonly', (s) => {
+        const req = s.index('projectId').openCursor(IDBKeyRange.only(projectId));
+        req.onsuccess = () => {
+          const c = req.result;
+          if (!c) return;
+          if (!isEditionKind(c.value.kind)) out.push(light(c.value));
+          c.continue();
+        };
+        return null;
+      });
+    }
+    return out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
+  },
+  async count(projectId) {
+    if (useMemory) return [...memoryVersions.values()].filter((v) => v.projectId === projectId).length;
+    return runVersions('readonly', (s) => s.index('projectId').count(IDBKeyRange.only(projectId)));
+  },
   async get(id) {
     return useMemory ? memoryVersions.get(id) : runVersions('readonly', (s) => s.get(id));
   },
@@ -182,7 +237,10 @@ export const versions = {
     await runVersions('readwrite', (s) => s.delete(id));
   },
   async removeProject(projectId) {
-    for (const v of await this.list(projectId)) await this.remove(v.id);
+    // 中身は読まずに、id だけを集めて消す
+    const ids = useMemory ? [...memoryVersions.values()].filter((v) => v.projectId === projectId).map((v) => v.id)
+      : await runVersions('readonly', (s) => s.index('projectId').getAllKeys(IDBKeyRange.only(projectId)));
+    for (const id of ids || []) await this.remove(id);
   },
   async clear() {
     if (useMemory) { memoryVersions.clear(); return; }

@@ -137,9 +137,10 @@ export async function makeArchive(plan = {}) {
     environment = { blockId: await addBlock('environment', 'environment', payload), summary: environmentSummary(payload) };
   }
 
+  // 稿だけを少しずつ読む（作品全体の復元ポイントは読まない。iPhone で、一緒に読むとメモリが足りず落ちていた）
   const addVersions = async (p, item, accept = () => true) => {
     for (let after = null; ;) {
-      const page = await versions.pageProject(p.id, after, 25);
+      const page = await versions.pageEditions(p.id, after, 25);
       for (const v of page) {
         if (!accept(v)) continue;
         const id = await addBlock('version', item.key, v, blockMeta(v));
@@ -147,7 +148,7 @@ export async function makeArchive(plan = {}) {
         item.summary.versionCount++;
       }
       if (page.length < 25) break;
-      after = page.at(-1).id;
+      after = page.at(-1);
     }
   };
 
@@ -163,7 +164,7 @@ export async function makeArchive(plan = {}) {
       item.blockIds.push(await addBlock('episode', item.key, ep, { episodeId: ep.id, order, title: epTitle(ep) }));
     }
     // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
-    await addVersions(p, item, (v) => !isRestorePoint(v));
+    await addVersions(p, item);
     items.push(item);
   };
 
@@ -175,6 +176,15 @@ export async function makeArchive(plan = {}) {
 
   const addEpisodes = async (p, ids) => {
     const wanted = new Set(ids || []);
+    if (!p.episodes.some((ep) => wanted.has(ep.id))) return;
+    // 選んだエピソードの稿だけを、作品の稿をひと通り読んで集める（エピソードごとに作品の稿を読み直さない）
+    const editions = new Map();
+    for (let after = null; ;) {
+      const page = await versions.pageEditions(p.id, after, 50);
+      for (const v of page) if (wanted.has(v.episodeId)) editions.set(v.episodeId, [...(editions.get(v.episodeId) || []), v]);
+      if (page.length < 50) break;
+      after = page.at(-1);
+    }
     for (let order = 0; order < p.episodes.length; order++) {
       const ep = p.episodes[order];
       if (!wanted.has(ep.id)) continue;
@@ -184,7 +194,11 @@ export async function makeArchive(plan = {}) {
         chapter, order, episode: episodeBrief(ep), blockIds: [], summary: { versionCount: 0 },
       };
       item.blockIds.push(await addBlock('episode', item.key, ep, { episodeId: ep.id, order, title: epTitle(ep) }));
-      await addVersions(p, item, (v) => v.episodeId === ep.id);
+      for (const v of editions.get(ep.id) || []) {
+        item.blockIds.push(await addBlock('version', item.key, v, blockMeta(v)));
+        item.summary.versionCount++;
+      }
+      editions.delete(ep.id);
       items.push(item);
     }
   };
@@ -342,14 +356,14 @@ async function preserveLocalVersionNames(localProjectId, versionBlocks, episodeI
   const remoteIds = new Set(versionBlocks.map((b) => b.versionId));
   const names = new Set(versionBlocks.filter((b) => versionKindOf(b) === 'episode' && b.site).map((b) => `${b.episodeId}|${b.site}|${b.name}`));
   for (let after = null; ;) {
-    const page = await versions.pageProject(localProjectId, after, 25);
+    const page = await versions.pageEditions(localProjectId, after, 25);
     for (const v of page) {
       if (remoteIds.has(v.id) || v.kind !== 'episode' || !v.site) continue;
       if (episodeId && v.episodeId !== episodeId) continue;
       if (names.has(`${v.episodeId}|${v.site}|${v.name}`)) await versions.put({ ...v, name: `${v.name}（この端末）` });
     }
     if (page.length < 25) break;
-    after = page.at(-1).id;
+    after = page.at(-1);
   }
 }
 

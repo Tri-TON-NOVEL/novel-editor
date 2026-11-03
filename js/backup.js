@@ -353,14 +353,14 @@ function episodeItem(p, ep, allVersions) {
 export async function makePack(plan = {}) {
   const projects = (await db.all()).map((p) => normalize(p));
   // 稿・履歴は、入れる作品の分だけ読む（自動バックアップのような1話分のパックでも、端末の全作品の稿を読み込んでいた。iPhone のメモリを節約するため）
-  const versionsOf = async (p) => versions.list(p.id);
+  // 稿だけを読む（作品全体の復元ポイントは入れない）
+  const versionsOf = async (p) => versions.editions(p.id);
   const items = [];
   // 作品全体は大きい（稿・変更履歴・復元ポイントを全部含む）ので、写しを作らずにそのまま入れる。
   // db.all()・versions.list() はどちらも読み出したばかりの別の物なので、ここで書き換えられる心配はない（iPhone のメモリを節約するため）
   const addWhole = async (p) => items.push({
     key: `project:${p.workId}`, type: 'project', project: p,
-    // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
-    versions: (await versionsOf(p)).filter((v) => ['episode', 'episode-legacy'].includes(v?.kind)),
+    versions: await versionsOf(p),
   });
   const addMaterials = (p) => items.push({
     key: `materials:${p.workId}`, type: 'materials', project: projectIdentity(p), data: projectMaterials(p),
@@ -690,7 +690,7 @@ function remapVersions(list, projectId, idMap = null) {
 async function putVersionsKeepingLocal(localProjectId, remote, episodeId = null) {
   const remoteIds = new Set(remote.map((v) => v.id));
   const names = new Set(remote.filter((v) => v.kind === 'episode' && v.site).map((v) => `${v.episodeId}|${v.site}|${v.name}`));
-  for (const v of await versions.list(localProjectId)) {
+  for (const v of await versions.editions(localProjectId)) {
     if (remoteIds.has(v.id) || v.kind !== 'episode' || !v.site) continue;
     if (episodeId && v.episodeId !== episodeId) continue;
     if (names.has(`${v.episodeId}|${v.site}|${v.name}`)) await versions.put({ ...v, name: `${v.name}（この端末）` });

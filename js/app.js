@@ -1151,7 +1151,7 @@ async function renderLibrary() {
 async function confirmProjectDelete(p) {
   const n = normalize(p);
   const name = n.title || '無題';
-  const vcount = (await versions.list(p.id)).length;
+  const vcount = await versions.count(p.id);
   if (!(await ask(`作品「${name}」をこの端末から削除しますか？`))) return false;
   if (!(await ask(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
     + `プロット・世界観・用語・登場人物、変更履歴${vcount}件がすべて消えます。\n`
@@ -2242,7 +2242,7 @@ function applyEdition(ep, site, data) {
 
 // エピソードの稿・以前の版すべて（両サイト）
 async function allEpisodeVersions(episodeId) {
-  return (await versions.list(project.id)).filter((v) => isEpisodeVersion(v) && v.episodeId === episodeId);
+  return (await versions.editions(project.id)).filter((v) => v.episodeId === episodeId);
 }
 
 async function saveEdition(ep, site, name, data = editionSnapshot(ep, site)) {
@@ -2442,7 +2442,7 @@ function snapshot() {
 }
 
 async function projectVersions() {
-  return (await versions.list(project.id)).filter((v) => !isEpisodeVersion(v));
+  return versions.restorePoints(project.id); // 中身（data）は持たない一覧。開くときに読む
 }
 
 async function saveVersion(name, memo = '', auto = false) {
@@ -2471,7 +2471,7 @@ function autoVersionKeep() {
 }
 
 async function trimAutoVersions(projectId = project.id) {
-  const autos = (await versions.list(projectId)).filter((v) => !isEpisodeVersion(v) && v.auto);
+  const autos = (await versions.restorePoints(projectId)).filter((v) => v.auto);
   for (const old of autos.slice(autoVersionKeep())) await versions.remove(old.id);
 }
 let autoDirty = false;
