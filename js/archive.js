@@ -376,24 +376,11 @@ function remapEditionIds(holder, map) {
   }
 }
 
-async function preserveLocalVersionNames(localProjectId, versionBlocks, episodeId = null) {
-  const remoteIds = new Set(versionBlocks.map((b) => b.versionId));
-  const names = new Set(versionBlocks.filter((b) => versionKindOf(b) === 'episode' && b.site).map((b) => `${b.episodeId}|${b.site}|${b.name}`));
-  for (let after = null; ;) {
-    const page = await versions.pageEditions(localProjectId, after, 25);
-    for (const v of page) {
-      if (remoteIds.has(v.id) || v.kind !== 'episode' || !v.site) continue;
-      if (episodeId && v.episodeId !== episodeId) continue;
-      if (names.has(`${v.episodeId}|${v.site}|${v.name}`)) await versions.put({ ...v, name: `${v.name}（この端末）` });
-    }
-    if (page.length < 25) break;
-    after = page.at(-1);
-  }
-}
-
+// 上書きするときは、この端末の稿（その作品、またはその話の分）を消して、バックアップの稿にそっくり入れ替える。
+// 消す前の状態は、読み込む前に「同期の前の状態」として端末全体を残している（app.js の protectBeforeRestore）
 async function restoreVersions(archive, item, localProjectId, { remap = null, existing = false, episodeId = null } = {}) {
   const blocks = blocksOf(archive, item).filter(isEditionBlock);
-  if (existing) await preserveLocalVersionNames(localProjectId, blocks, episodeId);
+  if (existing) await versions.removeEditions(localProjectId, episodeId);
   for (const block of blocks) {
     const v = await readArchiveBlock(archive, block);
     v.projectId = localProjectId;

@@ -683,18 +683,13 @@ function remapVersions(list, projectId, idMap = null) {
 }
 
 /**
- * 読み込んだ稿・履歴を入れる。この端末の稿・履歴・復元ポイントは消さない（同じ ID のものだけ読み込んだ側にする）。
- * この端末にしかない稿が、読み込んだ稿と同じサイト・同じ名前（第N稿）なら、区別できるよう「（この端末）」を付ける。
- * episodeId を渡したときは、そのエピソードの稿だけを名前の確認の対象にする。
+ * 読み込んだ稿を入れる。この端末の稿は、バックアップの稿にそっくり入れ替える（作品全体の復元ポイントは残す）。
+ * episodeId を渡したときは、そのエピソードの稿だけを入れ替える。
  */
 async function putVersionsKeepingLocal(localProjectId, remote, episodeId = null) {
-  const remoteIds = new Set(remote.map((v) => v.id));
-  const names = new Set(remote.filter((v) => v.kind === 'episode' && v.site).map((v) => `${v.episodeId}|${v.site}|${v.name}`));
-  for (const v of await versions.editions(localProjectId)) {
-    if (remoteIds.has(v.id) || v.kind !== 'episode' || !v.site) continue;
-    if (episodeId && v.episodeId !== episodeId) continue;
-    if (names.has(`${v.episodeId}|${v.site}|${v.name}`)) await versions.put({ ...v, name: `${v.name}（この端末）` });
-  }
+  // 0.52 から：上書きでは、この端末の稿（その作品、またはその話の分）を消して、バックアップの稿にそっくり入れ替える
+  // （作品全体の復元ポイントは消さない。消す前の状態は、読み込む前に「同期の前の状態」として残している）
+  await versions.removeEditions(localProjectId, episodeId);
   for (const v of remote) await versions.put(v);
 }
 
@@ -764,7 +759,7 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
         versionValues = versionValues.map((v) => ({ ...clone(v), projectId: localId }));
       }
       await db.put(restored);
-      // この端末の稿・変更履歴・復元ポイントは消さずに残す
+      // この端末の稿は、バックアップの稿にそっくり入れ替える（作品全体の復元ポイントは残す）
       if (existing) await putVersionsKeepingLocal(localId, versionValues);
       else for (const v of versionValues) await versions.put(v);
       if (existing) result.updatedList.push({ id: localId, title: restored.title || '無題' });
@@ -783,7 +778,7 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
       const srcEp = clone(item.episode);
       const index = target.episodes.findIndex((e) => e.id === srcEp.id);
       if (index >= 0) {
-        // この端末のこのエピソードの稿は消さない（下で、読み込んだ稿を足す）
+        // このエピソードの稿は、下でバックアップの稿にそっくり入れ替える
         target.episodes[index] = srcEp;
       } else if (target.episodes.length === 1 && !target.episodes[0].plot && !target.episodes[0].freeMemo
         && Object.values(target.episodes[0].drafts || {}).every((d) => !d.title && !d.body && !d.foreword && !d.afterword)) {

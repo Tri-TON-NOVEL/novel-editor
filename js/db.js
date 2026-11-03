@@ -221,6 +221,18 @@ export const versions = {
     }
     return out.sort((a, b) => String(b.createdAt).localeCompare(String(a.createdAt)));
   },
+  // 一つの作品（episodeId を渡したときは、その話）の稿をすべて削除する（バックアップで上書きするとき、稿をそっくり入れ替えるため）。
+  // 作品全体の復元ポイントは消さない
+  async removeEditions(projectId, episodeId = null) {
+    let ids;
+    if (useMemory) ids = [...memoryVersions.values()].filter((v) => v.projectId === projectId && isEditionKind(v.kind) && (!episodeId || v.episodeId === episodeId)).map((v) => v.id);
+    else if (!episodeId) {
+      const range = IDBKeyRange.bound([projectId, 'episode', ''], [projectId, 'episode-legacy', '￿']);
+      ids = await runVersions('readonly', (s) => s.index('projectKindId').getAllKeys(range));
+    } else ids = (await this.editions(projectId)).filter((v) => v.episodeId === episodeId).map((v) => v.id);
+    for (const id of ids || []) await this.remove(id);
+    return (ids || []).length;
+  },
   async count(projectId) {
     if (useMemory) return [...memoryVersions.values()].filter((v) => v.projectId === projectId).length;
     return runVersions('readonly', (s) => s.index('projectId').count(IDBKeyRange.only(projectId)));

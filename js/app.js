@@ -1951,7 +1951,8 @@ async function restoreInspected(asNew = false, btn = null) {
   }
   const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？'
     : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
-      + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
+      + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。\n'
+      + '同じ作品・エピソードの稿（第N稿）は、バックアップの稿にそっくり入れ替わります（この端末にしかない稿は消えます。読み込む前の端末全体の状態は「同期の前の状態」として残し、「設定」→「バックアップ」から書き出せます）。';
   const envNote = selected.includes('environment') ? '\n\n環境設定（表示・投稿サイト・リンク・ひな型など）は、バックアップの内容にします。クライアントIDとログインは、この端末のままです。読み込んだあと、画面を読み直します。' : '';
   if (!(await ask(verb + envNote, { ok: '読み込む' }))) return;
   // 復元が済んでから画面を閉じる。失敗したら画面は開いたまま、理由を出す
@@ -3230,13 +3231,26 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
     renderTemplateSelects();
     buildLinksMenu();
     const now = new Date().toISOString();
+    // 選んだ小説の稿（第N稿）も一緒に読み込む（新しい id にして、エピソードの「今の稿」もそれに合わせる）
+    const editions = (backup.versions || []).filter((v) => v?.projectId === src.id && isEpisodeVersion(v));
+    const idMap = new Map(editions.map((v) => [v.id, newVersionId()]));
+    const withEditions = (p) => {
+      for (const ep of p.episodes) if (ep.editionIds) ep.editionIds = Object.fromEntries(Object.entries(ep.editionIds).map(([s, id]) => [s, idMap.get(id) || id]));
+      return p;
+    };
+    const putEditions = async (projectId) => { for (const v of editions) await versions.put({ ...structuredClone(v), id: idMap.get(v.id), projectId }); };
     if (r.choice === 'overwrite') {
       await saveVersion(`「${name}」で上書きする前（自動）`, '', true);
-      const p = normalize({ ...structuredClone(src), id: project.id, workId: project.workId, links: project.links || {}, updatedAt: now });
+      // 上書きでは稿もそっくり入れ替える。消す前の端末全体の状態は「同期の前の状態」として残す
+      await savePreRestoreArchive(name, { environment: true, scope: 'all', reason: 'pre-restore', appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
+      const p = withEditions(normalize({ ...structuredClone(src), id: project.id, workId: project.workId, links: project.links || {}, updatedAt: now }));
+      await versions.removeEditions(p.id);
+      await putEditions(p.id);
       await db.put(p);
       showProject(p);
     } else {
-      const p = normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now });
+      const p = withEditions(normalize({ ...structuredClone(src), id: format.makeId(), workId: format.makeId(), links: {}, updatedAt: now }));
+      await putEditions(p.id);
       await switchTo(p);
     }
     syncPending = null;
@@ -3244,7 +3258,7 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
     if (newest && newest.name !== name) sync.markChecked(newest);
   });
   if (r.choice === 'overwrite') {
-    await inform(`復元が完了しました\n\nいま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています）`);
+    await inform(`復元が完了しました\n\nいま開いている小説を、「${name}」の「${src.title || '無題'}」の内容で上書きしました。\n（上書きする前の内容は「変更履歴と復元ポイント」に残しています。稿もバックアップのものに入れ替えました）`);
   } else {
     await inform(`復元が完了しました\n\n「${name}」の「${src.title || '無題'}」を、新しい小説として追加して開きました。\n（前に開いていた「${cur}」はそのまま残っています。「作品一覧」から開けます）`);
   }
