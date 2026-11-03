@@ -1952,14 +1952,17 @@ async function restoreInspected(asNew = false, btn = null) {
   const verb = asNew ? '既存の作品を変更せず、新しい作品として読み込みますか？'
     : '選択した内容をこの端末へ読み込みますか？同じ作品・エピソードは、バックアップの内容になります。\n'
       + '読み込む前の状態は、それぞれの作品の「変更履歴と復元ポイント」に「バックアップ読み込み前（自動）」として残します。この端末にしかない稿は消えません。';
-  if (!(await ask(verb, { ok: '読み込む' }))) return;
+  const envNote = selected.includes('environment') ? '\n\n環境設定（表示・投稿サイト・リンク・ひな型など）は、バックアップの内容にします。クライアントIDとログインは、この端末のままです。読み込んだあと、画面を読み直します。' : '';
+  if (!(await ask(verb + envNote, { ok: '読み込む' }))) return;
   // 復元が済んでから画面を閉じる。失敗したら画面は開いたまま、理由を出す
   const result = await runTask('restore', async () => {
     await flush();
     if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
+    // 環境（表示・投稿サイト・リンク・ひな型など）を選んだときは、バックアップの設定にする。
+    // 「まとめる」では、この端末ですでに決まっている設定（表示など）が変わらなかった。クライアントIDとログインは変えない
     const restored = inspectedBackup.archive
-      ? await restoreArchive(inspectedBackup.archive, { selected, asNew, environmentMode: 'merge' })
-      : await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'merge' });
+      ? await restoreArchive(inspectedBackup.archive, { selected, asNew, environmentMode: 'replace' })
+      : await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'replace' });
     if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
     // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
     // これ以降に作成されたバックアップだけを、次回から「他の端末の更新」として通知する。
@@ -1977,11 +1980,10 @@ async function restoreInspected(asNew = false, btn = null) {
   });
   if (!result) return;
   returnToEditor();
-  const follow = environmentFollowUp(result.environmentResult);
-  if (follow) {
-    await inform(`環境設定を読み込みました。${follow}`);
-    // 使うクラウド・クライアントIDが変わったときは、つなぎ直すために画面を読み直す
-    if (result.environmentResult.providerChanged || result.environmentResult.idsChanged) location.reload();
+  if (result.environmentResult) {
+    // 読み込んだ設定を画面に反映するため、読み直す（結果は読み直したあとで知らせる）
+    prefs.set('restoredReport', `復元が完了しました（追加${result.addedList.length}・更新${result.updatedList.length}・環境設定）\n環境設定を、バックアップの内容にしました。${environmentFollowUp(result.environmentResult)}`);
+    location.reload();
   }
 }
 
@@ -3216,7 +3218,7 @@ async function loadEnvironmentFrom(backup, name, env) {
   const how = await choose(`「${name}」の環境を読み込みます。小説は変わりません。\n\n入っているもの：\n${list}\n\n`
     + '・まとめる：この端末の設定を残したまま、足りないものを足します（ひな型・リンク・TXT インポートの条件は足し合わせ、アカウントは空の欄だけ埋めます）。\n'
     + '・置き換える：バックアップの設定で上書きします（表示・ファイル・自動バックアップの間隔なども）。\n'
-    + '端末の名前（プレフィックス）とログインは、どちらでも変わりません。クライアントIDが入っていないときは、この端末のクライアントIDをそのまま使います。',
+    + '端末の名前（プレフィックス）・ログイン・クライアントIDは、どちらでも変わりません（この端末のものをそのまま使います）。',
   [{ value: 'replace', label: '置き換える', danger: true }, { value: 'merge', label: 'まとめる', primary: true }]);
   if (!how) return false;
   await withBusy('復元中…', async () => {

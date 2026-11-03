@@ -52,7 +52,7 @@ function mergeList(remote, mine, keyOf) {
  *   そのほか（書き出しの列の選び方など） … この端末にまだない設定だけ入れる
  */
 export function mergeSharedPrefs(remotePrefs) {
-  for (const [key, value] of Object.entries(sharedPrefs(remotePrefs))) {
+  for (const [key, value] of Object.entries(withoutClientIds(sharedPrefs(remotePrefs)))) {
     if (value === null || value === undefined) continue;
     const mine = prefs.get(key, null);
     if (LISTS_BY_ID.includes(key) && Array.isArray(value)) {
@@ -201,8 +201,8 @@ export function environmentSummary(backup) {
  * 自動バックアップの保存先・プレフィックス・ログインなど、端末そのものの記録は変えない。
  */
 export function applyEnvironment(backup, mode) {
-  // クライアントIDが入っていない（空の）ときは、この端末のクライアントIDを消さない
-  const remote = Object.fromEntries(Object.entries(backup.prefs || {}).filter(([k, v]) => !CLIENT_ID_PREFS.includes(k) || (typeof v === 'string' && v.trim())));
+  // クライアントIDは、前の版のファイルに入っていても使わない（この端末のクライアントIDをそのまま使う）
+  const remote = withoutClientIds(backup.prefs);
   const before = { provider: prefs.get('cloud.provider', null), ids: CLIENT_ID_PREFS.map((k) => prefs.get(k, '')) };
   if (mode === 'merge') mergeSharedPrefs(remote);
   else {
@@ -243,10 +243,9 @@ export async function restoreBackup(backup, mode) {
   for (const v of backup.versions || []) {
     if (v && v.id && v.projectId) await versions.put(v);
   }
-  const saved = sharedPrefs(backup.prefs);
+  // 前の版のファイルに入っているクライアントIDは使わない（この端末のクライアントIDをそのまま使う。applyEnvironment と同じ）
+  const saved = withoutClientIds(sharedPrefs(backup.prefs));
   for (const [key, value] of Object.entries(saved)) {
-    // 前の版のファイルに入っている空のクライアントIDで、この端末のクライアントIDを消さない（applyEnvironment と同じ）
-    if (CLIENT_ID_PREFS.includes(key) && !(typeof value === 'string' && value.trim())) continue;
     if (mode === 'merge' && LISTS_BY_ID.includes(key) && Array.isArray(value)) {
       // ひな型・TXTインポートの条件は、端末にあるものとまとめる（同じものはバックアップ側を使う）
       const mine = prefs.get(key, []) || [];
