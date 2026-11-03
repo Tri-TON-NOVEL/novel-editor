@@ -2310,6 +2310,13 @@ function ensureEdition(ep, site = editSite) {
       await migrateLegacyEditions(ep);
       const list = (await allEpisodeVersions(ep.id)).filter((v) => v.kind === 'episode' && v.site === site);
       let cur = list.find((v) => v.id === ep.editionIds?.[site]);
+      // 今の稿が見つからない（ほかの端末のバックアップを読み込んだが、その稿がファイルに入っていなかったなど）。
+      // 今の内容と同じ稿があれば、それを今の稿にする（表示や読み込みのたびに新しい番号の稿を作っていた）
+      if (!cur) {
+        const now = JSON.stringify(editionSnapshot(ep, site));
+        cur = sortEditions(list).find((v) => JSON.stringify(editionData(v.data)) === now) || null;
+        if (cur) { ep.editionIds = { ...(ep.editionIds || {}), [site]: cur.id }; quietSave(); }
+      }
       if (!cur) {
         cur = await saveEdition(ep, site, `第${nextEditionNo(list)}稿`);
         list.unshift(cur);
@@ -2343,6 +2350,8 @@ async function raiseEdition(ep = episode(), site = editSite) {
 }
 
 const versionLabel = (name, time, chars) => `${name}　${fmtTime(time)}　${Number(chars || 0).toLocaleString()}字`;
+// 一覧での稿の名前（最終稿には印を付ける）
+const editionTitle = (v) => `${v.final ? '【最終稿】' : ''}${v.name}`;
 // 今の稿の時刻：その稿を最後に書いた時刻
 const editionNowTime = (ep, site, v) => [ep.siteUpdatedAt?.[site], versionTime(v)].filter(Boolean).sort().pop();
 
@@ -2356,8 +2365,8 @@ async function renderEpisodeVersions() {
   const { list, cur } = await ensureEdition(ep, site);
   if (seq !== versionRenderSeq || ep !== episode() || site !== editSite) return; // あとから呼ばれた描画を優先する
   sel.replaceChildren(...sortEditions(list).map((v) => (v.id === cur.id
-    ? new Option(versionLabel(v.name, editionNowTime(ep, site, v), countChars(draftOf(ep, site).body).all), v.id)
-    : new Option(versionLabel(v.name, versionTime(v), v.chars), v.id))));
+    ? new Option(versionLabel(editionTitle(v), editionNowTime(ep, site, v), countChars(draftOf(ep, site).body).all), v.id)
+    : new Option(versionLabel(editionTitle(v), versionTime(v), v.chars), v.id))));
   sel.value = cur.id;
   sel.setAttribute('aria-label', `${SITES[site].short}用の稿`);
 }
@@ -2420,6 +2429,40 @@ async function deleteEpisodeVersion() {
   showEpisode();
   renderEpisodeList();
   toast(rest.length ? `「${cur.name}」を削除して、「${next.name}」を表示しました` : `「${cur.name}」を削除しました（${SITES[site].short}用は空の第1稿になりました）`);
+}
+
+// 「最終稿にする」：編集中のサイトの、今表示している稿を最終稿にする（一覧に【最終稿】と出る。最終稿はサイトごとに1つ）。
+// ほかの稿を削除するかどうかを選んでもらう。もう一方のサイトの稿・以前の版（6.0 より前）は変えない
+async function finalizeEpisodeVersion() {
+  await flush();
+  const ep = episode();
+  const site = editSite;
+  const other = SITE_KEYS.find((s) => s !== site);
+  const { list, cur } = await ensureEdition(ep, site);
+  const rest = list.filter((v) => v.id !== cur.id);
+  const chars = countChars(draftOf(ep, site).body).all;
+  const head = `${SITES[site].label}用の「${cur.name}」（本文 ${chars.toLocaleString()}字）を最終稿にします。`;
+  let removeRest = false;
+  if (rest.length) {
+    const how = await choose(`${head}\n\nほかの稿（${sortEditions(rest).map((v) => v.name).join('・')}、${rest.length}件）をどうしますか？\n`
+      + '・すべて削除：今表示している稿だけを残します。削除した稿は元に戻せません。\n'
+      + '・残す：ほかの稿はそのまま残し、今の稿に【最終稿】の印だけを付けます。\n'
+      + `${SITES[other].short}用の稿は、どちらでも変わりません。`,
+    [{ value: 'delete', label: 'すべて削除', danger: true }, { value: 'keep', label: '残す', primary: true }]);
+    if (!how) return;
+    removeRest = how === 'delete';
+  } else if (!(await ask(`${head}\n${SITES[other].short}用の稿は変わりません。`, { ok: '最終稿にする' }))) return;
+  const stored = await storeEdition(ep, site, cur);
+  await versions.put({ ...stored, final: true });
+  for (const v of rest) {
+    if (removeRest) await versions.remove(v.id);
+    else if (v.final) await versions.put({ ...v, final: false });
+  }
+  quietSave();
+  await renderEpisodeVersions();
+  toast(removeRest
+    ? `${SITES[site].short}用の「${cur.name}」を最終稿にして、ほかの稿（${rest.length}件）を削除しました`
+    : `${SITES[site].short}用の「${cur.name}」を最終稿にしました`);
 }
 
 async function episodeVersionUp() {
@@ -4986,6 +5029,7 @@ const actions = {
   'add-chapter': addChapterFromList,
   'ep-version-up': episodeVersionUp,
   'ep-version-delete': deleteEpisodeVersion,
+  'ep-version-final': finalizeEpisodeVersion,
   'open-report': () => setReportMode(true),
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,

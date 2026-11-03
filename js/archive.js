@@ -139,6 +139,7 @@ export async function makeArchive(plan = {}) {
 
   // 稿だけを少しずつ読む（作品全体の復元ポイントは読まない。iPhone で、一緒に読むとメモリが足りず落ちていた）
   const addVersions = async (p, item, accept = () => true) => {
+    const added = new Map(); // 稿の id → エピソードの id
     for (let after = null; ;) {
       const page = await versions.pageEditions(p.id, after, 25);
       for (const v of page) {
@@ -146,10 +147,30 @@ export async function makeArchive(plan = {}) {
         const id = await addBlock('version', item.key, v, blockMeta(v));
         item.blockIds.push(id);
         item.summary.versionCount++;
+        added.set(v.id, v.episodeId);
       }
       if (page.length < 25) break;
       after = page.at(-1);
     }
+    return added;
+  };
+
+  // エピソードの「今の稿」が、この作品のこのエピソードの稿として見つからなかったもの（別の作品・別の話から写したエピソードなど）も入れる。
+  // 入れないと、読み込んだ端末で今の稿が見つからず、新しい番号の稿が作られていた。
+  // 元の稿（ほかの作品のもの）を読み込みで書き換えないよう、この作品用の別の id にして入れ、エピソードもその id を指すようにする
+  const withStrayEditions = async (p, ep, item, added) => {
+    let out = ep;
+    for (const [site, id] of Object.entries(ep.editionIds || {})) {
+      if (!id || added.get(id) === ep.id) continue;
+      const v = await versions.get(id);
+      if (!v || isRestorePoint(v)) continue;
+      const fixed = { ...v, id: `${id}@${p.id}:${ep.id}`, projectId: p.id, episodeId: ep.id, site: v.site || site };
+      item.blockIds.push(await addBlock('version', item.key, fixed, blockMeta(fixed)));
+      item.summary.versionCount++;
+      added.set(fixed.id, ep.id);
+      out = { ...out, editionIds: { ...out.editionIds, [site]: fixed.id } };
+    }
+    return out;
   };
 
   const addWhole = async (p) => {
@@ -159,12 +180,12 @@ export async function makeArchive(plan = {}) {
     };
     const base = { ...p, episodes: [] };
     item.blockIds.push(await addBlock('project', item.key, base));
+    // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
+    const added = await addVersions(p, item);
     for (let order = 0; order < p.episodes.length; order++) {
-      const ep = p.episodes[order];
+      const ep = await withStrayEditions(p, p.episodes[order], item, added);
       item.blockIds.push(await addBlock('episode', item.key, ep, { episodeId: ep.id, order, title: epTitle(ep) }));
     }
-    // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
-    await addVersions(p, item);
     items.push(item);
   };
 
@@ -193,12 +214,15 @@ export async function makeArchive(plan = {}) {
         key: `episode:${p.workId}:${ep.id}`, type: 'episode', project: identity(p),
         chapter, order, episode: episodeBrief(ep), blockIds: [], summary: { versionCount: 0 },
       };
-      item.blockIds.push(await addBlock('episode', item.key, ep, { episodeId: ep.id, order, title: epTitle(ep) }));
+      const added = new Map(); // 稿の id → エピソードの id
       for (const v of editions.get(ep.id) || []) {
         item.blockIds.push(await addBlock('version', item.key, v, blockMeta(v)));
         item.summary.versionCount++;
+        added.set(v.id, v.episodeId);
       }
       editions.delete(ep.id);
+      const saved = await withStrayEditions(p, ep, item, added);
+      item.blockIds.push(await addBlock('episode', item.key, saved, { episodeId: ep.id, order, title: epTitle(ep) }));
       items.push(item);
     }
   };

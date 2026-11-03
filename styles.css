@@ -133,7 +133,7 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .cloud-folder-name { font-size: 13px; font-weight: 700; word-break: break-all; }
 
 /* エピソードの版 */
-.ep-version { display: inline-flex; gap: 4px; align-items: center; }
+.ep-version { display: inline-flex; flex-wrap: wrap; gap: 4px; align-items: center; max-width: 100%; }
 .ep-version select { width: auto; max-width: 240px; padding: 4px 8px; font-size: 14px; }
 #autobackup-status { margin: 0; font-size: 14px; }
 .autobackup-options { display: flex; flex-wrap: wrap; gap: 8px 16px; }
