@@ -99,6 +99,10 @@ function blockMeta(v) {
   };
 }
 
+// 作品全体の復元ポイント（その時点の作品まるごとのコピー）。バックアップには入れず、読み込みでも持ってこない
+// （app.js の isEpisodeVersion と同じ分け方：稿でないものは、作品全体の復元ポイント）
+export const isRestorePoint = (v) => !['episode', 'episode-legacy'].includes(v?.kind);
+
 /** plan は従来の makePack と同じ。戻り値は { blob, pack, index, itemCount }。 */
 export async function makeArchive(plan = {}) {
   let rawProjects;
@@ -158,7 +162,8 @@ export async function makeArchive(plan = {}) {
       const ep = p.episodes[order];
       item.blockIds.push(await addBlock('episode', item.key, ep, { episodeId: ep.id, order, title: epTitle(ep) }));
     }
-    await addVersions(p, item);
+    // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
+    await addVersions(p, item, (v) => !isRestorePoint(v));
     items.push(item);
   };
 
@@ -229,6 +234,10 @@ export async function makeArchive(plan = {}) {
 }
 
 export function packFromArchive(index) {
+  // 稿の件数は、読み込む分だけを数え直す（前の版のファイルには、作品全体の復元ポイントも入っている）
+  const editions = new Map();
+  for (const b of index.blocks || []) if (isEditionBlock(b)) editions.set(b.itemKey, (editions.get(b.itemKey) || 0) + 1);
+  const summaryOf = (item) => (item.summary && 'versionCount' in item.summary ? { ...item.summary, versionCount: editions.get(item.key) || 0 } : item.summary || {});
   return {
     format: ARCHIVE_FORMAT, version: index.version, schemaVersion: index.schemaVersion,
     createdAt: index.createdAt, appVersion: index.appVersion, reason: index.reason,
@@ -236,7 +245,7 @@ export function packFromArchive(index) {
     environment: index.environment ? { archiveSummary: index.environment.summary || [], present: true } : null,
     items: (index.items || []).map((item) => ({
       key: item.key, type: item.type, project: item.project, chapter: item.chapter,
-      order: item.order, episode: item.episode, summary: item.summary || {},
+      order: item.order, episode: item.episode, summary: summaryOf(item),
     })),
   };
 }
@@ -287,6 +296,8 @@ export function bufferedSource(source, windowBytes = 8 * 1024 * 1024) {
 const isVersionBlock = (b) => b.kind === 'version' || !!b.versionId;
 const blockKind = (b) => (isVersionBlock(b) ? 'version' : b.kind);
 const versionKindOf = (b) => b.versionKind ?? (b.kind === 'version' ? '' : b.kind);
+// 読み込む稿のブロック（前の版で作ったファイルに入っている、作品全体の復元ポイントは飛ばす）
+const isEditionBlock = (b) => isVersionBlock(b) && !isRestorePoint({ kind: versionKindOf(b) });
 
 export async function openArchive(source) {
   if (!source?.readRange) throw new ArchiveFormatError('バックアップの読み込み元がありません');
@@ -343,7 +354,7 @@ async function preserveLocalVersionNames(localProjectId, versionBlocks, episodeI
 }
 
 async function restoreVersions(archive, item, localProjectId, { remap = null, existing = false, episodeId = null } = {}) {
-  const blocks = blocksOf(archive, item).filter(isVersionBlock);
+  const blocks = blocksOf(archive, item).filter(isEditionBlock);
   if (existing) await preserveLocalVersionNames(localProjectId, blocks, episodeId);
   for (const block of blocks) {
     const v = await readArchiveBlock(archive, block);
@@ -389,7 +400,7 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
   for (const item of archive.index.items || []) {
     if (!use(item.key)) continue;
     const itemBlocks = blocksOf(archive, item);
-    const versionBlocks = itemBlocks.filter(isVersionBlock);
+    const versionBlocks = itemBlocks.filter(isEditionBlock);
 
     if (item.type === 'project') {
       const baseBlock = itemBlocks.find((b) => blockKind(b) === 'project');

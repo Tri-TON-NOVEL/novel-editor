@@ -32,7 +32,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.02-0.51';
+const APP_VERSION = '2026.11.03-0.52';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1823,7 +1823,7 @@ async function createBackupPack(btn = $('backup-pack-save')) {
 // 新しい形式（.ayabackup）の項目は索引の見出しだけを持つ（本文などは読み込むときにその項目だけ展開する）
 function archivedItemDetail(item) {
   if (item.type === 'project') {
-    return [`作品全体：${item.project?.title || '無題'}`, `エピソード：${item.summary?.episodeCount || 0}話`, `稿・履歴：${item.summary?.versionCount || 0}件`, `更新：${fmtTime(item.project?.updatedAt)}`].join('\n');
+    return [`作品全体：${item.project?.title || '無題'}`, `エピソード：${item.summary?.episodeCount || 0}話`, `稿：${item.summary?.versionCount || 0}件（作品全体の復元ポイントは含めません）`, `更新：${fmtTime(item.project?.updatedAt)}`].join('\n');
   }
   if (item.type === 'materials') return `作品資料：${item.project?.title || '無題'}\n中身は、読み込むときにこの項目だけを展開します。`;
   const ep = item.episode || {};

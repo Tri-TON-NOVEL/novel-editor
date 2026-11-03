@@ -360,7 +360,8 @@ export async function makePack(plan = {}) {
   // db.all()・versions.list() はどちらも読み出したばかりの別の物なので、ここで書き換えられる心配はない（iPhone のメモリを節約するため）
   const addWhole = async (p) => items.push({
     key: `project:${p.workId}`, type: 'project', project: p,
-    versions: await versionsOf(p),
+    // 作品全体の復元ポイント（作品まるごとのコピー）は入れない。稿だけを入れる
+    versions: (await versionsOf(p)).filter((v) => ['episode', 'episode-legacy'].includes(v?.kind)),
   });
   const addMaterials = (p) => items.push({
     key: `materials:${p.workId}`, type: 'materials', project: projectIdentity(p), data: projectMaterials(p),
@@ -754,7 +755,8 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
       const localId = existing?.id || makeId();
       const links = existing?.links || {};
       const restored = normalize({ ...clone(src), id: localId, links, workId: asNew ? makeId() : src.workId });
-      let versionValues = item.versions || [];
+      // 作品全体の復元ポイント（作品まるごとのコピー）は持ってこない。稿だけを読み込む
+      let versionValues = (item.versions || []).filter((v) => ['episode', 'episode-legacy'].includes(v?.kind));
       if (asNew || !existing) {
         const remapped = remapVersions(versionValues, localId);
         versionValues = remapped.values;
