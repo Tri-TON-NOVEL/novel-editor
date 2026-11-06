@@ -6,6 +6,7 @@
 const hasFsa = 'showOpenFilePicker' in window && 'showSaveFilePicker' in window;
 // iPadOS の Safari は Mac と名乗るので、タッチ対応かどうかでも見分ける
 const isAppleTouch = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = /Android/.test(navigator.userAgent);
 
 function canShareFile(file) {
   try { return !!navigator.canShare && navigator.canShare({ files: [file] }); } catch { return false; }
@@ -47,7 +48,8 @@ export const localFile = {
       backup: { 'application/x-ayatuzuri-backup': ['.ayabackup'], 'application/json': ['.json'] },
       any: { 'application/json': ['.json'], 'text/plain': ['.txt'] },
     }[kind];
-    if (hasFsa) {
+    // Android は、知らない拡張子（.ayabackup）を絞り込みに入れると選べなくなることがあるので、バックアップは絞らない画面で選ぶ（iPhone・iPad と同じ）
+    if (hasFsa && !(isAndroid && kind === 'backup')) {
       let handle;
       try {
         [handle] = await window.showOpenFilePicker({ types: [{ description: kind === 'txt' ? 'テキスト' : 'あや綴りのファイル', accept: accepts }] });
@@ -62,7 +64,7 @@ export const localFile = {
     return new Promise((resolve, reject) => {
       const input = document.createElement('input');
       input.type = 'file';
-      // iPhone・iPad は、知らない拡張子（.ayabackup）を accept に入れると選べなくなることがあるので、バックアップでは絞らない
+      // iPhone・iPad・Android は、知らない拡張子（.ayabackup）を accept に入れると選べなくなることがあるので、バックアップでは絞らない
       if (kind !== 'backup') input.accept = Object.entries(accepts).flatMap(([mime, exts]) => [...exts, mime]).join(',');
       input.hidden = true;
       document.body.appendChild(input);

@@ -140,6 +140,7 @@ function trimBlankLines(arr) {
 //   'block'     この行から、次の見出しか次の話の区切りまでを塊ごと消す（例：【リアクション】）
 //   'foreword'  この行は消し、次の見出しまでを前書きにする
 //   'afterword' この行は消し、次の見出しまでを後書きにする
+//   'synopsis'  この行は消し、次の見出しまでを作品情報（あらすじ欄に入れる行）にする
 // 話・章の区切り行（marks）で塊は終わる。
 
 export const CLEANUP_ACTIONS = [
@@ -148,12 +149,13 @@ export const CLEANUP_ACTIONS = [
   ['block', 'この行から塊ごと消す'],
   ['foreword', '塊を前書きにする（行は消す）'],
   ['afterword', '塊を後書きにする（行は消す）'],
+  ['synopsis', '塊を作品のあらすじにする（行は消す）'],
   ['keep', '残す'],
 ];
 
 /**
  * 行ごとの扱いを返す。戻り値：配列
- *   null＝そのまま、'line'・'block'＝取り込まない、'title'＝話のタイトル、'foreword'・'afterword'＝その欄へ
+ *   null＝そのまま、'line'・'block'＝取り込まない、'title'＝話のタイトル、'foreword'・'afterword'・'synopsis'＝その欄へ
  */
 export function headingMask(lines, cleanup, marks = new Map()) {
   const mask = new Array(lines.length).fill(null);
@@ -173,7 +175,7 @@ export function headingMask(lines, cleanup, marks = new Map()) {
       if (action === 'keep') { mode = null; continue; }
       mask[i] = 'line';
       wantTitle = action === 'title';
-      mode = action === 'block' ? 'block' : action === 'foreword' ? 'foreword' : action === 'afterword' ? 'afterword' : null;
+      mode = ['block', 'foreword', 'afterword', 'synopsis'].includes(action) ? action : null;
       continue;
     }
     // 「次の行をタイトルに」の見出しのあと、最初の空でない行がタイトル
@@ -191,6 +193,7 @@ export function headingMask(lines, cleanup, marks = new Map()) {
  *   episodePrefix / chapterPrefix: タイトルから外す区切り記号（前方一致の条件のとき）,
  *   separator: 前書き・後書きの区切り行の条件（rule。なければ分けない）,
  *   mask: headingMask の結果（消す行・タイトル・前書き／後書きにする行）,
+ *   workTitleFromEpisode: 作品名の候補を、先頭の行ではなく最初の話のタイトルにする（短編）,
  * }
  * 話の区切り線のすぐあとに章の見出しがある場合（区切り線 → 【第１章】 → 小タイトル → 【エピソードタイトル】 …）も、
  * 章の見出しのあとに話の区切り線がある場合も、どちらでも分けられる。
@@ -206,7 +209,9 @@ export function buildEpisodes(lines, marks, opts = {}) {
   const chapters = [];
   const episodes = [];
   const firstMark = points.length ? points[0][0] : lines.length;
-  const headLines = trimBlankLines(textOf(range(0, firstMark).filter((i) => !mask[i])));
+  // 区切りより後ろにある【あらすじ】（短編）も、作品情報として扱う
+  const synopsisIdx = range(0, lines.length).filter((i) => mask[i] === 'synopsis');
+  const headLines = trimBlankLines(textOf([...range(0, firstMark).filter((i) => !mask[i]), ...synopsisIdx]));
   let chapterIndex = null;
   let pending = null; // 区切り線のあと中身がなく、すぐ章の見出しが来た話（{ line, title }）
 
@@ -317,7 +322,9 @@ export function buildEpisodes(lines, marks, opts = {}) {
     makeEpisode(start, title, rest, foreIdx, afterIdx);
   }
   if (pending) makeEpisode(pending.line, pending.title, [], [], []);
-  const headTitle = headLines.find((l) => l.trim())?.trim() || '';
+  const headTitle = opts.workTitleFromEpisode
+    ? episodes[0]?.title || ''
+    : headLines.find((l) => l.trim())?.trim() || '';
   return { head: { title: headTitle, lines: headLines }, chapters, episodes };
 }
 
@@ -588,6 +595,30 @@ export function detectMarksFromTitleList(sourceLines, listText, templateText) {
   return { marks, records };
 }
 
+// なろうのダウンロード TXT の作品情報。このエディターに入れる場所がないので、塊ごと消す
+// （Nコード・ユーザ情報は取り込む前の照合には使う）
+const NAROU_INFO_RULES = [
+  { text: '【ユーザ情報】', method: 'exact', action: 'block' },
+  { text: '【Nコード】', method: 'exact', action: 'block' },
+  { text: '【種別】', method: 'exact', action: 'block' },
+  { text: '【完結設定】', method: 'exact', action: 'block' },
+  { text: '【年齢制限】', method: 'exact', action: 'block' },
+  { text: '【ジャンル】', method: 'exact', action: 'block' },
+  { text: '【作品に含まれる要素】', method: 'exact', action: 'block' },
+  { text: '【キーワード】', method: 'exact', action: 'block' },
+  { text: '【掲載エピソード数】', method: 'exact', action: 'block' },
+  { text: '【初回掲載日時】', method: 'exact', action: 'block' },
+  { text: '【最終掲載日時】', method: 'exact', action: 'block' },
+  { text: '【感想受付】', method: 'exact', action: 'block' },
+  { text: '【レビュー受付】', method: 'exact', action: 'block' },
+  { text: '【評価受付】', method: 'exact', action: 'block' },
+  { text: '【開示設定】', method: 'exact', action: 'block' },
+  { text: '【評価】', method: 'exact', action: 'block' },
+  { text: '【収益情報】', method: 'exact', action: 'block' },
+];
+// ダウンロードTXT末尾の免責文と作成日時は作品本文ではないため、ここから末尾まで取り込まない
+const NAROU_DISCLAIMER_RULE = { text: '本テキストデータの利用によって発生する如何なる案件につきましても、株式会社ヒナプロジェクト及びその関連グループは一切の責任を負いません。', method: 'prefix', action: 'block' };
+
 export const PRESETS = [
   {
     // なろうからダウンロードした TXT：
@@ -617,26 +648,44 @@ export const PRESETS = [
           // 【エピソードタイトル】の次の行が話のタイトル
           { text: '【エピソードタイトル】', method: 'exact', action: 'title' },
           { text: '【リアクション】', method: 'exact', action: 'block' },
-          // このエディターに入れる場所がない作品情報は、塊ごと消す（Nコード・ユーザ情報は取り込む前の照合には使う）
-          { text: '【ユーザ情報】', method: 'exact', action: 'block' },
-          { text: '【Nコード】', method: 'exact', action: 'block' },
-          { text: '【種別】', method: 'exact', action: 'block' },
-          { text: '【完結設定】', method: 'exact', action: 'block' },
-          { text: '【年齢制限】', method: 'exact', action: 'block' },
-          { text: '【ジャンル】', method: 'exact', action: 'block' },
-          { text: '【作品に含まれる要素】', method: 'exact', action: 'block' },
-          { text: '【キーワード】', method: 'exact', action: 'block' },
-          { text: '【掲載エピソード数】', method: 'exact', action: 'block' },
-          { text: '【初回掲載日時】', method: 'exact', action: 'block' },
-          { text: '【最終掲載日時】', method: 'exact', action: 'block' },
-          { text: '【感想受付】', method: 'exact', action: 'block' },
-          { text: '【レビュー受付】', method: 'exact', action: 'block' },
-          { text: '【評価受付】', method: 'exact', action: 'block' },
-          { text: '【開示設定】', method: 'exact', action: 'block' },
-          { text: '【評価】', method: 'exact', action: 'block' },
-          { text: '【収益情報】', method: 'exact', action: 'block' },
-          // ダウンロードTXT末尾の免責文と作成日時は作品本文ではないため、ここから末尾まで取り込まない
-          { text: '本テキストデータの利用によって発生する如何なる案件につきましても、株式会社ヒナプロジェクト及びその関連グループは一切の責任を負いません。', method: 'prefix', action: 'block' },
+          ...NAROU_INFO_RULES,
+          NAROU_DISCLAIMER_RULE,
+          { text: '【前書き】', method: 'exact', action: 'foreword' },
+          { text: '【後書き】', method: 'exact', action: 'afterword' },
+        ],
+      },
+    },
+  },
+  {
+    // なろうからダウンロードした短編の TXT：区切り線はなく、全体で1話
+    //   【ユーザ情報】【Nコード】 …（取り込まない）
+    //   【タイトル】        ← ここから1話。次の行が話のタイトル（作品名にもする）
+    //   タイトル
+    //   【作者名】 …（取り込まない）
+    //   【あらすじ】        ← 作品のあらすじ欄へ
+    //   【前書き】 【本文】 【後書き】
+    //   【免責事項】 …（取り込まない）
+    id: 'narou-download-short',
+    name: 'なろう：ダウンロードTXT（短編）',
+    site: 'narou',
+    type: 'rules',
+    rules: {
+      workTitle: 'episode',
+      episode: { enabled: true, pattern: '【タイトル】', position: 'start', method: 'exact', title: 'exclude' },
+      chapter: { enabled: false, pattern: '', position: 'start', method: 'prefix', title: 'include' },
+      separator: { enabled: false, pattern: '^[\\s\\u3000]*[＊*◇◆☆★]{3,}[\\s\\u3000]*$', position: 'start', method: 'regex' },
+      cleanup: {
+        enabled: true,
+        pattern: '^[\\s\\u3000]*【[^】]+】[\\s\\u3000]*$',
+        defaultAction: 'line',
+        rules: [
+          { text: '【リアクション】', method: 'exact', action: 'block' },
+          ...NAROU_INFO_RULES,
+          { text: '【作者名】', method: 'exact', action: 'block' },
+          { text: '【掲載日時】', method: 'exact', action: 'block' },
+          { text: '【免責事項】', method: 'exact', action: 'block' },
+          NAROU_DISCLAIMER_RULE,
+          { text: '【あらすじ】', method: 'exact', action: 'synopsis' },
           { text: '【前書き】', method: 'exact', action: 'foreword' },
           { text: '【後書き】', method: 'exact', action: 'afterword' },
         ],

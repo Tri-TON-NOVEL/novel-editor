@@ -501,8 +501,8 @@ export function initImport(ctx) {
     box.replaceChildren(frag);
   }
 
-  const MASK_CLASS = { line: ' cut-line', block: ' cut-block', foreword: ' to-foreword', afterword: ' to-afterword', title: ' to-title' };
-  const MASK_TAG = { line: '消す', block: '消す', foreword: '前書き', afterword: '後書き', title: '題名' };
+  const MASK_CLASS = { line: ' cut-line', block: ' cut-block', foreword: ' to-foreword', afterword: ' to-afterword', synopsis: ' to-foreword', title: ' to-title' };
+  const MASK_TAG = { line: '消す', block: '消す', foreword: '前書き', afterword: '後書き', synopsis: 'あらすじ', title: '題名' };
 
   function renderMarks() {
     const m = merged();
@@ -544,6 +544,7 @@ export function initImport(ctx) {
       chapterPrefix: prefixOf(r.chapter),
       separator: r.separator?.enabled ? r.separator : null,
       mask: currentMask(),
+      workTitleFromEpisode: r.workTitle === 'episode',
     });
   }
 

@@ -32,7 +32,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.03-0.52';
+const APP_VERSION = '2026.11.06-0.54';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2911,11 +2911,11 @@ function applyBackupView() {
 }
 
 // 保存先のファイルの中身を読むのは、同時に3件まで（一覧を開いたときに通信が詰まらないように）。
-// iPhone はメモリが少ないので1件ずつ（全作品のパックのような大きいファイルを同時に読むと、アプリが落ちることがある）
-const BACKUP_READ_LIMIT = /iPhone|iPod/.test(navigator.userAgent) ? 1 : 3;
+// iPhone・Android はメモリが少ないことがあるので1件ずつ（全作品のパックのような大きいファイルを同時に読むと、アプリが落ちることがある）
+const BACKUP_READ_LIMIT = /iPhone|iPod|Android/.test(navigator.userAgent) ? 1 : 3;
 // 前の版の .json は、一覧ではファイルの先頭のこれだけを読む（管理情報は先頭にある。本文・稿は読まない）
 const BACKUP_HEAD_BYTES = 256 * 1024;
-// 管理情報が先頭にない古い形のファイルは、これより大きければ iPhone では一覧で中身を読まない（丸ごと読むと落ちることがあるため）
+// 管理情報が先頭にない古い形のファイルは、これより大きければ iPhone・Android では一覧で中身を読まない（丸ごと読むと落ちることがあるため）
 const BACKUP_FULL_READ_MAX = BACKUP_READ_LIMIT === 1 ? 2 * 1024 * 1024 : Infinity;
 // 前の版（0.50 まで）のバックアップは .json。新しい形式は .ayabackup
 const isLegacyBackupName = (name) => /\.json$/i.test(name || '');
@@ -4605,14 +4605,17 @@ function bindProjectNavOrder() {
 const MAX_LABELS = { title: 'エピソードタイトル', body: '本文', foreword: '前書き', afterword: '後書き', plot: 'プロット', memo: 'フリーメモ' };
 let maximized = null; // { box, input }
 
-// iPhone だけの設定：最大化したときの入力欄の高さ（キーボードの上の部分に隠れないように）
-//   prefs 'iphone.maxHeight' = { mode: 'auto'（見えている範囲いっぱい）| 'half'（画面の縦の半分）| 'px', px }
+// iPhone・Android だけの設定：最大化したときの入力欄の高さ（キーボードの上の部分に隠れないように）
+//   prefs 'iphone.maxHeight'／'android.maxHeight' = { mode: 'auto'（見えている範囲いっぱい）| 'half'（画面の縦の半分）| 'px', px }
+//   Android の分はバックアップに入れない（入れると、環境を読み込んだ端末の設定を変えてしまう）
 const isIPhone = () => /iPhone|iPod/.test(navigator.userAgent);
+const isAndroid = () => /Android/.test(navigator.userAgent);
+const maxHeightKey = () => (isAndroid() ? 'android.maxHeight' : 'iphone.maxHeight');
 const IPHONE_MAX_DEFAULT = { mode: 'auto', px: 360 };
 
 function iphoneMaxHeight() {
-  if (!isIPhone()) return null;
-  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get('iphone.maxHeight', {}) };
+  if (!isIPhone() && !isAndroid()) return null;
+  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get(maxHeightKey(), {}) };
   const screenH = window.innerHeight || document.documentElement.clientHeight;
   if (s.mode === 'half') return Math.round(screenH / 2);
   if (s.mode === 'px') return Math.min(screenH, Math.max(120, Number(s.px) || IPHONE_MAX_DEFAULT.px));
@@ -4620,8 +4623,9 @@ function iphoneMaxHeight() {
 }
 
 function renderIphoneMaxSettings() {
-  $('iphone-max').hidden = !isIPhone();
-  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get('iphone.maxHeight', {}) };
+  $('iphone-max').hidden = !isIPhone() && !isAndroid();
+  if (isAndroid()) $('iphone-max').querySelector('legend').textContent = 'Android：最大化したときの入力欄の高さ';
+  const s = { ...IPHONE_MAX_DEFAULT, ...prefs.get(maxHeightKey(), {}) };
   $('iphone-max-mode').value = s.mode;
   $('iphone-max-px').value = String(s.px);
   $('iphone-max-px-row').hidden = s.mode !== 'px';
@@ -4629,7 +4633,7 @@ function renderIphoneMaxSettings() {
 
 function saveIphoneMaxSettings() {
   const px = Math.min(2000, Math.max(120, Number($('iphone-max-px').value) || IPHONE_MAX_DEFAULT.px));
-  prefs.set('iphone.maxHeight', { mode: $('iphone-max-mode').value, px });
+  prefs.set(maxHeightKey(), { mode: $('iphone-max-mode').value, px });
   $('iphone-max-px-row').hidden = $('iphone-max-mode').value !== 'px';
   fitVisualViewport();
 }
