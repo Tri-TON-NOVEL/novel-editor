@@ -336,7 +336,7 @@ const USER_LABEL = /ユーザー?情報|ユーザー?ID|ユーザー?名|作者/
 
 /**
  * TXT の中の【Nコード】【ユーザ情報】などの塊を読む（最初に出てきたものだけ）。
- * 戻り値 { ncode（見つかった Nコード。小文字）, ncodeText, userText（ユーザ情報・作者の塊の文字）, title（【タイトル】の作品名）, labels（見つかった見出し） }
+ * 戻り値 { ncode（見つかった Nコード。小文字）, ncodeText, userText（ユーザ情報・作者の塊の文字）, labels（見つかった見出し） }
  */
 export function extractSiteInfo(lines) {
   const blocks = new Map();
@@ -359,7 +359,6 @@ export function extractSiteInfo(lines) {
     ncode: (NCODE.exec(ncodeText) || [])[0]?.toLowerCase() || '',
     ncodeText,
     userText,
-    title: (blocks.get('タイトル') || '').split('\n')[0].trim(),
     labels: [...blocks.keys()],
   };
 }
