@@ -67,7 +67,7 @@ export function initImport(ctx) {
       presetId: preset.id, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: '', titleListFileName: '',
       auto: new Map(), manual: new Map(),
-      result: null, rows: [], actionFilter: 'all', workTitle: '', useHead: true, step: 1, siteInfo: null, mismatches: [],
+      result: null, rows: [], actionFilter: 'all', workTitle: '', workTitleEdited: false, txtTitle: '', useHead: true, step: 1, siteInfo: null, mismatches: [],
     };
   }
 
@@ -166,6 +166,9 @@ export function initImport(ctx) {
     state.lines = I.splitLines(state.text);
     state.manual = new Map();
     state.auto = new Map();
+    // ファイルを選び直したら、作品名も新しいファイルから読み直す
+    state.workTitle = '';
+    state.workTitleEdited = false;
     showDecodeInfo();
     buildLineRows();
     updateNextButton();
@@ -635,9 +638,12 @@ export function initImport(ctx) {
       return { it, dup, include: true, action, target: dup.target };
     });
     state.targetProject = target;
-    if (!state.workTitle || state.target !== 'new') state.workTitle = result.head.title || state.fileName.replace(/\.[^.]+$/, '');
     // TXT の【ユーザ情報】【Nコード】と、設定に登録したアカウント・取り込み先の作品の Nコードを照合する
     state.siteInfo = I.extractSiteInfo(state.lines);
+    // 作品名：TXT の【タイトル】（なければ先頭の行、それもなければファイル名）。プレビューで書き換えた名前で登録する。
+    // 既存の作品へ取り込むときは、勝手に名前を変えないよう、今の作品名から始める
+    state.txtTitle = state.siteInfo.title || result.head.title || state.fileName.replace(/^.*／\s*/, '').replace(/\.[^.]+$/, '');
+    if (!state.workTitleEdited) state.workTitle = target ? (target.title || '') : state.txtTitle;
     const account = (ctx.prefs.get('accounts', {}) || {})[state.site] || {};
     state.mismatches = I.checkSiteInfo(state.siteInfo, account, state.site === 'narou' ? target?.narouNcode : '');
     // TXT の Nコードが対応付けられている作品（取り込み先とは別のとき）
@@ -686,14 +692,19 @@ export function initImport(ctx) {
     const s = I.summarize(result);
     const sum = $('imp-summary');
     sum.replaceChildren();
-    if (!target) {
-      const l = Object.assign(document.createElement('label'), { textContent: '作品名' });
-      const input = Object.assign(document.createElement('input'), { type: 'text', value: state.workTitle });
-      input.addEventListener('input', () => { state.workTitle = input.value; });
-      l.append(input);
-      sum.append(l);
-    } else {
+    // 作品名（この欄の名前で登録する）
+    const l = Object.assign(document.createElement('label'), { className: 'imp-work-title', textContent: target ? '作品名（取り込み先の作品名。書き換えると変わります）' : '作品名（TXT から読み込み。書き換えられます）' });
+    const input = Object.assign(document.createElement('input'), { type: 'text', value: state.workTitle, placeholder: '（無題）' });
+    input.addEventListener('input', () => { state.workTitle = input.value; state.workTitleEdited = true; });
+    l.append(input);
+    sum.append(l);
+    if (target) {
       sum.append(Object.assign(document.createElement('div'), { className: 'stat', textContent: `取り込み先：${target.title || '（無題）'}（${SITES[state.site].short}用の原稿）` }));
+      if (state.txtTitle && state.txtTitle !== (target.title || '')) {
+        const use = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: `TXT の作品名「${state.txtTitle}」にする` });
+        use.addEventListener('click', () => { input.value = state.txtTitle; state.workTitle = state.txtTitle; state.workTitleEdited = true; });
+        sum.append(use);
+      }
     }
     if (state.mismatches.length) {
       sum.append(Object.assign(document.createElement('div'), {
@@ -902,7 +913,9 @@ export function initImport(ctx) {
     const c = counts();
     if (!(c.add + c.overwrite)) return;
     const target = state.targetProject;
-    const name = target ? (target.title || '（無題）') : (state.workTitle || '（無題）');
+    const title = (state.workTitle || '').trim();
+    const rename = target && title && title !== (target.title || '');
+    const name = (rename ? `${target.title || '（無題）'}（作品名を「${title}」に変更）` : target ? target.title : title) || '（無題）';
     // 登録と違う情報があれば、先に警告する（OK で続ける／キャンセルで中止）
     if (state.mismatches.length && !(await ask(`⚠ TXT の情報が、設定に登録した内容と違います。\n${mismatchText()}\n\n別のアカウント・別の作品の TXT かもしれません。このまま取り込みますか？`, { danger: true, ok: '取り込む' }))) return;
     if (!(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `（うち未対応 ${c.errors}話）` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
@@ -926,7 +939,7 @@ export function initImport(ctx) {
           data: JSON.parse(serialize(p)).project,
         });
       } else {
-        p = newProject({ title: state.workTitle, site: state.site });
+        p = newProject({ title, site: state.site });
         p.chapters = [];
         p.episodes = [];
       }
@@ -964,6 +977,8 @@ export function initImport(ctx) {
       const pos = new Map(p.chapters.map((ch, i) => [ch.id, i]));
       p.episodes = p.episodes.map((e, i) => ({ e, i, k: pos.has(e.chapterId) ? pos.get(e.chapterId) : Infinity }))
         .sort((a, b) => a.k - b.k || a.i - b.i).map((x) => x.e);
+      // プレビューで書き換えた作品名（既存の作品は、書き換えたときだけ変える）
+      if (rename) p.title = title;
       // 先頭の未解析の行（タイトル行以外）をあらすじへ
       if (state.useHead && state.result.head.lines.length) {
         const lines = state.result.head.lines.filter((l, i) => !(i === state.result.head.lines.findIndex((x) => x.trim()) && l.trim() === state.result.head.title));
@@ -1081,6 +1096,7 @@ export function initImport(ctx) {
   $('imp-target').addEventListener('change', (e) => {
     state.target = e.target.value;
     state.strictMatch = state.target !== 'new';
+    state.workTitleEdited = false; // 取り込み先を変えたら、作品名の初期値も選び直す
     updateStrictMatchRow();
     saveSession();
   });
