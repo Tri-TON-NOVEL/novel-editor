@@ -264,6 +264,11 @@ export function initImport(ctx) {
     state.template = format.template || I.ALPHA_TITLE_LIST_TEMPLATE;
     state.auto = new Map();
     state.manual = new Map();
+    // 標準の書式はサイトが決まっているので、「取り込む原稿」もそれに合わせる（前回の選択を持ち越さない）
+    if (format.site) {
+      state.site = format.site;
+      $('imp-site').value = state.site;
+    }
     showTitleListSource();
   }
 
@@ -606,8 +611,12 @@ export function initImport(ctx) {
     const target = await targetProject();
     const items = result.episodes.map((e) => ({ ...e, chapterTitle: e.chapter === null ? '' : result.chapters[e.chapter]?.title || '' }));
     let dups = items.map((it) => ({ kind: 'none', target: null, action: 'add', hash: I.textHash(it.body) }));
+    const other = SITE_KEYS.find((s) => s !== state.site);
+    const hasDraft = (e, s) => { const d = draftOf(e, s); return !!((d.title || '').trim() || (d.body || '').trim()); };
+    // 別サイト版を足すときか（取り込み先に、もう一方のサイトの原稿だけがある話がある）。
+    // 同じサイトの TXT で更新するとき（なろう版の作品になろうの TXT など）は、増えた話はふつうに追加する
+    state.crossSite = !!target && target.episodes.some((e) => hasDraft(e, other) && !hasDraft(e, state.site));
     if (target) {
-      const other = SITE_KEYS.find((s) => s !== state.site);
       const existing = target.episodes.map((e) => ({
         id: e.id,
         // 取り込むサイト側のタイトルがなければ、もう一方のタイトルで照合する（なろう版にアルファ版を足すときなど）
@@ -622,7 +631,7 @@ export function initImport(ctx) {
       const dup = dups[i];
       // 別サイト版を既存作品へ足すとき、対応先が見つからない話を勝手に新規追加しない。
       // プレビューでエラーを示し、手動指定・新規追加・スキップを利用者が選べるようにする。
-      const action = target && state.strictMatch && dup.kind === 'none' ? 'unmatched' : dup.action;
+      const action = target && state.strictMatch && state.crossSite && dup.kind === 'none' ? 'unmatched' : dup.action;
       return { it, dup, include: true, action, target: dup.target };
     });
     state.targetProject = target;
@@ -638,6 +647,18 @@ export function initImport(ctx) {
       : null;
     // 同じ Nコードの作品があるときは、続行を選ぶまで取り込まない（別の小説として登録する余地は残す）
     state.ncodeAck = false;
+    // TXT の見た目と「取り込む原稿」が食い違うとき（なろうの TXT をアルファ用に、など）は、選び直すか続行を選ぶまで取り込まない
+    const looks = txtSite();
+    state.siteMismatch = looks && looks !== state.site ? looks : null;
+    state.siteAck = false;
+  }
+
+  // TXT がどちらのサイトのものに見えるか：'narou'／'alpha'／null（分からない）
+  function txtSite() {
+    if (state.type === 'title-list') return 'alpha';
+    const labels = state.siteInfo?.labels || [];
+    if (state.siteInfo?.ncode || labels.some((l) => /^(Nコード|エピソードタイトル|ユーザ情報)$/.test(l))) return 'narou';
+    return null;
   }
 
   function mismatchText() {
@@ -679,6 +700,31 @@ export function initImport(ctx) {
         className: 'imp-info warn imp-mismatch',
         textContent: `⚠ TXT の情報が、設定（投稿サイト）に登録した内容と違います。別のアカウント・別の作品の TXT かもしれません。\n${mismatchText()}`,
       }));
+    }
+    if (state.siteMismatch) {
+      const looks = SITES[state.siteMismatch].short;
+      const now = SITES[state.site].short;
+      const box = Object.assign(document.createElement('div'), {
+        className: 'imp-info warn imp-site-mismatch',
+        textContent: `⚠ この TXT は${looks}の TXT に見えますが、「取り込む原稿」が「${now}用」になっています（前回の選択が残っていることがあります）。\n`,
+      });
+      const fix = Object.assign(document.createElement('button'), { type: 'button', className: 'tool primary', textContent: `${looks}用に切り替える` });
+      fix.addEventListener('click', () => ctx.withBusy('プレビューを作り直しています…', async () => {
+        state.site = state.siteMismatch;
+        $('imp-site').value = state.site;
+        ctx.prefs.set('importSite', state.site);
+        await go(4);
+      }).catch(ctx.fail));
+      const keep = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: `このまま${now}用として取り込む` });
+      keep.addEventListener('click', () => {
+        state.siteAck = true;
+        fix.disabled = true;
+        keep.disabled = true;
+        keep.textContent = `このまま${now}用として取り込む（選びました）`;
+        updateCommitSummary();
+      });
+      box.append(fix, ' ', keep);
+      sum.append(box);
     }
     if (state.ncodeOwner) {
       const label = target ? `「${target.title || '（無題）'}」への取り込みを続行` : '別の小説として登録を続行';
@@ -840,9 +886,11 @@ export function initImport(ctx) {
 
   function updateCommitSummary() {
     const c = counts();
-    const waiting = state.ncodeOwner && !state.ncodeAck;
+    const siteWaiting = state.siteMismatch && !state.siteAck;
+    const waiting = siteWaiting || (state.ncodeOwner && !state.ncodeAck);
     $('imp-commit-summary').textContent = `追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `・未対応 ${c.errors}話` : ''}`
-      + (waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
+      + (siteWaiting ? '（「取り込む原稿」を確かめてください。上のボタンで選ぶと取り込めます）'
+        : waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
     $('imp-commit').disabled = !(c.add + c.overwrite) || waiting;
     updateCorrespondenceErrors();
     applyActionFilter();
@@ -970,7 +1018,8 @@ export function initImport(ctx) {
 
   async function open() {
     state = fresh();
-    state.site = ctx.prefs.get('importSite', ctx.getProject()?.site || formatOf(state.presetId)?.site || 'narou');
+    // 標準の書式ならそのサイト。自分で保存した書式（サイトを持たない）なら、前に選んだもの
+    state.site = formatOf(state.presetId)?.site || ctx.prefs.get('importSite', ctx.getProject()?.site || 'narou');
     $('imp-site').value = state.site;
     $('imp-type').value = state.type;
     fillPresets();
