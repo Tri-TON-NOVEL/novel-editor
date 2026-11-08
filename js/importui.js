@@ -636,6 +636,8 @@ export function initImport(ctx) {
     state.ncodeOwner = code && target?.narouNcode !== code
       ? (await ctx.db.all()).find((p) => p.id !== target?.id && (p.narouNcode || '').toLowerCase() === code) || null
       : null;
+    // 同じ Nコードの作品があるときは、続行を選ぶまで取り込まない（別の小説として登録する余地は残す）
+    state.ncodeAck = false;
   }
 
   function mismatchText() {
@@ -679,10 +681,20 @@ export function initImport(ctx) {
       }));
     }
     if (state.ncodeOwner) {
-      sum.append(Object.assign(document.createElement('div'), {
-        className: 'imp-info warn',
-        textContent: `⚠ この TXT の Nコード（${state.siteInfo.ncode}）は、作品「${state.ncodeOwner.title || '（無題）'}」に対応付けられています。その作品に取り込むなら、最初の画面で取り込み先を選び直してください。`,
-      }));
+      const label = target ? `「${target.title || '（無題）'}」への取り込みを続行` : '別の小説として登録を続行';
+      const box = Object.assign(document.createElement('div'), {
+        className: 'imp-info warn imp-ncode-owner',
+        textContent: `⚠ この TXT の Nコード（${state.siteInfo.ncode}）は、作品「${state.ncodeOwner.title || '（無題）'}」に対応付けられています。その作品に取り込むなら、最初の画面で取り込み先を選び直してください。${target ? 'このまま選んだ作品に取り込むなら' : '同じ小説をもう一つ別の作品として登録するなら'}、「${label}」を押してください。\n`,
+      });
+      const go = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: label });
+      go.addEventListener('click', () => {
+        state.ncodeAck = true;
+        go.disabled = true;
+        go.textContent = `${label}（選びました）`;
+        updateCommitSummary();
+      });
+      box.append(go);
+      sum.append(box);
     }
     if (target && state.strictMatch) {
       sum.append(Object.assign(document.createElement('div'), {
@@ -758,7 +770,11 @@ export function initImport(ctx) {
       inc.addEventListener('change', () => { row.include = inc.checked; r.classList.toggle('excluded', !row.include); updateCommitSummary(); });
       td(inc);
       td(it.chapterTitle || '未分類');
-      td(it.title || '（タイトルなし）');
+      // 話のタイトルは、ここで書き換えられる（取り込むときにこの値を使う）
+      const title = Object.assign(document.createElement('input'), { type: 'text', value: it.title || '', placeholder: '（タイトルなし）', className: 'imp-title-input' });
+      title.setAttribute('aria-label', `${i + 1}話目のタイトル`);
+      title.addEventListener('input', () => { it.title = title.value.trim(); });
+      td(title);
       td(`${[...it.body].length.toLocaleString()}字`);
       td(it.foreword ? 'あり' : '―');
       td(it.afterword ? 'あり' : '―');
@@ -824,8 +840,10 @@ export function initImport(ctx) {
 
   function updateCommitSummary() {
     const c = counts();
-    $('imp-commit-summary').textContent = `追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `・未対応 ${c.errors}話` : ''}`;
-    $('imp-commit').disabled = !(c.add + c.overwrite);
+    const waiting = state.ncodeOwner && !state.ncodeAck;
+    $('imp-commit-summary').textContent = `追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `・未対応 ${c.errors}話` : ''}`
+      + (waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
+    $('imp-commit').disabled = !(c.add + c.overwrite) || waiting;
     updateCorrespondenceErrors();
     applyActionFilter();
   }

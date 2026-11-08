@@ -32,7 +32,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.06-0.54';
+const APP_VERSION = '2026.11.08-0.55';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2002,19 +2002,23 @@ async function epSaveAs({ force = false } = {}) {
   if (r) toast(savedMessage(r, `エピソード「${label}」`));
 }
 
+// 「ファイル」→「開く」：「保存」と同じ形式（.ayabackup）を開き、内容を確かめて選んだものを読み込む。
+// 前の版の .json（バックアップ・パック・エピソードのファイル）も開ける
 async function epOpen({ force = false } = {}) {
-  const src = await openFrom('ファイルを開く', { force });
+  const src = await openFrom('ファイルを開く', { force, kind: 'backup' });
   if (!src) return;
-  // 「ファイル」→「保存」・バックアップパック・全体のバックアップ（前の版の .json）は、内容を確かめて選んだものを読み込む
-  if (isBackup(src.text) || isPack(src.text)) {
-    await inspectBackupText(src.text, src.name);
+  const opened = await openBackupSource(src);
+  if (opened.archive) { renderBackupInspection(opened.archive, src.name); return; }
+  const { text } = opened;
+  if (isBackup(text) || isPack(text)) {
+    await inspectBackupText(text, src.name);
     return;
   }
-  if (!isEpisodeFile(src.text)) {
-    toast('エピソードのファイルではありません', true);
+  if (!isEpisodeFile(text)) {
+    toast('あや綴りのバックアップ（.ayabackup）か、エピソードのファイルではありません', true);
     return;
   }
-  const data = parseEpisodeFile(src.text);
+  const data = parseEpisodeFile(text);
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、両サイトとも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;

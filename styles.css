@@ -943,6 +943,7 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .imp-preview { width: 100%; border-collapse: collapse; font-size: 13px; }
 .imp-preview th, .imp-preview td { border-bottom: 1px solid var(--border); padding: 6px; text-align: left; vertical-align: top; }
 .imp-preview th { position: sticky; top: 0; background: var(--surface); z-index: 1; white-space: nowrap; }
+.imp-preview .imp-title-input { width: 100%; min-width: 12em; }
 .imp-preview tr.excluded td { opacity: .45; }
 .imp-preview .warn { color: var(--danger); }
 .imp-preview select { padding: 4px 6px; font-size: 13px; width: auto; max-width: 220px; }
