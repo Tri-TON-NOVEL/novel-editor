@@ -110,6 +110,11 @@ function alphaToNarou(text, warnings) {
   t = t.replace(MITEMIN_URL, (m, user, code) => `<i${code}|${user}>`);
   t = t.replace(ALPHA_DOTS, (m, body) => dots('narou', body));
   t = t.replace(ALPHA_RUBY, (m, base, reading, i, all) => {
+    // なろうの記号（| 《 》）が入ったルビは、なろうで正しく表示できないので変換しない
+    if (/[|｜《》]/.test(base + reading)) {
+      addWarning(warnings, 'ruby-unsafe', 'ルビに「|」「《」「》」が含まれるため変換しませんでした（なろうでは正しく表示できません）', sampleOf(all, i));
+      return m;
+    }
     if ([...base].length > RUBY_LIMIT || [...reading].length > RUBY_LIMIT) {
       addWarning(warnings, 'ruby-long', `なろうのルビは対象・読みとも${RUBY_LIMIT}文字までです。長いルビはなろうでは表示されません`, sampleOf(all, i));
     }

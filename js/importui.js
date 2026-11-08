@@ -63,7 +63,7 @@ export function initImport(ctx) {
     const type = preset.format.type || 'rules';
     return {
       fileName: '', buffer: null, archiveName: '', archiveBuffer: null, zipEntries: [], zipEntryIndex: 0, text: '', lines: [], decode: null,
-      encoding: 'auto', site: preset.format.site || 'narou', target: 'new', strictMatch: true,
+      encoding: 'auto', site: preset.format.site || 'narou', target: 'new', mode: 'replace', strictMatch: true,
       presetId: preset.id, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: '', titleListFileName: '',
       auto: new Map(), manual: new Map(),
@@ -80,7 +80,7 @@ export function initImport(ctx) {
       ctx.meta.set('importSession', {
         savedAt: new Date().toISOString(),
         fileName: state.fileName, text: state.text, decode: state.decode && { encoding: state.decode.encoding, note: state.decode.note, bad: state.decode.bad },
-        site: state.site, target: state.target, strictMatch: state.strictMatch, presetId: state.presetId, type: state.type, rules: state.rules, template: state.template,
+        site: state.site, target: state.target, mode: state.mode, strictMatch: state.strictMatch, presetId: state.presetId, type: state.type, rules: state.rules, template: state.template,
         titleListText: state.titleListText, titleListFileName: state.titleListFileName,
         manual: [...state.manual.entries()], step: Math.min(state.step, 2),
       }).catch(() => {});
@@ -105,7 +105,7 @@ export function initImport(ctx) {
     const s = await ctx.meta.get('importSession');
     if (!s) return;
     state = { ...fresh(), fileName: s.fileName, text: s.text, lines: I.splitLines(s.text), decode: s.decode, site: s.site, target: s.target,
-      strictMatch: s.strictMatch !== false,
+      mode: s.mode === 'merge' ? 'merge' : 'replace', strictMatch: s.strictMatch !== false,
       presetId: s.presetId, type: s.type || 'rules', rules: completeRules(s.rules), template: s.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: s.titleListText || '', titleListFileName: s.titleListFileName || '', manual: new Map(s.manual) };
     $('imp-site').value = state.site;
@@ -139,7 +139,10 @@ export function initImport(ctx) {
 
   function updateStrictMatchRow() {
     const existing = state.target !== 'new';
-    $('imp-strict-match-row').hidden = !existing;
+    $('imp-mode-row').hidden = !existing;
+    document.querySelectorAll('input[name="imp-mode"]').forEach((r) => { r.checked = r.value === state.mode; });
+    // 対応付けは「追加・更新する」ときだけ使う
+    $('imp-strict-match-row').hidden = !existing || state.mode === 'replace';
     $('imp-strict-match').checked = state.strictMatch !== false;
   }
 
@@ -618,8 +621,10 @@ export function initImport(ctx) {
     const hasDraft = (e, s) => { const d = draftOf(e, s); return !!((d.title || '').trim() || (d.body || '').trim()); };
     // 別サイト版を足すときか（取り込み先に、もう一方のサイトの原稿だけがある話がある）。
     // 同じサイトの TXT で更新するとき（なろう版の作品になろうの TXT など）は、増えた話はふつうに追加する
-    state.crossSite = !!target && target.episodes.some((e) => hasDraft(e, other) && !hasDraft(e, state.site));
-    if (target) {
+    // 置き換える：既存のエピソード・章はすべて消すので、照合しないで全部を新しい話として入れる
+    state.replacing = !!target && state.mode === 'replace';
+    state.crossSite = !!target && !state.replacing && target.episodes.some((e) => hasDraft(e, other) && !hasDraft(e, state.site));
+    if (target && !state.replacing) {
       const existing = target.episodes.map((e) => ({
         id: e.id,
         // 取り込むサイト側のタイトルがなければ、もう一方のタイトルで照合する（なろう版にアルファ版を足すときなど）
@@ -643,7 +648,10 @@ export function initImport(ctx) {
     // 作品名：TXT から読み取った作品名（従来どおり。読めなければファイル名）。
     // 取り込み先が新しい作品でも既存の作品でも、プレビューの欄にある名前をそのまま作品名として登録する
     state.txtTitle = result.head.title || state.fileName.replace(/^.*／\s*/, '').replace(/\.[^.]+$/, '');
-    if (!state.workTitleEdited) state.workTitle = state.txtTitle;
+    // 別サイト版を足すとき（なろう版の作品にアルファの TXT など）は、名前のある作品なら今の作品名のままにする
+    // （作品の投稿先と違うサイトの原稿を「追加・更新する」とき。2回目以降の更新も同じ）
+    const keepName = !!target && !state.replacing && !!(target.title || '').trim() && (state.crossSite || (target.site || 'narou') !== state.site);
+    if (!state.workTitleEdited) state.workTitle = keepName ? target.title : state.txtTitle;
     const account = (ctx.prefs.get('accounts', {}) || {})[state.site] || {};
     state.mismatches = I.checkSiteInfo(state.siteInfo, account, state.site === 'narou' ? target?.narouNcode : '');
     // TXT の Nコードが対応付けられている作品（取り込み先とは別のとき）
@@ -699,12 +707,27 @@ export function initImport(ctx) {
     l.append(input);
     sum.append(l);
     if (target) {
-      sum.append(Object.assign(document.createElement('div'), { className: 'stat', textContent: `取り込み先：${target.title || '（無題）'}（${SITES[state.site].short}用の原稿）` }));
-      // 取り込み先に名前があって TXT と違うときは、今の名前に戻すこともできる（どちらにするかは登録する人が決める）
-      if ((target.title || '').trim() && target.title !== state.txtTitle) {
-        const keep = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: `取り込み先の今の作品名「${target.title}」にする` });
-        keep.addEventListener('click', () => { input.value = target.title; state.workTitle = target.title; state.workTitleEdited = true; });
-        sum.append(keep);
+      sum.append(Object.assign(document.createElement('div'), { className: 'stat', textContent: `取り込み先：${target.title || '（無題）'}（${SITES[state.site].short}用の原稿${state.replacing ? '・置き換え' : ''}）` }));
+      if (state.replacing) {
+        const other = SITE_KEYS.find((x) => x !== state.site);
+        const otherDrafts = target.episodes.filter((e) => { const d = draftOf(e, other); return (d.title || '').trim() || (d.body || '').trim(); }).length;
+        sum.append(Object.assign(document.createElement('div'), {
+          className: 'imp-info warn imp-replace-note',
+          textContent: `⚠ 置き換え：取り込み先の今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この TXT の内容に入れ替えます。`
+            + (otherDrafts ? `\n${SITES[other].short}用の原稿がある話も ${otherDrafts}話あり、一緒に消えます。別サイト版を足すときは、最初の画面で「追加・更新する」を選んでください。` : '')
+            + ((target.site || 'narou') !== state.site ? `\n作品のメインの投稿先も「${SITES[target.site || 'narou'].short}用」から「${SITES[state.site].short}用」に変わります。` : '')
+            + '\n（取り込む前の状態は「バックアップ版」に残すので、あとから戻せます。設定資料・メモはそのままです）',
+        }));
+      }
+      // 取り込み先に名前があって TXT と違うときは、どちらの名前にするかをボタンでも選べる（決めるのは登録する人）
+      if ((target.title || '').trim() && state.txtTitle && target.title !== state.txtTitle) {
+        const pickName = (text, value) => {
+          const b = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: text });
+          b.addEventListener('click', () => { input.value = value; state.workTitle = value; state.workTitleEdited = true; });
+          return b;
+        };
+        sum.append(pickName(`取り込み先の今の作品名「${target.title}」にする`, target.title), ' ',
+          pickName(`TXT の作品名「${state.txtTitle}」にする`, state.txtTitle));
       }
     }
     if (state.mismatches.length) {
@@ -754,12 +777,12 @@ export function initImport(ctx) {
       box.append(go);
       sum.append(box);
     }
-    if (target && state.strictMatch) {
+    if (target && !state.replacing && state.strictMatch) {
       sum.append(Object.assign(document.createElement('div'), {
         id: 'imp-correspondence-errors', className: 'imp-info warn imp-mismatch', hidden: true,
       }));
     }
-    if (target) {
+    if (target && !state.replacing) {
       const filterLabel = Object.assign(document.createElement('label'), { className: 'imp-action-filter', textContent: '扱いを検索' });
       const filter = Object.assign(document.createElement('select'), { id: 'imp-action-filter', ariaLabel: '扱いを検索' });
       for (const [value, label] of [
@@ -787,7 +810,7 @@ export function initImport(ctx) {
       d.append(Object.assign(document.createElement('summary'), { textContent: `先頭の未解析の行（作品情報など）${result.head.lines.length}行` }),
         Object.assign(document.createElement('pre'), { textContent: result.head.lines.join('\n') }));
       const l = Object.assign(document.createElement('label'), { className: 'inline' });
-      const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: state.useHead && (!target || !target.synopsis) });
+      const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: state.useHead && (!target || state.replacing || !target.synopsis) });
       state.useHead = cb.checked;
       cb.addEventListener('change', () => { state.useHead = cb.checked; });
       l.append(cb, target?.synopsis ? ' あらすじ欄に入れる（取り込み先のあらすじは空でないため、入れると上書きになります）' : ' タイトル行以外を、作品のあらすじ欄に入れる');
@@ -801,7 +824,7 @@ export function initImport(ctx) {
     const target = state.targetProject;
     const table = $('imp-preview');
     const head = ['取込', '章', 'タイトル', '本文', '前書き', '後書き', '画像', '注意'];
-    if (target) head.push('既存との関係', '扱い');
+    if (target && !state.replacing) head.push('既存との関係', '扱い');
     const thead = document.createElement('thead');
     const tr = document.createElement('tr');
     for (const h of head) tr.append(Object.assign(document.createElement('th'), { textContent: h }));
@@ -838,7 +861,7 @@ export function initImport(ctx) {
       td(it.afterword ? 'あり' : '―');
       td(String(countImages(it.body) || '―'));
       td(it.warnings.join('／') || '―', it.warnings.length ? 'warn' : '');
-      if (target) {
+      if (target && !state.replacing) {
         const relation = {
           same: `同じ本文：${targetEpName(dup.target)}`,
           title: `同じタイトル：${targetEpName(dup.target)}`,
@@ -900,7 +923,7 @@ export function initImport(ctx) {
     const c = counts();
     const siteWaiting = state.siteMismatch && !state.siteAck;
     const waiting = siteWaiting || (state.ncodeOwner && !state.ncodeAck);
-    $('imp-commit-summary').textContent = `追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `・未対応 ${c.errors}話` : ''}`
+    $('imp-commit-summary').textContent = (state.replacing ? `置き換え（今の ${state.targetProject.episodes.length}話を削除）・` : '') + `追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `・未対応 ${c.errors}話` : ''}`
       + (siteWaiting ? '（「取り込む原稿」を確かめてください。上のボタンで選ぶと取り込めます）'
         : waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
     $('imp-commit').disabled = !(c.add + c.overwrite) || waiting;
@@ -919,7 +942,8 @@ export function initImport(ctx) {
     const name = (rename ? `${target.title || '（無題）'}（作品名を「${title}」に変更）` : target ? target.title : title) || '（無題）';
     // 登録と違う情報があれば、先に警告する（OK で続ける／キャンセルで中止）
     if (state.mismatches.length && !(await ask(`⚠ TXT の情報が、設定に登録した内容と違います。\n${mismatchText()}\n\n別のアカウント・別の作品の TXT かもしれません。このまま取り込みますか？`, { danger: true, ok: '取り込む' }))) return;
-    if (!(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `（うち未対応 ${c.errors}話）` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
+    if (state.replacing && !(await ask(`「${name}」を置き換えます。\n今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この TXT の ${c.add}話に入れ替えます。${(target.site || 'narou') !== state.site ? `\nメインの投稿先も「${SITES[state.site].short}用」に変わります。` : ''}\n（取り込む前の状態は「バックアップ版」に残します）\nよろしいですか？`, { danger: true, ok: '置き換える' }))) return;
+    if (!state.replacing && !(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n追加 ${c.add}話・上書き ${c.overwrite}話・スキップ ${c.skip}話${c.errors ? `（うち未対応 ${c.errors}話）` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
     const btn = $('imp-commit');
     btn.disabled = true;
     try {
@@ -939,6 +963,13 @@ export function initImport(ctx) {
           episodes: p.episodes.length,
           data: JSON.parse(serialize(p)).project,
         });
+        // 置き換える：今のエピソード・章をすべて消してから、TXT の話を入れる
+        if (state.replacing) {
+          p.chapters = [];
+          p.episodes = [];
+          // 別サイトの TXT で置き換えると、今のメインの原稿は空になるので、メインを TXT のサイトにする
+          p.site = state.site;
+        }
       } else {
         p = newProject({ title, site: state.site });
         p.chapters = [];
@@ -1101,6 +1132,12 @@ export function initImport(ctx) {
     saveSession();
   });
   $('imp-strict-match').addEventListener('change', (e) => { state.strictMatch = e.target.checked; saveSession(); });
+  $('imp-mode-row').addEventListener('change', (e) => {
+    if (!e.target.matches('input[name="imp-mode"]')) return;
+    state.mode = e.target.value;
+    updateStrictMatchRow();
+    saveSession();
+  });
   $('imp-encoding').addEventListener('change', (e) => { state.encoding = e.target.value; decodeAndShow(); });
   // 1つ目の画面の次（書式あり：区切り設定／書式なし：タイトル一覧）へ進む
   const goNext = () => go(2, { detect: state.type !== 'title-list' });

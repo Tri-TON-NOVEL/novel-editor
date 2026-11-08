@@ -610,6 +610,11 @@
           <select id="imp-encoding"></select>
         </label>
       </div>
+      <fieldset class="imp-mode" id="imp-mode-row" hidden>
+        <legend>既存の作品への取り込み方</legend>
+        <label class="check"><input type="radio" name="imp-mode" value="replace" checked> 置き換える（今のエピソード・章をすべて削除して、TXT の内容に入れ替える）</label>
+        <label class="check"><input type="radio" name="imp-mode" value="merge"> 追加・更新する（同じ話は上書き、ない話は追加。別サイト版を足すときもこちら）</label>
+      </fieldset>
       <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける（対応しない話は勝手に追加せず、エラーとして表示）</label>
       <div class="imp-file-pick">
         <span class="imp-file-head">TXT／ZIP ファイル</span>
@@ -627,7 +632,7 @@
         <p class="hint">取り込むTXTを一つ選んでください。選ぶと読み込んで次の画面へ進みます。フォルダー内のTXTも一覧に表示します。</p>
         <div id="imp-zip-entry-list" class="imp-zip-entry-list"></div>
       </fieldset>
-      <p class="hint">TXTの読み取り方法と、取り込む原稿の投稿先は別々に選べます。既存作品を選ぶと、もう一方の投稿先のタイトルも使って対応するエピソードを探します。本文以外のプロット・フリーメモは変わりません。確定するまで作品は一切変更しません。</p>
+      <p class="hint">TXTの読み取り方法と、取り込む原稿の投稿先は別々に選べます。既存作品を選んで「置き換える」にすると、今のエピソード・章をすべて削除して TXT の内容に入れ替えます（取り込む前の状態はバックアップ版に残ります）。「追加・更新する」にすると、もう一方の投稿先のタイトルも使って対応するエピソードを探し、本文以外のプロット・フリーメモは変えません。確定するまで作品は一切変更しません。</p>
       <div id="imp-decode-info" class="imp-info" hidden></div>
       </div>
       <footer class="import-foot">

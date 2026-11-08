@@ -839,6 +839,8 @@ dialog.fullscreen {
 .import-grid label, .imp-preset label { display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .imp-zip-picker { margin: 10px 0 0; }
 /* TXT インポート：ファイルを選ぶボタン（選ぶと読み込んで次の画面へ） */
+.imp-mode { border: 1px solid var(--border); border-radius: 6px; padding: 6px 10px; margin: 8px 0; display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.imp-mode legend { font-weight: 700; padding: 0 4px; }
 .imp-file-pick { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px; font-size: 13px; font-weight: 700; }
 .imp-file-buttons { display: flex; flex-wrap: wrap; gap: 6px 8px; font-weight: 400; font-size: 15px; }
 .imp-file-buttons [hidden] { display: none; }
