@@ -310,6 +310,7 @@ function projectMaterials(p) {
     alphaWorkId: n.alphaWorkId,
     synopsis: n.synopsis,
     projectMemo: n.projectMemo || '',
+    memos: clone(n.memos),
     chapters: clone(n.chapters),
     world: clone(n.world),
     characters: clone(n.characters),
@@ -772,6 +773,8 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
     const target = await targetFor(remote, remote.title);
     const existedBefore = locals.some((p) => p.id === target.id);
     if (item.type === 'materials') {
+      // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
+      if (!Array.isArray(item.data?.memos)) delete target.memos;
       Object.assign(target, clone(item.data), { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
     } else if (item.type === 'episode') {
       if (item.chapter && !target.chapters.some((c) => c.id === item.chapter.id)) target.chapters.push(clone(item.chapter));

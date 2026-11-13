@@ -286,6 +286,11 @@
         <div class="splitter" id="splitter" role="separator" aria-orientation="vertical" aria-label="本文とプロットの幅を変える（ダブルクリックで元に戻す）" title="ドラッグで幅を変更／ダブルクリックで元に戻す"></div>
 
         <section class="pane pane-side" data-pane="side">
+          <!-- プロットとフリーメモはタブで切り替える -->
+          <div class="side-tabs" id="side-tabs" role="tablist" aria-label="プロット・フリーメモ">
+            <button type="button" role="tab" data-side-tab="plot" aria-selected="true">プロット</button>
+            <button type="button" role="tab" data-side-tab="memo" aria-selected="false">フリーメモ</button>
+          </div>
           <section class="field mx grow" data-field="plot">
             <div class="field-head">
               <button type="button" class="fold-btn" data-fold="plot" aria-expanded="true" title="プロットを折りたたむ／開く">▾</button>
@@ -383,11 +388,17 @@
 
     <!-- 作品全体のメモ -->
     <section class="view" id="view-project-memo" hidden>
+      <!-- メモはタブで切り替える（作品ごとに複数） -->
+      <div class="memo-tabs" id="memo-tabs" role="tablist" aria-label="メモ"></div>
       <section class="field grow">
         <div class="field-head">
-          <label for="project-memo" class="view-title">メモ</label>
+          <label for="memo-title" class="view-title">メモ</label>
+          <input type="text" id="memo-title" class="memo-title" autocomplete="off" spellcheck="false" placeholder="メモのタイトル" aria-label="メモのタイトル">
           <span class="count" id="count-project-memo"></span>
           <span class="spacer"></span>
+          <button type="button" class="tool" id="memo-move-left" title="このメモのタブを左へ" aria-label="このメモのタブを左へ">◀</button>
+          <button type="button" class="tool" id="memo-move-right" title="このメモのタブを右へ" aria-label="このメモのタブを右へ">▶</button>
+          <button type="button" class="tool danger" id="memo-delete">このメモを削除</button>
           <button type="button" class="tool" data-find="project-memo">検索</button>
           <button type="button" class="tool selall-btn" data-selall="project-memo">全て選択</button>
           <button type="button" class="copy" data-copy="project-memo">コピー</button>
@@ -1183,7 +1194,7 @@
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
       <legend>書き出しなどで使う保存先（この端末）</legend>
-      <p class="hint">「ファイル」→「開く」「保存」は、この設定にかかわらず、毎回「この端末・その他（ファイル・場所を自由に選ぶ）」か「クラウド」かを選びます。この設定は、TXT の書き出しなど、ほかの保存・読み込みに使います。</p>
+      <p class="hint">「ファイル」→「開く」「保存」は、この設定にかかわらず、いつも「この端末・その他」（端末の画面で、ファイル・場所を自由に選ぶ）を使います。クラウドのバックアップは「設定」→「バックアップ」で扱います。この設定は、TXT の書き出しなど、ほかの保存・読み込みに使います。</p>
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>

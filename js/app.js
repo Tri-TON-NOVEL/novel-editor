@@ -1,7 +1,7 @@
 import { db, prefs, versions, meta, saveEnvironment, restoreEnvironmentIfLost } from './db.js';
 import {
   newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars,
-  draftOf, DRAFT_FIELDS, SITE_KEYS,
+  draftOf, DRAFT_FIELDS, SITE_KEYS, newMemo, DEFAULT_MEMO_TITLE,
 } from './format.js';
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
@@ -32,7 +32,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.13-0.63';
+const APP_VERSION = '2026.11.13-0.64';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -249,7 +249,7 @@ function isEmptyProject(p) {
   const r = p.reports || {};
   const e = p.episodes[0];
   const er = e.report || {};
-  return !p.title && !p.synopsis && !p.projectMemo && !r.x && !r.narouTitle && !r.narouBody
+  return !p.title && !p.synopsis && !p.projectMemo && !(p.memos || []).some((m) => m.body) && !r.x && !r.narouTitle && !r.narouBody
     && !p.chapters.some((c) => c.plot) && !p.world.items.length && !p.characters.items.length
     && p.episodes.length === 1 && !e.plot && !e.freeMemo && !er.x && !er.narouTitle && !er.narouBody
     && SITE_KEYS.every((s) => DRAFT_FIELDS.every((f) => !draftOf(e, s)[f]));
@@ -324,7 +324,8 @@ function updateCounts() {
 // ---------- 本文・プロット・フリーメモの折りたたみ（端末ごと：prefs 'fold.body' など） ----------
 // 折りたたんでも中身は消えず、自動保存も続く。見出しに文字数（空なら「（空）」）を出す
 const FOLDS = { body: () => el.body, plot: () => el.plot, memo: () => el.freeMemo };
-const isFolded = (key) => key in FOLDS && prefs.get('fold.' + key, false) === true;
+// プロット・フリーメモはタブで切り替えるので、折りたたまない（前の版で折りたたんでいても開いて出す）
+const isFolded = (key) => key === 'body' && prefs.get('fold.' + key, false) === true;
 
 function setFolded(key, on) {
   prefs.set('fold.' + key, !!on);
@@ -436,7 +437,7 @@ function editEpisode(field, value) {
 const bindings = [
   [el.novelTitle, (v) => { project.title = v; }],
   [el.synopsis, (v) => { project.synopsis = v; }],
-  [el.projectMemo, (v) => { project.projectMemo = v; }],
+  [el.projectMemo, (v) => setMemoBody(v)],
   [el.epTitle, (v) => editEpisode('title', v)],
   [el.foreword, (v) => editEpisode('foreword', v)],
   [el.body, (v) => editEpisode('body', v)],
@@ -934,7 +935,7 @@ function showProject(p, handle = null) {
   el.novelTitle.value = project.title;
   el.site.value = project.site;
   el.synopsis.value = project.synopsis;
-  el.projectMemo.value = project.projectMemo || '';
+  renderMemos();
   el.narouUrl.value = project.narouUrl;
   el.alphaUrl.value = project.alphaUrl;
   $('work-ncode').value = project.narouNcode || '';
@@ -958,6 +959,136 @@ function showProject(p, handle = null) {
   updateStatus();
   // 以前の版の、作品に1つだった活動報告があれば、エピソードへ移す（画面が出そろってから聞く）
   setTimeout(() => migrateProjectReports().catch(fail), 800);
+}
+
+// ---------- 作品のメモ（複数。タブで切り替える） ----------
+// 開いているメモは端末ごとに覚える（prefs 'memo:作品ID'）。中身は作品データ（memos）に入り、バックアップにも入る
+let memoId = null;
+function currentMemo() {
+  if (!Array.isArray(project.memos) || !project.memos.length) project.memos = [newMemo({ body: project.projectMemo || '' })];
+  return project.memos.find((m) => m.id === memoId) || project.memos[0];
+}
+// 前の版でも1つ目のメモが読めるよう、projectMemo に1つ目の本文を写しておく
+const syncLegacyMemo = () => { project.projectMemo = project.memos[0]?.body || ''; };
+
+function setMemoBody(v) {
+  currentMemo().body = v;
+  syncLegacyMemo();
+}
+
+function selectMemo(id) {
+  memoId = id;
+  prefs.set('memo:' + project.id, id);
+  renderMemos();
+}
+
+function renderMemos() {
+  const cur = currentMemo();
+  memoId = cur.id;
+  const box = $('memo-tabs');
+  const tabs = project.memos.map((m) => {
+    const b = Object.assign(document.createElement('button'), { type: 'button', textContent: m.title || DEFAULT_MEMO_TITLE, title: m.title || DEFAULT_MEMO_TITLE });
+    b.setAttribute('role', 'tab');
+    b.setAttribute('aria-selected', String(m.id === cur.id));
+    b.dataset.memoId = m.id;
+    return b;
+  });
+  const add = Object.assign(document.createElement('button'), { type: 'button', className: 'memo-add', textContent: '＋ メモを追加', title: '新しいメモ（タブ）を追加' });
+  add.dataset.memoAdd = '1';
+  box.replaceChildren(...tabs, add);
+  if (el.projectMemo.value !== cur.body) el.projectMemo.value = cur.body;
+  if ($('memo-title').value !== cur.title) $('memo-title').value = cur.title;
+  const i = project.memos.indexOf(cur);
+  $('memo-move-left').disabled = i <= 0;
+  $('memo-move-right').disabled = i >= project.memos.length - 1;
+  setCount('project-memo', el.projectMemo.value);
+}
+
+function addMemo() {
+  const used = new Set(project.memos.map((m) => m.title));
+  let n = project.memos.length + 1;
+  while (used.has(`${DEFAULT_MEMO_TITLE}${n}`)) n++;
+  const m = newMemo({ title: `${DEFAULT_MEMO_TITLE}${n}` });
+  project.memos.push(m);
+  changed();
+  selectMemo(m.id);
+  $('memo-title').focus();
+  $('memo-title').select();
+}
+
+async function deleteMemo() {
+  const cur = currentMemo();
+  const name = cur.title || DEFAULT_MEMO_TITLE;
+  const only = project.memos.length === 1;
+  if (cur.body || only) {
+    const msg = only
+      ? `メモ「${name}」の中身を消しますか？（メモが1つだけなので、タブは残して中身を空にし、タイトルを「${DEFAULT_MEMO_TITLE}」に戻します。元に戻せません）`
+      : `メモ「${name}」を削除しますか？（${countChars(cur.body).all.toLocaleString()}字。元に戻せません）`;
+    if (!(await ask(msg, { danger: true, ok: only ? '消す' : '削除する' }))) return;
+    if (!project.memos.includes(cur)) return; // 確認しているあいだに消えていたら何もしない
+  }
+  if (only) {
+    cur.title = DEFAULT_MEMO_TITLE;
+    cur.body = '';
+  } else {
+    const i = project.memos.indexOf(cur);
+    project.memos.splice(i, 1);
+    memoId = project.memos[Math.min(i, project.memos.length - 1)].id;
+    prefs.set('memo:' + project.id, memoId);
+  }
+  syncLegacyMemo();
+  changed();
+  renderMemos();
+}
+
+function moveMemo(delta) {
+  const cur = currentMemo();
+  const i = project.memos.indexOf(cur);
+  const j = i + delta;
+  if (j < 0 || j >= project.memos.length) return;
+  project.memos.splice(i, 1);
+  project.memos.splice(j, 0, cur);
+  syncLegacyMemo();
+  changed();
+  renderMemos();
+}
+
+function bindMemos() {
+  $('memo-tabs').addEventListener('click', (e) => {
+    const b = e.target.closest('button');
+    if (!b) return;
+    if (b.dataset.memoAdd) addMemo();
+    else if (b.dataset.memoId) selectMemo(b.dataset.memoId);
+  });
+  $('memo-title').addEventListener('input', (e) => {
+    currentMemo().title = e.target.value;
+    const tab = $('memo-tabs').querySelector(`[data-memo-id="${CSS.escape(memoId)}"]`);
+    if (tab) { tab.textContent = e.target.value || DEFAULT_MEMO_TITLE; tab.title = tab.textContent; }
+    changed();
+  });
+  $('memo-delete').addEventListener('click', () => deleteMemo().catch(fail));
+  $('memo-move-left').addEventListener('click', () => moveMemo(-1));
+  $('memo-move-right').addEventListener('click', () => moveMemo(1));
+}
+
+// ---------- エピソード編集：プロット・フリーメモのタブ（端末ごとに覚える：prefs 'sideTab'） ----------
+function applySideTab(tab = prefs.get('sideTab', 'plot')) {
+  // 表示の設定でどちらかを隠しているときは、出ているほうにする
+  let t = tab === 'memo' ? 'memo' : 'plot';
+  if (document.body.classList.contains('hide-plot')) t = 'memo';
+  if (document.body.classList.contains('hide-memo')) t = 'plot';
+  document.querySelector('.pane-side').dataset.sideTab = t;
+  document.querySelectorAll('#side-tabs [data-side-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.sideTab === t)));
+  scheduleFitFields();
+}
+
+function bindSideTabs() {
+  document.querySelectorAll('#side-tabs [data-side-tab]').forEach((b) => b.addEventListener('click', () => {
+    prefs.set('sideTab', b.dataset.sideTab);
+    applySideTab(b.dataset.sideTab);
+    (b.dataset.sideTab === 'memo' ? el.freeMemo : el.plot).focus({ preventScroll: true });
+  }));
+  applySideTab();
 }
 
 async function switchTo(p, handle = null) {
@@ -1210,7 +1341,9 @@ const cloudDestinationLabel = () => `${cloudName()}（クラウドで設定し�
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 // force：設定にかかわらず選ぶ画面を出す（設定のほうを目立つボタンにする）
-async function chooseDestination(kind, { force = false } = {}) {
+// only：選ぶ画面を出さず、その保存先だけを使う（「ファイル」→「開く」「保存」は、この端末用なので 'local'。クラウドはバックアップの画面で使う）
+async function chooseDestination(kind, { force = false, only = '' } = {}) {
+  if (only) return only;
   const p = driveProvider();
   const pref = oldCloud(prefs.get(DEST_KEY, 'ask'));
   if (!p) {
@@ -1495,8 +1628,8 @@ function pickDriveFile(p, title, kind = 'json') {
  * title：クラウドの画面の見出し（「（全体：すべての作品）」など。前に「○○に保存」を付ける）
  * 戻り値: { type: 'cloud', label, id, name }／{ type: 'local', handle, how, name }／null（やめた）
  */
-async function saveTextTo(text, name, { title, force = false, workId = '', kind = 'json', busyText = '保存中…' } = {}) {
-  const dest = await chooseDestination('save', { force });
+async function saveTextTo(text, name, { title, force = false, only = '', workId = '', kind = 'json', busyText = '保存中…' } = {}) {
+  const dest = await chooseDestination('save', { force, only });
   let where = dest;
   if (dest === 'cloud') {
     const r = await openDriveSave({ p: driveProvider(), title, name, text, workId, kind, busyText });
@@ -1529,8 +1662,8 @@ function savedMessage(r, what, head = '保存が完了しました') {
  * 保存先を選んで開く（「どこから開きますか？」。設定の「ファイル」タブに従う）。kind: 'json'／'txt'
  * 戻り値: { text, name, source: 'cloud'|'local', id?, handle?, file? }／null
  */
-async function openFrom(title, { force = false, kind = 'json' } = {}) {
-  const dest = await chooseDestination('open', { force });
+async function openFrom(title, { force = false, only = '', kind = 'json' } = {}) {
+  const dest = await chooseDestination('open', { force, only });
   let where = dest;
   if (dest === 'cloud') {
     const p = driveProvider();
@@ -1802,8 +1935,8 @@ async function createBackupPack(btn = $('backup-pack-save')) {
     } else {
       let name = form.elements.fileName.value.trim() || packFileName(made.pack, { device: sync.prefix() }).replace(/\.json$/i, ARCHIVE_EXT);
       if (!name.toLowerCase().endsWith(ARCHIVE_EXT)) name += ARCHIVE_EXT;
-      // 「ファイル」→「保存」：毎回「この端末・その他（自由な場所）／クラウド」を選ぶ
-      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…', force: true });
+      // 「ファイル」→「保存」：この端末・その他の好きな場所へ（クラウドはバックアップの画面で）
+      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…', only: 'local' });
       if (!r) return false; // 保存先を選ぶ画面を閉じた（やめた）
     }
     recordSaved(made.pack, await allProjects());
@@ -1839,7 +1972,7 @@ function itemDetail(item) {
   }
   if (item.type === 'materials') {
     const d = item.data || {};
-    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${d.projectMemo ? 'あり' : 'なし'}`].join('\n');
+    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].join('\n');
   }
   const ep = item.episode || {};
   const sites = ['narou', 'alpha'].map((site) => {
@@ -2006,8 +2139,8 @@ async function epSaveAs({ force = false } = {}) {
 
 // 「ファイル」→「開く」：「保存」と同じ形式（.ayabackup）を開き、内容を確かめて選んだものを読み込む。
 // 前の版の .json（バックアップ・パック・エピソードのファイル）も開ける
-async function epOpen({ force = false } = {}) {
-  const src = await openFrom('ファイルを開く', { force, kind: 'backup' });
+async function epOpen({ force = false, only = '' } = {}) {
+  const src = await openFrom('ファイルを開く', { force, only, kind: 'backup' });
   if (!src) return;
   const opened = await openBackupSource(src);
   if (opened.archive) { renderBackupInspection(opened.archive, src.name); return; }
@@ -3586,7 +3719,7 @@ function renderCloudFolder(p) {
 const copySources = {
   'novel-title': () => ['小説タイトル', project.title],
   synopsis: () => ['あらすじ', project.synopsis],
-  'project-memo': () => ['メモ', project.projectMemo || ''],
+  'project-memo': () => [`メモ「${currentMemo().title || DEFAULT_MEMO_TITLE}」`, currentMemo().body],
   'ep-title': () => ['エピソードタイトル', cur().title],
   foreword: () => ['前書き', convert(editSite, cur().foreword)],
   body: () => ['本文', convert(editSite, cur().body)],
@@ -4549,6 +4682,7 @@ function applyUiPrefs() {
   const cls = document.body.classList;
   for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
   cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
+  if (document.querySelector('.pane-side')) applySideTab(); // 隠したほうのタブを開いていたら、出ているほうにする
   for (const k of ['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo',
     'plot-from-other', 'free-memo-from-other', 'x-text', 'narou-report-title', 'narou-report-body', 'main-to-sub']) {
     cls.toggle('hide-copy-' + k, !uiPref('copy.' + k));
@@ -5042,7 +5176,7 @@ const actions = {
   'backup-pack-open': () => openBackupPackFile().catch(fail),
   'sync-save': () => saveNow(),
   'copy-episode-notes': openEpisodeNotesCopy,
-  'ep-open': () => epOpen({ force: true }), // 「ファイル」→「開く」：毎回「この端末・その他／クラウド」を選ぶ
+  'ep-open': () => epOpen({ only: 'local' }), // 「ファイル」→「開く」：この端末・その他から（クラウドはバックアップの画面で）
   'ep-save-as': () => fileSaveAs().catch(fail),
   'new-chapter-at': () => openNewItem('chapter'),
   'new-episode-at': () => openNewItem('episode'),
@@ -5134,6 +5268,8 @@ function bindSplitter() {
   splitter.addEventListener('dblclick', () => { prefs.set('split', applySplit(SPLIT_DEFAULT)); });
   bindSidebarSplitter();
   bindPlotMemoSplitter();
+  bindSideTabs();
+  bindMemos();
 }
 
 // プロットとフリーメモの境目を上下にドラッグして、高さの比率を変える（端末ごとに記憶）

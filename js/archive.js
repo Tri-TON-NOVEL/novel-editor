@@ -57,7 +57,7 @@ function projectMaterials(p) {
   return {
     title: n.title, site: n.site, narouUrl: n.narouUrl, alphaUrl: n.alphaUrl,
     narouNcode: n.narouNcode, alphaWorkId: n.alphaWorkId, synopsis: n.synopsis,
-    projectMemo: n.projectMemo || '', chapters: n.chapters, world: n.world,
+    projectMemo: n.projectMemo || '', memos: n.memos, chapters: n.chapters, world: n.world,
     characters: n.characters, createdAt: n.createdAt, updatedAt: n.updatedAt,
   };
 }
@@ -452,6 +452,8 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       const block = itemBlocks.find((b) => blockKind(b) === 'materials');
       if (!block) throw new ArchiveFormatError('作品資料のデータがありません');
       const data = await readArchiveBlock(archive, block);
+      // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
+      if (!Array.isArray(data.memos)) delete target.memos;
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
     } else if (item.type === 'episode') {
       const block = itemBlocks.find((b) => blockKind(b) === 'episode');

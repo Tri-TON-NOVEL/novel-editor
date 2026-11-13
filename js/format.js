@@ -4,7 +4,9 @@
 //
 // project = {
 //   id（端末ローカル）, workId（作品の識別子。端末をまたいでも同じ）,
-//   title, site: 'narou' | 'alpha'（メイン投稿サイト）, narouUrl, alphaUrl, synopsis（あらすじ）, projectMemo（作品全体のメモ）,
+//   title, site: 'narou' | 'alpha'（メイン投稿サイト）, narouUrl, alphaUrl, synopsis（あらすじ）,
+//   memos: [{ id, title, body }]（作品全体のメモ。タブで切り替える。1つ以上）,
+//   projectMemo（1つ目のメモの本文の写し。前の版で読んでも1つ目のメモが残るように）,
 //   chapters: [{ id, title, plot, order }],                       章（全体プロットの章と同じもの）
 //   episodes: [{
 //     id, chapterId（null＝未分類）, order,
@@ -139,13 +141,28 @@ function migrateEpisode(e, site, project, chapterIds) {
   });
 }
 
+export const DEFAULT_MEMO_TITLE = 'メモ';
+export function newMemo(content = {}) {
+  return { id: makeId(), title: DEFAULT_MEMO_TITLE, body: '', ...content };
+}
+// メモの並びを整える（1つもなければ、前の版の projectMemo を1つ目にする）
+// id がないときは決まった id にする（読むたびに変わると、変わっていないのに自動バックアップの印が変わるため）
+export function normalizeMemos(memos, legacyBody = '') {
+  const list = Array.isArray(memos)
+    ? memos.filter((m) => m && typeof m === 'object').map((m, i) => ({ ...m, id: String(m.id || 'memo-' + (i + 1)), title: String(m.title ?? ''), body: String(m.body ?? '') }))
+    : [];
+  return list.length ? list : [newMemo({ id: 'memo-1', body: String(legacyBody ?? '') })];
+}
+
 // 足りない項目を補い、旧形式を現行形式へ移す（元のオブジェクトは変更しない）
 export function normalize(p) {
   const base = newProject();
   const project = { ...base, ...p, reports: { ...base.reports, ...(p.reports || {}) }, links: { ...(p.links || {}) } };
   if (!SITE_KEYS.includes(project.site)) project.site = 'narou';
   if (!project.workId) project.workId = makeId();
-  project.projectMemo = String(p.projectMemo ?? '');
+  // 作品のメモ（複数）。前の版のデータ（projectMemo だけ）は、1つ目のメモにする
+  project.memos = normalizeMemos(p.memos, p.projectMemo);
+  project.projectMemo = project.memos[0].body;
 
   // 章（並びは配列の順。order は保存時に振り直す）
   const chapterSrc = Array.isArray(p.chapters) && p.chapters.length

@@ -1188,3 +1188,25 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
   /* キーボードが出ている間：入力中の欄を、キーボードの上に見えている高さに収める（閉じたら元に戻る） */
   body.keyboard-open:not(.maximizing) .pane textarea.kb-target { flex: none !important; min-height: 120px !important; height: calc(var(--vv-height, 100dvh) - 140px) !important; max-height: calc(var(--vv-height, 100dvh) - 140px) !important; }
 }
+
+/* 作品のメモ（複数）：タブで切り替える */
+.memo-tabs { display: flex; flex-wrap: wrap; gap: 4px; align-items: flex-end; border-bottom: 1px solid var(--border); padding-bottom: 0; }
+.memo-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; min-height: 32px; padding: 4px 12px; max-width: 14em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: var(--surface, transparent); }
+.memo-tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+.memo-tabs .memo-add { border-style: dashed; font-weight: 400; }
+.memo-title { flex: 1 1 12em; min-width: 8em; max-width: 24em; font-size: 15px; padding: 4px 8px; }
+
+/* エピソード編集：プロットとフリーメモはタブで切り替える（選んだほうだけ大きく出す） */
+.side-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.side-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; min-height: 32px; padding: 4px 14px; }
+.side-tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
+.pane-side .plot-memo-splitter { display: none !important; }
+.pane-side[data-side-tab="plot"] .field[data-field="memo"],
+.pane-side[data-side-tab="memo"] .field[data-field="plot"] { display: none !important; }
+.pane-side .field[data-field="plot"], .pane-side .field[data-field="memo"] { flex: 1 1 0 !important; }
+.pane-side [data-fold="plot"], .pane-side [data-fold="memo"] { display: none; }
+body.hide-plot .side-tabs, body.hide-memo .side-tabs { display: none; }
+/* 指で触る端末では、メモとプロット・フリーメモのタブも押しやすい高さにする */
+@media (pointer: coarse) {
+  .memo-tabs button, .side-tabs button { min-height: 44px; }
+}
