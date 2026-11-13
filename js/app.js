@@ -32,7 +32,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.13-0.62';
+const APP_VERSION = '2026.11.13-0.63';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1222,7 +1222,8 @@ async function chooseDestination(kind, { force = false } = {}) {
   if (pref !== 'ask' && !force) return pref;
   const last = pref !== 'ask' ? pref : oldCloud(prefs.get('file.lastDestination', 'local'));
   const drive = { value: 'cloud', label: cloudDestinationLabel(), primary: last === 'cloud' };
-  const local = { value: 'local', label: 'この端末・その他（iCloud など）', primary: last !== 'cloud' };
+  // 「この端末・その他」は、端末のファイル選択（保存）画面で、場所もファイルも自由に選べる
+  const local = { value: 'local', label: kind === 'open' ? 'この端末・その他（ファイルを自由に選ぶ。iCloud など）' : 'この端末・その他（好きな場所に保存。iCloud など）', primary: last !== 'cloud' };
   // 前回使ったほうを右端（目立つボタン）に置く
   const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'cloud' ? [local, drive] : [drive, local]);
   if (r) prefs.set('file.lastDestination', r);
@@ -1801,7 +1802,8 @@ async function createBackupPack(btn = $('backup-pack-save')) {
     } else {
       let name = form.elements.fileName.value.trim() || packFileName(made.pack, { device: sync.prefix() }).replace(/\.json$/i, ARCHIVE_EXT);
       if (!name.toLowerCase().endsWith(ARCHIVE_EXT)) name += ARCHIVE_EXT;
-      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…' });
+      // 「ファイル」→「保存」：毎回「この端末・その他（自由な場所）／クラウド」を選ぶ
+      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…', force: true });
       if (!r) return false; // 保存先を選ぶ画面を閉じた（やめた）
     }
     recordSaved(made.pack, await allProjects());
@@ -5040,7 +5042,7 @@ const actions = {
   'backup-pack-open': () => openBackupPackFile().catch(fail),
   'sync-save': () => saveNow(),
   'copy-episode-notes': openEpisodeNotesCopy,
-  'ep-open': () => epOpen(),
+  'ep-open': () => epOpen({ force: true }), // 「ファイル」→「開く」：毎回「この端末・その他／クラウド」を選ぶ
   'ep-save-as': () => fileSaveAs().catch(fail),
   'new-chapter-at': () => openNewItem('chapter'),
   'new-episode-at': () => openNewItem('episode'),

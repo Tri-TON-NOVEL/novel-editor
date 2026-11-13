@@ -29,7 +29,8 @@ export const DEFAULT_INTERVAL_MIN = 10;
 export const DEFAULT_KEEP = 200;
 const CHECK_MS = 30_000;       // 保存が必要かを確かめる間隔
 const LEAVE_MIN_MS = 30_000;   // 画面を離れるときの保存の最短間隔（タブを切り替えるたびに増えないように）
-const IDLE_MS = 20_000;        // 自動バックアップは、入力がこれだけ止まってから
+const IDLE_SAVE_MS = 5 * 60_000; // 入力がこれだけ止まったら、自動バックアップする（書き終えた区切りで保存）
+const IDLE_MS = 20_000;        // 書き続けているときの保存（保存間隔ごと）は、入力がこれだけ止まってから
 const IDLE_MAX_MS = 30 * 60_000; // 打ち続けていても、保存間隔からこれ以上は待たない
 const DIR_KEY = 'autoBackupDir';
 // 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.ayabackup。端末の時刻）の両方を読む。
@@ -473,12 +474,16 @@ export function savePack(name, text) {
 let resultHandler = () => {};
 export function onBackupResult(fn) { resultHandler = fn || (() => {}); }
 
-// 一定時間ごとに確認し、変更があって保存間隔を過ぎていれば保存する。
-// 前の保存から間があいていても、最初の変更ですぐには保存しない：最初の変更から保存間隔の分だけ待ち、
-// さらに入力が IDLE_MS 止まるまで待つ（打ち続けている間は保存しない。ただし IDLE_MAX_MS を超えたら保存する）
+// 一定時間ごとに確認し、変更があれば次のどちらかで保存する。
+//   1. 入力が IDLE_SAVE_MS（5分）止まったとき
+//   2. 書き続けているとき：最初の変更から保存間隔の分だけ待ち、入力が IDLE_MS 止まった区切りで（止まらなくても IDLE_MAX_MS を超えたら保存する）
 function tick() {
   if (state !== 'on' || !checked || !dirty) return;
   const now = Date.now();
+  if (now - lastRun < LEAVE_MIN_MS) return;
+  // 1. 入力が5分止まった（前回の起動から残っていた変更は、起動時の確認が済んだらすぐ）
+  if (now - lastEdit >= IDLE_SAVE_MS) { backupNow({ auto: true }); return; }
+  // 2. 書き続けているとき：「保存間隔」ごと（入力が少し止まった区切りで。止まらなくても長くは待たない）
   const interval = intervalMin() * 60_000;
   if (now - lastRun < interval || now - dirtySince < interval) return;
   if (now - lastEdit < IDLE_MS && now - dirtySince < interval + IDLE_MAX_MS) return;

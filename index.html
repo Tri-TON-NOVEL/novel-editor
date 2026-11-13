@@ -1182,7 +1182,8 @@
     <!-- ファイル -->
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
-      <legend>「ファイル」メニューで使う保存先（この端末）</legend>
+      <legend>書き出しなどで使う保存先（この端末）</legend>
+      <p class="hint">「ファイル」→「開く」「保存」は、この設定にかかわらず、毎回「この端末・その他（ファイル・場所を自由に選ぶ）」か「クラウド」かを選びます。この設定は、TXT の書き出しなど、ほかの保存・読み込みに使います。</p>
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>
@@ -1297,7 +1298,7 @@
         <label>ファイル名の先頭（プレフィックス）
           <input type="text" id="sync-prefix" autocomplete="off" spellcheck="false">
         </label>
-        <label>保存間隔
+        <label>書き続けているときの保存間隔
           <select name="autoBackupInterval">
             <option value="5">5分ごと</option>
             <option value="10">10分ごと</option>
@@ -1310,7 +1311,7 @@
           <input name="autoBackupKeep" type="number" min="10" max="2000" step="10" inputmode="numeric">
         </label>
       </div>
-      <p class="hint">ファイル名には「あや綴り」、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
+      <p class="hint">自動バックアップは、変更してから入力が5分止まったときに保存します。書き続けていて5分止まらないときは、上の「書き続けているときの保存間隔」ごとに保存します。ファイル名には「あや綴り」、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
         設定は変えるとすぐに反映されます。</p>
       <div class="button-row" id="sync-presync-row" hidden>
         <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>
