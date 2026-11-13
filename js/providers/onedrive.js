@@ -185,9 +185,14 @@ async function getToken() {
 
 async function api(path, options = {}, retry = true) {
   const t = await getToken();
-  const res = await fetch(path.startsWith('http') ? path : GRAPH + path, {
-    ...options, headers: { ...(options.headers || {}), Authorization: 'Bearer ' + t },
-  });
+  let res;
+  try {
+    res = await fetch(path.startsWith('http') ? path : GRAPH + path, {
+      ...options, headers: { ...(options.headers || {}), Authorization: 'Bearer ' + t },
+    });
+  } catch (e) {
+    throw isNetworkError(e) ? networkError(e) : e;
+  }
   if (res.status === 401 && retry) {
     if (token) setToken({ ...token, expiresAt: 0 }); // 鍵を更新してもう一度
     return api(path, options, false);
@@ -252,7 +257,7 @@ async function download(id, { bytes = false } = {}) {
   const url = it['@microsoft.graph.downloadUrl'];
   let res;
   if (url) {
-    res = await fetch(url);
+    res = await fetchDownload(url);
     if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
   } else {
     res = await api(`${byId(id)}/content`);
@@ -264,7 +269,7 @@ async function download(id, { bytes = false } = {}) {
 async function downloadStart(id, maxBytes) {
   const it = await (await api(byId(id))).json();
   const url = it['@microsoft.graph.downloadUrl'];
-  const res = url ? await fetch(url) : await api(`${byId(id)}/content`);
+  const res = url ? await fetchDownload(url) : await api(`${byId(id)}/content`);
   if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
   return readStart(res, maxBytes);
 }
@@ -273,20 +278,68 @@ async function downloadStart(id, maxBytes) {
 // ダウンロード用のURLは1時間ほど使えるので、続けて読むあいだは使い回す（1回ごとに問い合わせると往復が倍になる）
 const DOWNLOAD_URL_MS = 10 * 60_000;
 const downloadUrls = new Map(); // id → { url, at }
+// 範囲を指定した読み込みが、通信の途中で切れたり、ブラウザ・回線の都合で通らなかったりしたときは、
+// ファイル全体を範囲なしで一度読み（一覧を読むときと同じ読み方）、そこから切り出す。全体は少しのあいだだけ覚えておく
+const WHOLE_FILE_MS = 5 * 60_000;
+let wholeFile = null; // { id, bytes, at }
+async function downloadUrlOf(id) {
+  downloadUrls.delete(id);
+  const it = await (await api(byId(id))).json();
+  const url = it['@microsoft.graph.downloadUrl'] || '';
+  if (url) downloadUrls.set(id, { url, at: Date.now() });
+  return url;
+}
 async function downloadRange(id, start, end) {
+  if (wholeFile?.id === id && Date.now() - wholeFile.at < WHOLE_FILE_MS) return wholeFile.bytes.slice(start, end);
   const opts = { headers: { Range: `bytes=${start}-${end - 1}` } };
   const cached = downloadUrls.get(id);
   let res = cached && Date.now() - cached.at < DOWNLOAD_URL_MS ? await fetch(cached.url, opts).catch(() => null) : null;
-  if (!res?.ok) {
-    downloadUrls.delete(id);
-    const it = await (await api(byId(id))).json();
-    const url = it['@microsoft.graph.downloadUrl'];
-    if (url) downloadUrls.set(id, { url, at: Date.now() });
-    res = url ? await fetch(url, opts) : await api(`${byId(id)}/content`, opts);
+  let netError = null;
+  // 1回目がだめなら、新しいダウンロード用の URL でもう一度（URL の期限切れ・一時的な通信の失敗）
+  for (let attempt = 0; attempt < 2 && !res?.ok; attempt++) {
+    try {
+      const url = await downloadUrlOf(id);
+      res = url ? await fetchDownload(url, opts) : await api(`${byId(id)}/content`, opts);
+    } catch (e) {
+      if (!isNetworkError(e)) throw e;
+      netError = e;
+      res = null;
+    }
+  }
+  if (!res) {
+    // 範囲指定の読み込みが通らない：全体を範囲なしで読む
+    try {
+      const url = downloadUrls.get(id)?.url || await downloadUrlOf(id);
+      const all = url ? await fetchDownload(url) : await api(`${byId(id)}/content`);
+      if (!all.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + all.status + '）');
+      wholeFile = { id, bytes: await all.arrayBuffer(), at: Date.now() };
+      return wholeFile.bytes.slice(start, end);
+    } catch (e) {
+      throw isNetworkError(e) ? networkError(e) : e;
+    }
   }
   if (!res.ok) throw new Error('OneDrive エラー: ファイルを読めませんでした（' + res.status + '）');
   const bytes = await res.arrayBuffer();
-  return res.status === 206 ? bytes : bytes.slice(start, end);
+  if (res.status !== 206) {
+    // 範囲指定が無視されて全体が届いた：そのまま覚えておく（続きの読み込みで何度も全体を取らない）
+    wholeFile = { id, bytes, at: Date.now() };
+    return bytes.slice(start, end);
+  }
+  return bytes;
+}
+
+// fetch が通信そのものに失敗したとき（Chrome「Failed to fetch」、Safari「Load failed」など）
+function isNetworkError(e) { return e instanceof TypeError || !!e?.network; }
+function networkError(e) {
+  if (e?.network) return e; // もう日本語の知らせにしてある
+  const err = new Error(`OneDrive との通信に失敗しました。ネットにつながっているか確かめて、もう一度読み込んでください（${e.message}）`);
+  err.cause = e;
+  err.network = true;
+  return err;
+}
+// ダウンロード用の URL から読む（通信に失敗したら、分かる知らせにする）
+async function fetchDownload(url, opts) {
+  try { return await fetch(url, opts); } catch (e) { throw isNetworkError(e) ? networkError(e) : e; }
 }
 
 // 書き込む。target は byPath() か byId()。conflict：'replace'（上書き）／'fail'（同じ名前があればエラー）
