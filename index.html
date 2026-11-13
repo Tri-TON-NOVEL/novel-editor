@@ -77,6 +77,7 @@
         <button type="button" class="nav-item" draggable="true" data-view="world">世界観・用語</button>
         <button type="button" class="nav-item" draggable="true" data-view="characters">登場人物</button>
         <button type="button" class="nav-item" draggable="true" data-view="project-memo">メモ</button>
+        <button type="button" class="nav-item" draggable="true" data-view="foreshadows">伏線</button>
       </div>
       <details class="work-codes" id="work-codes">
         <summary>小説投稿サイト情報 <span class="work-codes-state" id="work-codes-state"></span></summary>
@@ -212,7 +213,7 @@
 
       <div class="tabs" role="tablist">
         <button type="button" role="tab" data-tab="body" aria-selected="true">本文</button>
-        <button type="button" role="tab" data-tab="side" aria-selected="false" id="tab-side">プロット・メモ</button>
+        <button type="button" role="tab" data-tab="side" aria-selected="false" id="tab-side">プロット・メモ・伏線</button>
       </div>
 
       <div class="panes">
@@ -287,9 +288,11 @@
 
         <section class="pane pane-side" data-pane="side">
           <!-- プロットとフリーメモはタブで切り替える -->
-          <div class="side-tabs" id="side-tabs" role="tablist" aria-label="プロット・フリーメモ">
+          <div class="side-tabs" id="side-tabs" role="tablist" aria-label="プロット・フリーメモ・伏線・回収">
             <button type="button" role="tab" data-side-tab="plot" aria-selected="true">プロット</button>
             <button type="button" role="tab" data-side-tab="memo" aria-selected="false">フリーメモ</button>
+            <button type="button" role="tab" data-side-tab="foreshadow" aria-selected="false" title="この話で張った伏線を登録">伏線</button>
+            <button type="button" role="tab" data-side-tab="payoff" aria-selected="false" title="これまでの伏線の回収を記録">回収</button>
           </div>
           <section class="field mx grow" data-field="plot">
             <div class="field-head">
@@ -325,6 +328,42 @@
               <button type="button" class="tool jump-btn" data-jump="free-memo" data-to="bottom" title="フリーメモの一番下へ" aria-label="フリーメモの一番下へ">↓</button>
             </div>
             <textarea id="free-memo" spellcheck="false" placeholder="修正したいこと、備忘録、書いていて気付いたことなど（なろう用・アルファ用で共通）"></textarea>
+          </section>
+          <!-- 伏線：この話で張った伏線（フォームで登録） -->
+          <section class="field grow fs-pane" data-field="foreshadow">
+            <div class="field-head">
+              <span class="fs-pane-title">この話で張った伏線</span>
+              <span class="fs-epno" id="fs-epno"></span>
+            </div>
+            <div class="fs-scroll">
+              <ul class="fs-cards" id="fs-here"></ul>
+              <form class="fs-form" id="fs-form" autocomplete="off">
+                <div class="fs-form-head" id="fs-form-head">伏線を登録</div>
+                <label class="stack">名前 <input type="text" name="title" maxlength="200" spellcheck="false" placeholder="例：祖父の懐中時計" required></label>
+                <label class="stack">内容 <textarea name="body" rows="4" spellcheck="false" placeholder="どんな伏線を張ったか（あとで回収するときの手がかり）"></textarea></label>
+                <div class="fs-form-foot">
+                  <button type="button" id="fs-form-cancel" hidden>編集をやめる</button>
+                  <button type="submit" class="primary" id="fs-form-submit">登録</button>
+                </div>
+              </form>
+            </div>
+          </section>
+          <!-- 回収：この話までに張った伏線を出し、この話での回収を記録する -->
+          <section class="field grow fs-pane" data-field="payoff">
+            <div class="field-head">
+              <span class="fs-pane-title">伏線の回収</span>
+              <span class="fs-epno" id="payoff-epno"></span>
+            </div>
+            <div class="fs-filter" id="payoff-filter">
+              <label><input type="checkbox" data-payoff-status="open"> 未回収</label>
+              <label><input type="checkbox" data-payoff-status="partial"> 部分回収済み</label>
+              <label><input type="checkbox" data-payoff-status="resolved"> 回収済み</label>
+              <label><input type="checkbox" data-payoff-status="dropped"> 取りやめ</label>
+              <input type="search" id="payoff-search" placeholder="名前・内容で絞り込み" aria-label="回収する伏線を絞り込み">
+            </div>
+            <div class="fs-scroll">
+              <ul class="fs-cards" id="payoff-list"></ul>
+            </div>
           </section>
         </section>
       </div>
@@ -406,6 +445,50 @@
         <textarea id="project-memo" spellcheck="false" placeholder="作品全体についてのメモ（エピソードごとのフリーメモとは別です）"></textarea>
       </section>
     </section>
+
+    <!-- 伏線一覧（発生と回収の対応） -->
+    <section class="view scroll" id="view-foreshadows" hidden>
+      <h1 class="view-title">伏線一覧</h1>
+      <p class="hint">伏線は、エピソードの「伏線」タブで登録し、「回収」タブで回収・部分回収を記録します。話数は目次の並び順（第1話からの通し番号）です。状態はここで選び直せます。話数を押すと、そのエピソードへ移ります。</p>
+      <div class="fs-list-filter">
+        <fieldset class="fs-status-filter">
+          <legend>状態</legend>
+          <label><input type="checkbox" data-fsl-status="open" checked> 未回収</label>
+          <label><input type="checkbox" data-fsl-status="partial" checked> 部分回収済み</label>
+          <label><input type="checkbox" data-fsl-status="resolved" checked> 回収済み</label>
+          <label><input type="checkbox" data-fsl-status="dropped" checked> 取りやめ</label>
+        </fieldset>
+        <div class="fs-search-row">
+          <select id="fsl-field" aria-label="検索する項目">
+            <option value="all">すべての項目</option>
+            <option value="title">名前</option>
+            <option value="body">内容</option>
+            <option value="origin">発生した話</option>
+            <option value="payoff">回収・部分回収</option>
+          </select>
+          <input type="search" id="fsl-search" placeholder="検索（スペースで区切ると、すべてを含むもの）" aria-label="伏線を検索">
+        </div>
+        <div class="fs-search-row">
+          <label>話 <input type="number" id="fsl-from" min="1" inputmode="numeric" aria-label="この話から"></label>
+          <span>〜</span>
+          <label><input type="number" id="fsl-to" min="1" inputmode="numeric" aria-label="この話まで"> 話</label>
+          <select id="fsl-sort" aria-label="並べ方">
+            <option value="origin">発生した話の順</option>
+            <option value="status">状態の順</option>
+            <option value="last">最後に回収した話の順</option>
+            <option value="title">名前の順</option>
+          </select>
+          <span class="fs-count" id="fsl-count"></span>
+        </div>
+      </div>
+      <div class="fs-table-wrap">
+        <table class="fs-table" id="fsl-table">
+          <thead><tr><th>状態</th><th>発生</th><th>名前</th><th>内容</th><th>回収・部分回収</th><th></th></tr></thead>
+          <tbody id="fsl-body"></tbody>
+        </table>
+        <p class="hint" id="fsl-empty" hidden></p>
+      </div>
+    </section>
   </main>
 </div>
 
@@ -417,6 +500,22 @@
   </form>
 </dialog>
 
+<dialog id="fs-edit-dialog" class="wide-dialog" aria-labelledby="fs-edit-title">
+  <form method="dialog" class="dialog" id="fs-edit-form" autocomplete="off">
+    <h2 id="fs-edit-title">伏線を編集</h2>
+    <p class="hint" id="fs-edit-origin"></p>
+    <label class="stack">名前 <input type="text" name="title" maxlength="200" spellcheck="false" required></label>
+    <label class="stack">内容 <textarea name="body" rows="5" spellcheck="false"></textarea></label>
+    <label class="stack">状態 <select name="status"></select></label>
+    <div class="fs-edit-events" id="fs-edit-events"></div>
+    <footer class="dialog-foot">
+      <button type="button" class="danger" id="fs-edit-delete">この伏線を削除</button>
+      <span class="spacer"></span>
+      <button type="button" value="cancel" id="fs-edit-cancel">キャンセル</button>
+      <button type="submit" value="ok" class="primary">保存</button>
+    </footer>
+  </form>
+</dialog>
 <dialog id="backup-pack-dialog" class="wide-dialog">
   <form method="dialog" class="dialog" id="backup-pack-form">
     <h2 id="backup-pack-heading">バックアップパックを作成</h2>
@@ -1060,6 +1159,7 @@
       <label><input type="checkbox" data-ui="novel.world"> 世界観・用語</label>
       <label><input type="checkbox" data-ui="novel.characters"> 登場人物</label>
       <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
+      <label><input type="checkbox" data-ui="novel.foreshadows"> 伏線一覧</label>
       <label><input type="checkbox" data-ui="novel.workcodes"> 小説投稿サイト情報</label>
     </fieldset>
     <fieldset class="checks">
@@ -1080,6 +1180,7 @@
       <label><input type="checkbox" data-ui="show.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
+      <label><input type="checkbox" data-ui="show.foreshadow"> 伏線・回収タブ</label>
       <label><input type="checkbox" data-ui="show.report"> 活動報告タブ</label>
     </fieldset>
     <fieldset class="checks">

@@ -18,10 +18,13 @@
 //   world:      { categories: [{ id, name }], items: [{ id, categoryId, ...列 }] },  設定
 //   characters: { categories: [{ id, name }], items: [{ id, categoryId, ...列,
 //                 orgs: [{ id: 設定の項目ID, note: 立場 }]（所属）, identityId（同じ値の行どうしが同一人物） }] },  登場人物
+//   foreshadows: [...]（伏線の発生・回収。形は foreshadow.js の先頭）,
 //   reports: { x, narouTitle, narouBody },
 //   createdAt, updatedAt, links（端末ローカル）: { [クラウドID]: ファイルID }
 // }
 // 旧形式は、このファイル内の補完処理で現在の形式へ移行する。
+import { normalizeForeshadows } from './foreshadow.js';
+
 export const FORMAT = 'novel-editor';
 export const SCHEMA_VERSION = 3;
 export const SITE_KEYS = ['narou', 'alpha'];
@@ -181,6 +184,7 @@ export function normalize(p) {
 
   project.world = normalizeTable(p.world, base.world);
   project.characters = normalizeTable(p.characters, base.characters);
+  project.foreshadows = normalizeForeshadows(p.foreshadows);
   return project;
 }
 

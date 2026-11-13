@@ -19,6 +19,8 @@ import {
 } from './archive.js';
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
+import { initForeshadow } from './foreshadowui.js';
+import { stampEpisodeNo } from './foreshadow.js';
 import { decodeText } from './importer.js';
 import { ask, askText, choose, inform } from './dialogs.js';
 import {
@@ -32,7 +34,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.13-0.64';
+const APP_VERSION = '2026.11.13-0.66';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -56,7 +58,8 @@ let project = null;     // 編集中の作品
 let epIndex = 0;        // 編集中のエピソード
 let view = 'episode';   // VIEWS のいずれか
 // 活動報告はエピソードの画面の中（「活動報告」タブ）。6.0 より前は独立した画面だった
-const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'project-memo'];
+const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows'];
+let fsUI = null;        // 伏線の画面（initForeshadow）
 let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
 let saveTimer = null;
 let dirty = false;
@@ -249,7 +252,7 @@ function isEmptyProject(p) {
   const r = p.reports || {};
   const e = p.episodes[0];
   const er = e.report || {};
-  return !p.title && !p.synopsis && !p.projectMemo && !(p.memos || []).some((m) => m.body) && !r.x && !r.narouTitle && !r.narouBody
+  return !p.title && !p.synopsis && !p.projectMemo && !(p.memos || []).some((m) => m.body) && !(p.foreshadows || []).length && !r.x && !r.narouTitle && !r.narouBody
     && !p.chapters.some((c) => c.plot) && !p.world.items.length && !p.characters.items.length
     && p.episodes.length === 1 && !e.plot && !e.freeMemo && !er.x && !er.narouTitle && !er.narouBody
     && SITE_KEYS.every((s) => DRAFT_FIELDS.every((f) => !draftOf(e, s)[f]));
@@ -828,6 +831,7 @@ function showEpisode() {
   updateCounts();
   renderSiteTabs();
   renderEpisodeVersions().catch(() => {});
+  fsUI?.renderEpisode(); // 伏線・回収タブ
 }
 
 // ---------- 活動報告（エピソードごと：ep.report = { x, narouTitle, narouBody, updatedAt }） ----------
@@ -917,6 +921,7 @@ function setView(next) {
   if (view === 'outline') outline.render();
   if (view === 'world') worldTable.render();
   if (view === 'characters') characterTable.render();
+  if (view === 'foreshadows') fsUI?.renderList();
   renderEpisodeList();
   document.body.classList.remove('drawer-open');
 }
@@ -930,6 +935,7 @@ function selectEpisode(i) {
 
 function showProject(p, handle = null) {
   if (project?.id !== p.id && epSearch) { epSearch = ''; $('ep-search').value = ''; } // 作品を替えたら検索を消す
+  if (project?.id !== p.id) fsUI?.reset(); // 伏線の編集中の欄も消す
   project = normalize(p);
   fileHandle = handle;
   el.novelTitle.value = project.title;
@@ -1071,24 +1077,44 @@ function bindMemos() {
   $('memo-move-right').addEventListener('click', () => moveMemo(1));
 }
 
-// ---------- エピソード編集：プロット・フリーメモのタブ（端末ごとに覚える：prefs 'sideTab'） ----------
+// ---------- エピソード編集：プロット・フリーメモ・伏線・回収のタブ（端末ごとに覚える：prefs 'sideTab'） ----------
+// タブ → 表示の設定で隠したときに body に付く印
+const SIDE_TABS = { plot: 'hide-plot', memo: 'hide-memo', foreshadow: 'hide-foreshadow', payoff: 'hide-foreshadow' };
 function applySideTab(tab = prefs.get('sideTab', 'plot')) {
-  // 表示の設定でどちらかを隠しているときは、出ているほうにする
-  let t = tab === 'memo' ? 'memo' : 'plot';
-  if (document.body.classList.contains('hide-plot')) t = 'memo';
-  if (document.body.classList.contains('hide-memo')) t = 'plot';
+  // 表示の設定で隠しているタブは出さず、選んでいたタブが隠れていたら、出ている最初のタブにする
+  const shown = Object.keys(SIDE_TABS).filter((k) => !document.body.classList.contains(SIDE_TABS[k]));
+  const t = shown.includes(tab) ? tab : (shown[0] || 'plot');
   document.querySelector('.pane-side').dataset.sideTab = t;
-  document.querySelectorAll('#side-tabs [data-side-tab]').forEach((b) => b.setAttribute('aria-selected', String(b.dataset.sideTab === t)));
+  document.querySelectorAll('#side-tabs [data-side-tab]').forEach((b) => {
+    b.hidden = !shown.includes(b.dataset.sideTab);
+    b.setAttribute('aria-selected', String(b.dataset.sideTab === t));
+  });
+  $('side-tabs').hidden = shown.length < 2; // 1つだけなら、タブは出さない
   scheduleFitFields();
 }
 
 function bindSideTabs() {
   document.querySelectorAll('#side-tabs [data-side-tab]').forEach((b) => b.addEventListener('click', () => {
-    prefs.set('sideTab', b.dataset.sideTab);
-    applySideTab(b.dataset.sideTab);
-    (b.dataset.sideTab === 'memo' ? el.freeMemo : el.plot).focus({ preventScroll: true });
+    const t = b.dataset.sideTab;
+    prefs.set('sideTab', t);
+    applySideTab(t);
+    if (t === 'plot' || t === 'memo') (t === 'memo' ? el.freeMemo : el.plot).focus({ preventScroll: true });
+    else fsUI?.renderEpisode(); // 話数・タイトルを今の並びで出し直す
   }));
   applySideTab();
+}
+
+// 伏線の一覧などから、そのエピソードを開いて指定のタブを出す
+function openEpisodeAt(episodeId, sideTab) {
+  const i = project.episodes.findIndex((e) => e.id === episodeId);
+  if (i < 0) { toast('そのエピソードは削除されています'); return; }
+  if (reportMode) setReportMode(false);
+  selectEpisode(i);
+  if (sideTab && !document.body.classList.contains('hide-side')) {
+    prefs.set('sideTab', sideTab);
+    applySideTab(sideTab);
+    selectTab('side'); // 狭い画面では「プロット・メモ」の側を出す
+  }
 }
 
 async function switchTo(p, handle = null) {
@@ -1211,6 +1237,7 @@ async function deleteEpisode(index = epIndex) {
   // 確認している間に並びが変わっていても、同じエピソードを消す
   index = project.episodes.indexOf(ep);
   if (index < 0) return;
+  stampEpisodeNo(project, ep.id, index + 1); // 伏線の記録に、消す話の話数を残す（一覧で「第N話（削除済み）」と出す）
   const last = project.episodes.length === 1;
   if (last) project.episodes[0] = newEpisode();
   else project.episodes.splice(index, 1);
@@ -1892,7 +1919,7 @@ async function openPackDialog(mode = 'pack') {
     : `選んだ内容を一つのファイルにまとめ、自動バックアップの保存先${usable ? `「${sync.folderName()}」` : ''}に保存します（ほかの端末では、更新として知らせが出ます）。「変更あり」は、前にこの端末で保存したときから変わったものです。`;
   $('backup-pack-file-row').hidden = mode !== 'file';
   $('backup-pack-name-row').hidden = mode === 'file';
-  $('backup-pack-save').textContent = mode === 'file' ? '保存先を選ぶ…' : '保存';
+  $('backup-pack-save').textContent = '保存'; // ファイル保存でも「保存」（押すと端末の保存画面が開く）
   setTaskError($('backup-pack-dialog'), '');
   updatePackForm();
   $('backup-pack-dialog').showModal();
@@ -1972,7 +1999,7 @@ function itemDetail(item) {
   }
   if (item.type === 'materials') {
     const d = item.data || {};
-    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].join('\n');
+    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].concat((d.foreshadows || []).length ? [`伏線：${d.foreshadows.length}件`] : []).join('\n');
   }
   const ep = item.episode || {};
   const sites = ['narou', 'alpha'].map((site) => {
@@ -3796,6 +3823,15 @@ const importScreen = initImport({
   },
 });
 
+// 伏線（エピソードの「伏線」「回収」タブと、作品の「伏線一覧」）
+fsUI = initForeshadow({
+  prefs, ask, toast,
+  getProject: () => project,
+  getEpisode: () => episode(),
+  changed: () => changed(),
+  openEpisode: (id, tab) => openEpisodeAt(id, tab),
+});
+
 async function copyField(key) {
   const [label, text] = copySources[key]();
   if (!text) { toast(label + 'は空です'); return; }
@@ -4654,6 +4690,7 @@ const UI_TARGETS = {
   'novel.world': () => document.querySelector('.nav-item[data-view="world"]'),
   'novel.characters': () => document.querySelector('.nav-item[data-view="characters"]'),
   'novel.project-memo': () => document.querySelector('.nav-item[data-view="project-memo"]'),
+  'novel.foreshadows': () => document.querySelector('.nav-item[data-view="foreshadows"]'),
   'novel.workcodes': () => $('work-codes'),
   'show.report': () => $('report-tab'),
   'nav.add-episode': () => document.querySelector('.nav-add [data-action="add-episode"]'),
@@ -4671,7 +4708,7 @@ const UI_TARGETS = {
 function applyUiPrefs() {
   for (const [key, target] of Object.entries(UI_TARGETS)) target()?.classList.toggle('ui-off', !uiPref(key));
   // 隠した画面を開いていたら、エピソードの画面へ
-  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo' }[view];
+  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo', foreshadows: 'novel.foreshadows' }[view];
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
   if (reportMode && !uiPref('show.report')) setReportMode(false);
   // 左の一覧を開くボタンは「作品」と呼ぶ（作品の資料とエピソードを選ぶ場所のため。7.7.7 から全端末・全表示で同じ）
@@ -4680,8 +4717,8 @@ function applyUiPrefs() {
   drawerBtn.textContent = `☰ ${drawerName}`;
   drawerBtn.setAttribute('aria-label', drawerName);
   const cls = document.body.classList;
-  for (const f of ['foreword', 'afterword', 'plot', 'memo']) cls.toggle('hide-' + f, !uiPref('show.' + f));
-  cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo'));
+  for (const f of ['foreword', 'afterword', 'plot', 'memo', 'foreshadow']) cls.toggle('hide-' + f, !uiPref('show.' + f));
+  cls.toggle('hide-side', !uiPref('show.plot') && !uiPref('show.memo') && !uiPref('show.foreshadow'));
   if (document.querySelector('.pane-side')) applySideTab(); // 隠したほうのタブを開いていたら、出ているほうにする
   for (const k of ['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo',
     'plot-from-other', 'free-memo-from-other', 'x-text', 'narou-report-title', 'narou-report-body', 'main-to-sub']) {
@@ -4701,7 +4738,7 @@ function applyUiPrefs() {
 }
 
 // 左の作品情報メニューは、利用者が決めた順番を環境設定として保存する。
-const PROJECT_NAV_DEFAULT = ['synopsis', 'outline', 'world', 'characters', 'project-memo'];
+const PROJECT_NAV_DEFAULT = ['synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows'];
 function applyProjectNavOrder() {
   const box = $('project-nav');
   const saved = prefs.get('nav.projectOrder', []);

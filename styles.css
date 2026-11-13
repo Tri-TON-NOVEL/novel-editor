@@ -1197,16 +1197,118 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .memo-title { flex: 1 1 12em; min-width: 8em; max-width: 24em; font-size: 15px; padding: 4px 8px; }
 
 /* エピソード編集：プロットとフリーメモはタブで切り替える（選んだほうだけ大きく出す） */
-.side-tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
-.side-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; min-height: 32px; padding: 4px 14px; }
+.side-tabs { display: flex; flex-wrap: wrap; gap: 4px; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.side-tabs button { border: 1px solid var(--border); border-bottom: 0; border-radius: 8px 8px 0 0; min-height: 32px; padding: 4px 12px; }
 .side-tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
 .pane-side .plot-memo-splitter { display: none !important; }
-.pane-side[data-side-tab="plot"] .field[data-field="memo"],
-.pane-side[data-side-tab="memo"] .field[data-field="plot"] { display: none !important; }
+.pane-side:not([data-side-tab="plot"]) .field[data-field="plot"], .pane-side:not([data-side-tab="memo"]) .field[data-field="memo"],
+.pane-side:not([data-side-tab="foreshadow"]) .field[data-field="foreshadow"],
+.pane-side:not([data-side-tab="payoff"]) .field[data-field="payoff"] { display: none !important; }
 .pane-side .field[data-field="plot"], .pane-side .field[data-field="memo"] { flex: 1 1 0 !important; }
 .pane-side [data-fold="plot"], .pane-side [data-fold="memo"] { display: none; }
-body.hide-plot .side-tabs, body.hide-memo .side-tabs { display: none; }
+.side-tabs[hidden], .side-tabs button[hidden] { display: none !important; } /* 隠したタブ・1つだけのとき（JS で hidden） */
 /* 指で触る端末では、メモとプロット・フリーメモのタブも押しやすい高さにする */
 @media (pointer: coarse) {
   .memo-tabs button, .side-tabs button { min-height: 44px; }
+}
+
+/* 伏線・回収タブ（エピソード）と伏線一覧 */
+.pane-side .fs-pane { flex: 1 1 0 !important; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
+.fs-pane-title { font-weight: 700; }
+.fs-epno { color: var(--muted, #666); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+.fs-scroll { flex: 1 1 0; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; gap: 10px; padding: 2px 2px 8px; }
+.fs-cards { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
+.fs-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; background: var(--surface, transparent); display: flex; flex-direction: column; gap: 6px; }
+.fs-card.editing { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.fs-card-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.fs-card-head .fs-name { flex: 1 1 8em; min-width: 0; overflow-wrap: anywhere; }
+.fs-card-foot { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+.fs-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
+.fs-empty { color: var(--muted, #666); font-size: 14px; padding: 4px 2px; }
+.fs-badge { display: inline-block; font-size: 12px; line-height: 1.6; padding: 0 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
+.fs-st-open { color: #b4541a; }
+.fs-st-partial { color: #8a6d00; }
+.fs-st-resolved { color: #2e7d32; }
+.fs-st-dropped { color: #777; }
+.fs-events { list-style: none; margin: 0; padding: 0 0 0 8px; border-left: 3px solid var(--border); display: flex; flex-direction: column; gap: 4px; font-size: 13px; }
+.fs-events li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; }
+.fs-events li.here { font-weight: 600; }
+.fs-kind { font-weight: 700; white-space: nowrap; }
+.fs-kind-partial { color: #8a6d00; }
+.fs-kind-resolved { color: #2e7d32; }
+.fs-event-body { white-space: pre-wrap; overflow-wrap: anywhere; flex: 1 1 10em; min-width: 0; font-weight: 400; }
+.fs-event-tools { display: inline-flex; gap: 4px; }
+.fs-ep-link { border: 0; background: none; padding: 0; min-height: 0; color: var(--accent); text-decoration: underline; cursor: pointer; font: inherit; font-weight: 700; white-space: nowrap; }
+.fs-ep-link:disabled { color: var(--muted, #777); text-decoration: none; cursor: default; }
+.fs-form, .fs-payoff-form { display: flex; flex-direction: column; gap: 6px; border: 1px dashed var(--border); border-radius: 8px; padding: 8px 10px; }
+.fs-form-head { font-weight: 700; }
+.fs-form input[type="text"], .fs-form textarea, .fs-payoff-form textarea { width: 100%; box-sizing: border-box; font-size: 15px; }
+.fs-form textarea, .fs-payoff-form textarea { resize: vertical; min-height: 4.5em; }
+.fs-form-foot { display: flex; gap: 6px; justify-content: flex-end; flex-wrap: wrap; }
+.fs-radios { display: flex; gap: 14px; flex-wrap: wrap; }
+.fs-filter { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: center; font-size: 13px; }
+.fs-filter input[type="search"] { flex: 1 1 10em; min-width: 0; }
+/* 伏線一覧 */
+.fs-list-filter { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
+.fs-status-filter { display: flex; flex-wrap: wrap; gap: 4px 14px; border: 0; padding: 0; margin: 0; }
+.fs-status-filter legend { font-weight: 700; padding: 0; margin-right: 8px; float: left; }
+.fs-search-row { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+.fs-search-row input[type="search"] { flex: 1 1 16em; min-width: 0; }
+.fs-search-row input[type="number"] { width: 5em; }
+.fs-count { color: var(--muted, #666); font-size: 13px; margin-left: auto; }
+.fs-table-wrap { overflow-x: auto; }
+.fs-table { border-collapse: collapse; width: 100%; font-size: 14px; }
+.fs-table th, .fs-table td { border: 1px solid var(--border); padding: 6px 8px; vertical-align: top; text-align: left; }
+.fs-table th { background: var(--surface, transparent); white-space: nowrap; }
+.fs-table td.fs-name { font-weight: 700; min-width: 7em; overflow-wrap: anywhere; }
+.fs-table td.fs-body { white-space: pre-wrap; overflow-wrap: anywhere; min-width: 12em; }
+.fs-table td.fs-origin { white-space: nowrap; }
+.fs-table .fs-ep-title { display: block; font-size: 12px; color: var(--muted, #666); white-space: normal; max-width: 12em; }
+.fs-table .fs-events { min-width: 12em; }
+.fs-table td.fs-actions { width: 1%; white-space: nowrap; }
+.fs-status-select { font-weight: 700; }
+.fs-none { color: var(--muted, #777); }
+.fs-edit-events { display: flex; flex-direction: column; gap: 8px; }
+.fs-edit-events-head { font-weight: 700; }
+.fs-edit-event { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; }
+.fs-edit-event-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.fs-edit-event-head .fs-ep-label { flex: 1 1 10em; font-weight: 700; overflow-wrap: anywhere; }
+.fs-edit-event textarea, #fs-edit-form input[type="text"], #fs-edit-form textarea { width: 100%; box-sizing: border-box; }
+#fs-edit-form .dialog-foot .spacer { flex: 1; }
+/* 狭い画面：エピソードの伏線・回収は画面ごとスクロールし、一覧は1件ずつのカードにする */
+@media (max-width: 899px) {
+  .pane-side .fs-pane { flex: none !important; }
+  .pane-side.side-fit .fs-pane { flex-grow: 1 !important; }
+  .fs-scroll { flex: none; overflow: visible; }
+}
+@media (max-width: 700px) {
+  .fs-table, .fs-table tbody, .fs-table tr, .fs-table td { display: block; width: auto; }
+  .fs-table thead { display: none; }
+  .fs-table tr { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; margin-bottom: 10px; }
+  .fs-table td { border: 0; padding: 3px 0; min-width: 0 !important; }
+  .fs-table td[data-label]::before { content: attr(data-label); display: block; font-size: 12px; color: var(--muted, #666); font-weight: 400; }
+  .fs-table td.fs-actions { width: auto; text-align: right; }
+  .fs-table .fs-ep-title { max-width: none; }
+}
+@media (pointer: coarse) {
+  .fs-ep-link { min-height: 32px; }
+}
+/* 暗い表示：伏線の状態の色を明るめに */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .fs-st-open { color: #f0a070; }
+  :root:not([data-theme="light"]) .fs-st-partial, :root:not([data-theme="light"]) .fs-kind-partial { color: #e8c547; }
+  :root:not([data-theme="light"]) .fs-st-resolved, :root:not([data-theme="light"]) .fs-kind-resolved { color: #7fcf83; }
+  :root:not([data-theme="light"]) .fs-st-dropped { color: #a8a8a8; }
+}
+:root[data-theme="dark"] .fs-st-open { color: #f0a070; }
+:root[data-theme="dark"] .fs-st-partial, :root[data-theme="dark"] .fs-kind-partial { color: #e8c547; }
+:root[data-theme="dark"] .fs-st-resolved, :root[data-theme="dark"] .fs-kind-resolved { color: #7fcf83; }
+:root[data-theme="dark"] .fs-st-dropped { color: #a8a8a8; }
+/* 伏線一覧：プルダウンは中身の幅にする（全体の select の幅の指定を打ち消す） */
+.fs-search-row select, .fs-status-select, .fs-edit-event-head select { width: auto; flex: 0 0 auto; max-width: 100%; }
+.fs-status-select { min-width: 8.5em; }
+.fs-table td:first-child { min-width: 9em; }
+@media (max-width: 700px) { .fs-table td:first-child { min-width: 0; } }
+.fs-filter input[type="search"], .fs-list-filter input[type="search"], .fs-list-filter input[type="number"] {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font: inherit; min-height: 36px; box-sizing: border-box;
 }

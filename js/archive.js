@@ -57,7 +57,7 @@ function projectMaterials(p) {
   return {
     title: n.title, site: n.site, narouUrl: n.narouUrl, alphaUrl: n.alphaUrl,
     narouNcode: n.narouNcode, alphaWorkId: n.alphaWorkId, synopsis: n.synopsis,
-    projectMemo: n.projectMemo || '', memos: n.memos, chapters: n.chapters, world: n.world,
+    projectMemo: n.projectMemo || '', memos: n.memos, foreshadows: n.foreshadows, chapters: n.chapters, world: n.world,
     characters: n.characters, createdAt: n.createdAt, updatedAt: n.updatedAt,
   };
 }
@@ -454,6 +454,7 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       const data = await readArchiveBlock(archive, block);
       // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
       if (!Array.isArray(data.memos)) delete target.memos;
+      // 0.65 までのバックアップには伏線がない：この端末の伏線は消さずに残す（Object.assign で上書きされない）
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
     } else if (item.type === 'episode') {
       const block = itemBlocks.find((b) => blockKind(b) === 'episode');
