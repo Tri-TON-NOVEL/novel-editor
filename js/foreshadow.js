@@ -95,7 +95,7 @@ export function stampEpisodeNo(project, episodeId, no) {
   }
 }
 
-// 一覧・回収タブで使う形にする（並べ替え用の話数つき）
+// 一覧・伏線タブで使う形にする（並べ替え用の話数つき）
 export function foreshadowRows(project) {
   const nums = episodeNumbers(project);
   return (project.foreshadows || []).map((fs, index) => {
@@ -134,7 +134,7 @@ export function inRange(row, from, to) {
   return ok(row.origin.no) || row.payoffs.some((p) => ok(p.ref.no));
 }
 
-// 回収タブに出す伏線：この話まで（同じ話も含む）に張ったもので、選んだ状態のもの
+// 伏線タブの回収候補（タブ側では同じ話で張ったものを「この話で張った伏線」へ分ける）：この話まで（同じ話も含む）に張ったもので、選んだ状態のもの
 export function payoffCandidates(project, episodeId, statuses) {
   const nums = episodeNumbers(project);
   const current = nums.get(episodeId) ?? Infinity;

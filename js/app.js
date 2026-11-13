@@ -34,7 +34,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.13-0.66';
+const APP_VERSION = '2026.11.14-0.67';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -831,7 +831,7 @@ function showEpisode() {
   updateCounts();
   renderSiteTabs();
   renderEpisodeVersions().catch(() => {});
-  fsUI?.renderEpisode(); // 伏線・回収タブ
+  fsUI?.renderEpisode(); // 伏線タブ
 }
 
 // ---------- 活動報告（エピソードごと：ep.report = { x, narouTitle, narouBody, updatedAt }） ----------
@@ -1077,10 +1077,13 @@ function bindMemos() {
   $('memo-move-right').addEventListener('click', () => moveMemo(1));
 }
 
-// ---------- エピソード編集：プロット・フリーメモ・伏線・回収のタブ（端末ごとに覚える：prefs 'sideTab'） ----------
+// ---------- エピソード編集：プロット・フリーメモ・伏線のタブ（端末ごとに覚える：prefs 'sideTab'） ----------
 // タブ → 表示の設定で隠したときに body に付く印
-const SIDE_TABS = { plot: 'hide-plot', memo: 'hide-memo', foreshadow: 'hide-foreshadow', payoff: 'hide-foreshadow' };
+const SIDE_TABS = { plot: 'hide-plot', memo: 'hide-memo', foreshadow: 'hide-foreshadow' };
+// 0.66 の「回収」タブは 0.67 で「伏線」タブにまとめた（覚えていた 'payoff' は伏線タブとして開く）
+const sideTabName = (t) => (t === 'payoff' ? 'foreshadow' : t);
 function applySideTab(tab = prefs.get('sideTab', 'plot')) {
+  tab = sideTabName(tab);
   // 表示の設定で隠しているタブは出さず、選んでいたタブが隠れていたら、出ている最初のタブにする
   const shown = Object.keys(SIDE_TABS).filter((k) => !document.body.classList.contains(SIDE_TABS[k]));
   const t = shown.includes(tab) ? tab : (shown[0] || 'plot');
@@ -3823,7 +3826,7 @@ const importScreen = initImport({
   },
 });
 
-// 伏線（エピソードの「伏線」「回収」タブと、作品の「伏線一覧」）
+// 伏線（エピソードの「伏線」タブと、作品の「伏線一覧」）
 fsUI = initForeshadow({
   prefs, ask, toast,
   getProject: () => project,

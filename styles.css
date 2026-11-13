@@ -1202,8 +1202,7 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .side-tabs button[aria-selected="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 700; }
 .pane-side .plot-memo-splitter { display: none !important; }
 .pane-side:not([data-side-tab="plot"]) .field[data-field="plot"], .pane-side:not([data-side-tab="memo"]) .field[data-field="memo"],
-.pane-side:not([data-side-tab="foreshadow"]) .field[data-field="foreshadow"],
-.pane-side:not([data-side-tab="payoff"]) .field[data-field="payoff"] { display: none !important; }
+.pane-side:not([data-side-tab="foreshadow"]) .field[data-field="foreshadow"] { display: none !important; }
 .pane-side .field[data-field="plot"], .pane-side .field[data-field="memo"] { flex: 1 1 0 !important; }
 .pane-side [data-fold="plot"], .pane-side [data-fold="memo"] { display: none; }
 .side-tabs[hidden], .side-tabs button[hidden] { display: none !important; } /* 隠したタブ・1つだけのとき（JS で hidden） */
@@ -1212,7 +1211,7 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
   .memo-tabs button, .side-tabs button { min-height: 44px; }
 }
 
-/* 伏線・回収タブ（エピソード）と伏線一覧 */
+/* 伏線タブ（エピソード）と伏線一覧 */
 .pane-side .fs-pane { flex: 1 1 0 !important; min-height: 0; display: flex; flex-direction: column; gap: 6px; }
 .fs-pane-title { font-weight: 700; }
 .fs-epno { color: var(--muted, #666); font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
@@ -1225,6 +1224,9 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .fs-card-foot { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
 .fs-body { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 14px; }
 .fs-empty { color: var(--muted, #666); font-size: 14px; padding: 4px 2px; }
+.fs-add { align-self: flex-start; }
+.fs-add[hidden], .fs-form[hidden] { display: none !important; }
+.fs-section-title { font-size: 14px; font-weight: 700; margin: 6px 0 0; padding-bottom: 2px; border-bottom: 1px solid var(--border); }
 .fs-badge { display: inline-block; font-size: 12px; line-height: 1.6; padding: 0 8px; border-radius: 999px; border: 1px solid currentColor; white-space: nowrap; }
 .fs-st-open { color: #b4541a; }
 .fs-st-partial { color: #8a6d00; }

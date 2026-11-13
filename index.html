@@ -288,11 +288,10 @@
 
         <section class="pane pane-side" data-pane="side">
           <!-- プロットとフリーメモはタブで切り替える -->
-          <div class="side-tabs" id="side-tabs" role="tablist" aria-label="プロット・フリーメモ・伏線・回収">
+          <div class="side-tabs" id="side-tabs" role="tablist" aria-label="プロット・フリーメモ・伏線">
             <button type="button" role="tab" data-side-tab="plot" aria-selected="true">プロット</button>
             <button type="button" role="tab" data-side-tab="memo" aria-selected="false">フリーメモ</button>
-            <button type="button" role="tab" data-side-tab="foreshadow" aria-selected="false" title="この話で張った伏線を登録">伏線</button>
-            <button type="button" role="tab" data-side-tab="payoff" aria-selected="false" title="これまでの伏線の回収を記録">回収</button>
+            <button type="button" role="tab" data-side-tab="foreshadow" aria-selected="false" title="この話で張った伏線の登録と、これまでの伏線の回収">伏線</button>
           </div>
           <section class="field mx grow" data-field="plot">
             <div class="field-head">
@@ -329,39 +328,33 @@
             </div>
             <textarea id="free-memo" spellcheck="false" placeholder="修正したいこと、備忘録、書いていて気付いたことなど（なろう用・アルファ用で共通）"></textarea>
           </section>
-          <!-- 伏線：この話で張った伏線（フォームで登録） -->
+          <!-- 伏線：この話で張った伏線の登録と、この話での回収の記録（0.67 で「回収」タブをまとめた） -->
           <section class="field grow fs-pane" data-field="foreshadow">
             <div class="field-head">
-              <span class="fs-pane-title">この話で張った伏線</span>
+              <span class="fs-pane-title">伏線</span>
               <span class="fs-epno" id="fs-epno"></span>
             </div>
             <div class="fs-scroll">
-              <ul class="fs-cards" id="fs-here"></ul>
-              <form class="fs-form" id="fs-form" autocomplete="off">
+              <button type="button" class="fs-add" id="fs-add">＋伏線を追加</button>
+              <form class="fs-form" id="fs-form" autocomplete="off" hidden>
                 <div class="fs-form-head" id="fs-form-head">伏線を登録</div>
                 <label class="stack">名前 <input type="text" name="title" maxlength="200" spellcheck="false" placeholder="例：祖父の懐中時計" required></label>
                 <label class="stack">内容 <textarea name="body" rows="4" spellcheck="false" placeholder="どんな伏線を張ったか（あとで回収するときの手がかり）"></textarea></label>
                 <div class="fs-form-foot">
-                  <button type="button" id="fs-form-cancel" hidden>編集をやめる</button>
+                  <button type="button" id="fs-form-cancel">やめる</button>
                   <button type="submit" class="primary" id="fs-form-submit">登録</button>
                 </div>
               </form>
-            </div>
-          </section>
-          <!-- 回収：この話までに張った伏線を出し、この話での回収を記録する -->
-          <section class="field grow fs-pane" data-field="payoff">
-            <div class="field-head">
-              <span class="fs-pane-title">伏線の回収</span>
-              <span class="fs-epno" id="payoff-epno"></span>
-            </div>
-            <div class="fs-filter" id="payoff-filter">
-              <label><input type="checkbox" data-payoff-status="open"> 未回収</label>
-              <label><input type="checkbox" data-payoff-status="partial"> 部分回収済み</label>
-              <label><input type="checkbox" data-payoff-status="resolved"> 回収済み</label>
-              <label><input type="checkbox" data-payoff-status="dropped"> 取りやめ</label>
-              <input type="search" id="payoff-search" placeholder="名前・内容で絞り込み" aria-label="回収する伏線を絞り込み">
-            </div>
-            <div class="fs-scroll">
+              <h3 class="fs-section-title">この話で張った伏線</h3>
+              <ul class="fs-cards" id="fs-here"></ul>
+              <h3 class="fs-section-title">これまでの伏線（回収候補）</h3>
+              <div class="fs-filter" id="payoff-filter">
+                <label><input type="checkbox" data-payoff-status="open"> 未回収</label>
+                <label><input type="checkbox" data-payoff-status="partial"> 部分回収済み</label>
+                <label><input type="checkbox" data-payoff-status="resolved"> 回収済み</label>
+                <label><input type="checkbox" data-payoff-status="dropped"> 取りやめ</label>
+                <input type="search" id="payoff-search" placeholder="名前・内容で絞り込み" aria-label="これまでの伏線を絞り込み">
+              </div>
               <ul class="fs-cards" id="payoff-list"></ul>
             </div>
           </section>
@@ -449,7 +442,7 @@
     <!-- 伏線一覧（発生と回収の対応） -->
     <section class="view scroll" id="view-foreshadows" hidden>
       <h1 class="view-title">伏線一覧</h1>
-      <p class="hint">伏線は、エピソードの「伏線」タブで登録し、「回収」タブで回収・部分回収を記録します。話数は目次の並び順（第1話からの通し番号）です。状態はここで選び直せます。話数を押すと、そのエピソードへ移ります。</p>
+      <p class="hint">伏線は、エピソードの「伏線」タブで登録し、回収・部分回収も同じタブで記録します。話数は目次の並び順（第1話からの通し番号）です。状態はここで選び直せます。話数を押すと、そのエピソードへ移ります。</p>
       <div class="fs-list-filter">
         <fieldset class="fs-status-filter">
           <legend>状態</legend>
@@ -1180,7 +1173,7 @@
       <label><input type="checkbox" data-ui="show.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
       <label><input type="checkbox" data-ui="show.memo"> フリーメモ</label>
-      <label><input type="checkbox" data-ui="show.foreshadow"> 伏線・回収タブ</label>
+      <label><input type="checkbox" data-ui="show.foreshadow"> 伏線タブ</label>
       <label><input type="checkbox" data-ui="show.report"> 活動報告タブ</label>
     </fieldset>
     <fieldset class="checks">
