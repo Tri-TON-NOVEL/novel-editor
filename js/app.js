@@ -36,7 +36,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.16-0.72';
+const APP_VERSION = '2026.11.16-0.73';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -362,17 +362,53 @@ function renderFoldInfo() {
 
 // ---------- 全て選択（その欄の文字をすべて選ぶ） ----------
 function selectAllIn(id) {
-  const t = $(id);
+  const t = revealField(id);
   if (!t) return;
+  t.focus();
+  t.select();
+  t.setSelectionRange(0, t.value.length);
+}
+
+// 欄が折りたたみ・閉じたタブの中にあれば開いて、その欄を返す
+function revealField(id) {
+  const t = $(id);
+  if (!t) return null;
   if (id === 'foreword') $('foreword-box').open = true;
   if (id === 'afterword') $('afterword-box').open = true;
   const fold = { body: 'body', plot: 'plot', 'free-memo': 'memo' }[id];
   if (fold && isFolded(fold)) setFolded(fold, false);
   const pane = t.closest('[data-pane]');
   if (pane) selectTab(pane.dataset.pane);
-  t.focus();
-  t.select();
-  t.setSelectionRange(0, t.value.length);
+  // プロット・フリーメモは、横のタブ（プロット／フリーメモ／伏線）でその欄を出す
+  const side = { plot: 'plot', 'free-memo': 'memo' }[id];
+  if (side && document.querySelector('.pane-side')?.dataset.sideTab !== side) {
+    prefs.set('sideTab', side);
+    applySideTab(side);
+  }
+  return t;
+}
+
+// ---------- 貼り付け（0.73。クリップボードの文字を、その欄のカーソル位置へ。選んでいる文字があれば置き換え） ----------
+async function pasteInto(id) {
+  const t = revealField(id);
+  if (!t) return;
+  let text;
+  try {
+    if (!navigator.clipboard?.readText) throw new Error('unsupported');
+    text = await navigator.clipboard.readText();
+  } catch {
+    t.focus();
+    toast('クリップボードを読めませんでした。欄を長押し（パソコンは Ctrl+V）で貼り付けてください', true);
+    return;
+  }
+  if (!text) { t.focus(); toast('クリップボードに文字がありません', true); return; }
+  // 欄が見えていない（表示の設定で隠しているなど）ときは、ほかの欄へ入らないよう貼り付けない
+  t.focus({ preventScroll: true });
+  if (document.activeElement !== t) { toast('この欄が表示されていないため、貼り付けできませんでした', true); return; }
+  if (t.tagName === 'INPUT') text = text.replace(/\r\n|\r|\n/g, ' '); // 1行の欄は改行を空白に
+  else text = text.replace(/\r\n?/g, '\n');
+  if (narouPasteNeedsConversion(t, text)) pasteConvertedForNarou(t, text);
+  else replaceSelection(t, text);
 }
 
 // ---------- 自動保存 ----------
@@ -4222,14 +4258,20 @@ function jumpToText(t, index, length) {
 //   アルファポリスの書き方（ルビ #漢字__かんじ__#・傍点 《《傍点》》）→ なろうの書き方に変換する。画像タグはそのまま
 //   みてみんの画像ページの URL → なろうの挿絵タグ
 function onBodyPaste(e) {
-  if (editSite !== 'narou') return;
-  const t = e.currentTarget;
   const text = e.clipboardData?.getData('text/plain');
-  if (!text) return;
+  if (!text || !narouPasteNeedsConversion(e.currentTarget, text)) return;
+  e.preventDefault();
+  pasteConvertedForNarou(e.currentTarget, text);
+}
+
+// なろう用の本文・前書き・後書きで、変換が必要な文字か（「貼り付け」ボタンでも使う）
+function narouPasteNeedsConversion(t, text) {
+  return editSite === 'narou' && [el.body, el.foreword, el.afterword].includes(t) && (countAlphaNotation(text) > 0 || hasMiteminUrl(text));
+}
+
+function pasteConvertedForNarou(t, text) {
   const alpha = countAlphaNotation(text);
   const mitemin = hasMiteminUrl(text);
-  if (!alpha && !mitemin) return;
-  e.preventDefault();
   const conv = convertText('alpha', 'narou', text, { keepImages: true });
   replaceSelection(t, conv.text);
   const msg = [];
@@ -4806,6 +4848,8 @@ const UI_TARGETS = {
     .map((k) => ['count.' + k, () => $('count-' + k)])),
   ...Object.fromEntries(['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'project-memo', 'x-text', 'narou-report-title', 'narou-report-body']
     .map((k) => ['selall.' + k, () => document.querySelector(`[data-selall="${k}"]`)])),
+  ...Object.fromEntries(['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'project-memo', 'x-text', 'narou-report-title', 'narou-report-body']
+    .map((k) => ['paste.' + k, () => document.querySelector(`[data-paste="${k}"]`)])),
 };
 
 function applyUiPrefs() {
@@ -5696,6 +5740,11 @@ function bindEvents() {
   document.querySelectorAll('[data-selall]').forEach((b) => {
     b.addEventListener('pointerdown', (e) => e.preventDefault());
     b.addEventListener('click', () => selectAllIn(b.dataset.selall));
+  });
+  // 貼り付け（押してもカーソル位置が変わらないよう、押した時点ではフォーカスを動かさない）
+  document.querySelectorAll('[data-paste]').forEach((b) => {
+    b.addEventListener('pointerdown', (e) => e.preventDefault());
+    b.addEventListener('click', () => pasteInto(b.dataset.paste).catch(fail));
   });
   // 本文・プロット・フリーメモの折りたたみ
   document.querySelectorAll('[data-fold]').forEach((b) => b.addEventListener('click', () => setFolded(b.dataset.fold, !isFolded(b.dataset.fold))));

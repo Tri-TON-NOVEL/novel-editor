@@ -160,6 +160,7 @@
               <button type="button" class="tool" data-action="open-x" title="「リンク」の X の URL を開きます">X を開く</button>
               <button type="button" class="tool selall-btn" data-selall="x-text">全て選択</button>
               <button type="button" class="copy" data-copy="x-text">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="x-text" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
             </div>
             <textarea id="x-text" spellcheck="false" placeholder="X に投稿する文章"></textarea>
           </section>
@@ -180,6 +181,7 @@
               <button type="button" class="tool" data-action="open-narou-report" title="「リンク」のなろう活動報告の URL を開きます">なろう活動報告を開く</button>
               <button type="button" class="tool selall-btn" data-selall="narou-report-title">全て選択</button>
               <button type="button" class="copy" data-copy="narou-report-title">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="narou-report-title" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
             </div>
             <input id="narou-report-title" type="text" autocomplete="off" placeholder="活動報告のタイトル">
           </section>
@@ -191,6 +193,7 @@
               <button type="button" class="tool" data-find="narou-report-body">検索</button>
               <button type="button" class="tool selall-btn" data-selall="narou-report-body">全て選択</button>
               <button type="button" class="copy" data-copy="narou-report-body">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="narou-report-body" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
             </div>
             <textarea id="narou-report-body" spellcheck="false" placeholder="活動報告の本文"></textarea>
           </section>
@@ -207,6 +210,7 @@
           <button type="button" class="tool max-btn" data-max="title" aria-label="エピソードタイトルを最大化" title="最大化">⤢</button>
           <button type="button" class="tool selall-btn" data-selall="ep-title">全て選択</button>
           <button type="button" class="copy" data-copy="ep-title">コピー</button>
+          <button type="button" class="tool paste-btn" data-paste="ep-title" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
         </div>
         <input id="ep-title" type="text" autocomplete="off" placeholder="エピソードタイトル（サブタイトル）">
       </section>
@@ -245,6 +249,7 @@
               <button type="button" class="tool max-btn" data-max="body" aria-label="本文を最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="body" data-max-tool="select-all">全て選択</button>
               <button type="button" class="copy" data-copy="body" data-max-tool="copy">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="body" data-max-tool="paste" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
               <button type="button" class="tool jump-btn" data-jump="body" data-to="top" data-max-tool="jump-top" title="本文の一番上へ" aria-label="本文の一番上へ">↑</button>
               <button type="button" class="tool jump-btn" data-jump="body" data-to="bottom" data-max-tool="jump-bottom" title="本文の一番下へ" aria-label="本文の一番下へ">↓</button>
             </div>
@@ -262,6 +267,7 @@
                 <button type="button" class="tool max-btn" data-max="foreword" aria-label="前書きを最大化" title="最大化">⤢</button>
                 <button type="button" class="tool selall-btn" data-selall="foreword">全て選択</button>
                 <button type="button" class="copy" data-copy="foreword">コピー</button>
+                <button type="button" class="tool paste-btn" data-paste="foreword" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
               </div>
               <textarea id="foreword" rows="3" spellcheck="false" placeholder="前書き（なろうではサブタイトルの前に表示されます）"></textarea>
             </div>
@@ -278,6 +284,7 @@
                 <button type="button" class="tool max-btn" data-max="afterword" aria-label="後書きを最大化" title="最大化">⤢</button>
                 <button type="button" class="tool selall-btn" data-selall="afterword">全て選択</button>
                 <button type="button" class="copy" data-copy="afterword">コピー</button>
+                <button type="button" class="tool paste-btn" data-paste="afterword" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
               </div>
               <textarea id="afterword" rows="3" spellcheck="false" placeholder="後書き"></textarea>
             </div>
@@ -305,6 +312,7 @@
               <button type="button" class="tool max-btn" data-max="plot" aria-label="プロットを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="plot">全て選択</button>
               <button type="button" class="copy" data-copy="plot">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="plot" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
               <button type="button" class="tool jump-btn" data-jump="plot" data-to="top" title="プロットの一番上へ" aria-label="プロットの一番上へ">↑</button>
               <button type="button" class="tool jump-btn" data-jump="plot" data-to="bottom" title="プロットの一番下へ" aria-label="プロットの一番下へ">↓</button>
             </div>
@@ -323,6 +331,7 @@
               <button type="button" class="tool max-btn" data-max="memo" aria-label="フリーメモを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="free-memo">全て選択</button>
               <button type="button" class="copy" data-copy="free-memo">コピー</button>
+              <button type="button" class="tool paste-btn" data-paste="free-memo" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
               <button type="button" class="tool jump-btn" data-jump="free-memo" data-to="top" title="フリーメモの一番上へ" aria-label="フリーメモの一番上へ">↑</button>
               <button type="button" class="tool jump-btn" data-jump="free-memo" data-to="bottom" title="フリーメモの一番下へ" aria-label="フリーメモの一番下へ">↓</button>
             </div>
@@ -438,6 +447,7 @@
           <button type="button" class="tool" data-find="project-memo">検索</button>
           <button type="button" class="tool selall-btn" data-selall="project-memo">全て選択</button>
           <button type="button" class="copy" data-copy="project-memo">コピー</button>
+          <button type="button" class="tool paste-btn" data-paste="project-memo" title="クリップボードの文字を、カーソルの位置へ貼り付けます">貼り付け</button>
         </div>
         <textarea id="project-memo" spellcheck="false" placeholder="作品全体についてのメモ（エピソードごとのフリーメモとは別です）"></textarea>
       </section>
@@ -1233,6 +1243,20 @@
       <label><input type="checkbox" data-ui="copy.main-to-sub"> メイン → サブにコピー</label>
     </fieldset>
     <fieldset class="checks">
+      <legend>貼り付けボタン</legend>
+      <label><input type="checkbox" data-ui="paste.ep-title"> エピソードタイトル</label>
+      <label><input type="checkbox" data-ui="paste.body"> 本文</label>
+      <label><input type="checkbox" data-ui="paste.foreword"> 前書き</label>
+      <label><input type="checkbox" data-ui="paste.afterword"> 後書き</label>
+      <label><input type="checkbox" data-ui="paste.plot"> プロット</label>
+      <label><input type="checkbox" data-ui="paste.free-memo"> フリーメモ</label>
+      <label><input type="checkbox" data-ui="paste.project-memo"> 作品のメモ</label>
+      <label><input type="checkbox" data-ui="paste.x-text"> X の投稿文</label>
+      <label><input type="checkbox" data-ui="paste.narou-report-title"> 活動報告のタイトル</label>
+      <label><input type="checkbox" data-ui="paste.narou-report-body"> 活動報告の本文</label>
+      <p class="hint">押すと、クリップボードの文字をカーソルの位置へ貼り付けます（選んでいる文字があれば置き換え）。なろう用の本文・前書き・後書きでは、Ctrl+V と同じくアルファポリスのルビ・傍点を変換します。初めて押したとき、ブラウザーがクリップボードの読み取りを許可するか聞くことがあります。</p>
+    </fieldset>
+    <fieldset class="checks">
       <legend>最大化ボタン</legend>
       <label><input type="checkbox" data-ui="max.title"> エピソードタイトル</label>
       <label><input type="checkbox" data-ui="max.body"> 本文</label>
@@ -1265,6 +1289,7 @@
       <label><input type="checkbox" data-ui="max.tool.image-list"> 画像一覧</label>
       <label><input type="checkbox" data-ui="max.tool.select-all"> 全て選択</label>
       <label><input type="checkbox" data-ui="max.tool.copy"> コピー</label>
+      <label><input type="checkbox" data-ui="max.tool.paste"> 貼り付け</label>
       <label><input type="checkbox" data-ui="max.tool.jump-top"> 本文の一番上へ</label>
       <label><input type="checkbox" data-ui="max.tool.jump-bottom"> 本文の一番下へ</label>
       <p class="hint">最大化中に必要なボタンだけを選べます。ボタンを減らすと、本文入力欄をより広く使えます。</p>

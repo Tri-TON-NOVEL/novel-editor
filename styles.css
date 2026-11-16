@@ -412,7 +412,7 @@ body.hide-plot .plot-memo-splitter, body.hide-memo .plot-memo-splitter,
 .field.folded > :not(.field-head) { display: none !important; }
 .field.folded { flex: 0 0 auto !important; min-height: 0 !important; }
 /* 全て選択 */
-.selall-btn { white-space: nowrap; min-height: 32px; }
+.selall-btn, .paste-btn { white-space: nowrap; min-height: 32px; }
 
 /* 「表示」で隠した部品 */
 .ui-off { display: none !important; }
