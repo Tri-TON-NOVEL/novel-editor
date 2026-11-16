@@ -12,6 +12,7 @@ export const CHARACTER_COLUMNS = [
   { key: 'reading', label: '読み', width: '8em' },
   { key: 'age', label: '年齢', width: '4.5em' },
   { key: 'gender', label: '性別', width: '4.5em' },
+  { key: 'pronoun', label: '自己人称', width: '6em' }, // 0.68：自分のことを何と呼ぶか（俺・私・わたくし など）
   { key: 'role', label: '役割・立場', width: '10em' },
   { key: 'orgs', label: '所属', width: '11em', kind: 'orgs' },
   { key: 'identityId', label: '同一人物（別名）', width: '10em', kind: 'alias' },
@@ -29,7 +30,7 @@ export const WORLD_COLUMNS = [
 
 // 「テキストに書き出す」で最初から選んでおく列
 const EXPORT_DEFAULT = {
-  characters: ['name', 'reading', 'age', 'gender', 'role', 'orgs', 'traits'],
+  characters: ['name', 'reading', 'age', 'gender', 'pronoun', 'role', 'orgs', 'traits'],
   world: ['name', 'reading', 'detail'],
 };
 

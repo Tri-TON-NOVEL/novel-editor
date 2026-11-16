@@ -101,8 +101,9 @@ function narouToAlpha(text, warnings) {
   return t;
 }
 
-function alphaToNarou(text, warnings) {
-  let t = text.replace(ALPHA_IMAGE, (m, id) => {
+function alphaToNarou(text, warnings, opts = {}) {
+  // keepImages：画像タグはそのまま残す（アルファの文章をなろう用の本文へ貼り付けたとき）
+  let t = opts.keepImages ? text : text.replace(ALPHA_IMAGE, (m, id) => {
     addWarning(warnings, 'image', 'アルファポリスの画像タグを「ここに画像を挿入」の目印にしました。なろうでは、みてみんの画像で入れ直してください', m);
     return imageMark(id);
   });
@@ -125,12 +126,13 @@ function alphaToNarou(text, warnings) {
 
 /**
  * from の記法で書かれた文章を to の記法へ変換する。変換できないものは原文のまま残し、warnings に入れる。
+ * opts.keepImages（アルファ → なろうのとき）：アルファの画像タグを目印にせず、そのまま残す。
  * @returns {{ text: string, warnings: { type, message, count, samples }[] }}
  */
-export function convertText(from, to, text) {
+export function convertText(from, to, text, opts = {}) {
   const warnings = [];
   if (!text || from === to) return { text: text || '', warnings };
-  const out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings);
+  const out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings, opts);
   return { text: out, warnings };
 }
 
@@ -256,3 +258,26 @@ export const DEFAULT_TEMPLATES = [
     body: 'お読みいただきありがとうございます！\n「面白かった」「続きが気になる」と思っていただけたら、\nブックマークや下の☆☆☆☆☆での評価をいただけると励みになります。',
   },
 ];
+
+// ---------- アルファポリスの書き方が入っているか（なろう用の本文へ貼り付けたときに変換する） ----------
+// 戻り値：ルビ・傍点の数（0 ならアルファの書き方はない）
+export function countAlphaNotation(text) {
+  if (!text) return 0;
+  return [...text.matchAll(ALPHA_RUBY)].length + [...text.matchAll(ALPHA_DOTS)].length;
+}
+export function countAlphaImages(text) {
+  return text ? [...text.matchAll(ALPHA_IMAGE)].length : 0;
+}
+
+// ---------- 本文の中の画像の書き方の範囲（入力欄で色を付ける） ----------
+// なろうの挿絵タグ・みてみんの URL・アルファの画像タグ・「ここに画像を挿入」の目印。[開始, 終わり] の並び（重なりなし）
+const IMAGE_MARK = /【ここに画像を挿入：[^】\n]*】/g;
+export function imageRanges(text) {
+  if (!text) return [];
+  const all = findImages(text).map((i) => [i.index, i.index + i.text.length]);
+  for (const m of text.matchAll(IMAGE_MARK)) all.push([m.index, m.index + m[0].length]);
+  all.sort((a, b) => a[0] - b[0] || b[1] - a[1]);
+  const out = [];
+  for (const r of all) if (!out.length || r[0] >= out.at(-1)[1]) out.push(r);
+  return out;
+}

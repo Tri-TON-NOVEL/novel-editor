@@ -31,6 +31,7 @@ export function initForeshadow(opts) {
   const { getProject, getEpisode, changed, ask, toast, prefs } = opts;
   let editingId = ''; // 「伏線」タブで編集中の伏線
   let draft = null; // 開いている回収の記録欄 { fsId, eventId, kind, body }
+  let pastFor = ''; // 「これまでの伏線」を出しているエピソードの id（ほかの話を開くと、また隠れる）
 
   const list = () => {
     const p = getProject();
@@ -129,6 +130,11 @@ export function initForeshadow(opts) {
     });
   });
   $('payoff-search').addEventListener('input', () => renderEpisode());
+  $('fs-past-toggle').addEventListener('click', () => {
+    const ep = getEpisode();
+    pastFor = pastFor === ep.id ? '' : ep.id;
+    renderEpisode();
+  });
 
   function payoffForm(fs) {
     const kindName = `payoff-kind-${fs.id}`;
@@ -217,7 +223,17 @@ export function initForeshadow(opts) {
     $('fs-here').replaceChildren(...(mine.length ? mine.map((r) => card(r, ep, ref, true))
       : [h('li', { class: 'fs-empty', text: 'この話で張った伏線はまだありません。「＋伏線を追加」から登録できます。' })]));
 
-    // これまでの伏線（前の話までに張ったもの）
+    // これまでの伏線（前の話までに張ったもの）。「表示する」を押したときだけ並べる
+    const showPast = pastFor === ep.id;
+    $('fs-past').hidden = !showPast;
+    const toggle = $('fs-past-toggle');
+    toggle.textContent = showPast ? '隠す' : '表示する';
+    toggle.setAttribute('aria-expanded', String(showPast));
+    if (!showPast) {
+      $('payoff-list').replaceChildren();
+      if (draft && !mine.some((r) => r.fs.id === draft.fsId)) draft = null;
+      return;
+    }
     const statuses = payoffStatuses();
     document.querySelectorAll('[data-payoff-status]').forEach((c) => { c.checked = statuses.includes(c.dataset.payoffStatus); });
     const q = $('payoff-search').value;
@@ -278,15 +294,16 @@ export function initForeshadow(opts) {
     empty.hidden = rows.length > 0;
     empty.textContent = all.length ? '条件に合う伏線はありません。' : 'まだ伏線がありません。エピソードの「伏線」タブで登録します。';
     $('fsl-table').hidden = !rows.length;
-    const epLink = (ref, episodeId, tab) => h('button', { type: 'button', class: 'fs-ep-link', text: episodeLabel(ref), disabled: ref.deleted || undefined,
-      onclick: () => opts.openEpisode(episodeId, tab) });
+    // past：回収の話数から移るときは、そこで回収した伏線が見えるよう「これまでの伏線」も出す
+    const epLink = (ref, episodeId, tab, past = false) => h('button', { type: 'button', class: 'fs-ep-link', text: episodeLabel(ref), disabled: ref.deleted || undefined,
+      onclick: () => { if (past) pastFor = episodeId; opts.openEpisode(episodeId, tab); } });
     $('fsl-body').replaceChildren(...rows.map(({ fs, origin, payoffs }) => h('tr', {},
       h('td', { 'data-label': '状態' }, statusSelect(fs)),
       h('td', { 'data-label': '発生', class: 'fs-origin' }, epLink(origin, fs.episodeId, 'foreshadow'), origin.title ? h('span', { class: 'fs-ep-title', text: origin.title }) : null),
       h('td', { 'data-label': '名前', class: 'fs-name' }, fs.title || '（名前なし）'),
       h('td', { 'data-label': '内容', class: 'fs-body' }, fs.body),
       h('td', { 'data-label': '回収・部分回収' }, payoffs.length ? h('ul', { class: 'fs-events' }, payoffs.map(({ ev, ref }) => h('li', {},
-        epLink(ref, ev.episodeId, 'foreshadow'),
+        epLink(ref, ev.episodeId, 'foreshadow', true),
         h('span', { class: `fs-kind fs-kind-${ev.kind}`, text: PAYOFF_KIND[ev.kind] }),
         ev.body ? h('span', { class: 'fs-event-body', text: ev.body }) : null))) : h('span', { class: 'fs-none', text: '—' })),
       h('td', { class: 'fs-actions' }, h('button', { type: 'button', class: 'tool', text: '編集', onclick: () => openEditDialog(fs) })),
@@ -374,6 +391,6 @@ export function initForeshadow(opts) {
     renderEpisode,
     renderList,
     // 作品を替えたときなど：編集中の状態を消す
-    reset() { resetForm(); draft = null; },
+    reset() { resetForm(); draft = null; pastFor = ''; },
   };
 }

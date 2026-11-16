@@ -26,15 +26,17 @@ import { ask, askText, choose, inform } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
   miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
+  countAlphaNotation, countAlphaImages,
 } from './notation.js';
 import { localFile, WORK_TYPES, TEXT_TYPES, BACKUP_TYPES } from './localfile.js';
+import { attachImageHighlight } from './bodyhighlight.js';
 import { providers, activeProvider } from './providers/index.js';
 
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.14-0.67';
+const APP_VERSION = '2026.11.16-0.68';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -60,6 +62,7 @@ let view = 'episode';   // VIEWS のいずれか
 // 活動報告はエピソードの画面の中（「活動報告」タブ）。6.0 より前は独立した画面だった
 const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows'];
 let fsUI = null;        // 伏線の画面（initForeshadow）
+let bodyHL = null;      // 本文の画像の書き方に色を付ける（attachImageHighlight）
 let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
 let saveTimer = null;
 let dirty = false;
@@ -315,6 +318,7 @@ function updateCounts() {
   setCount('foreword', el.foreword.value);
   setCount('body', el.body.value);
   $('image-count').textContent = String(findImages(el.body.value).length);
+  bodyHL?.update(); // 画像の書き方に色を付ける
   setCount('afterword', el.afterword.value);
   setCount('plot', el.plot.value);
   setCount('free-memo', el.freeMemo.value);
@@ -2287,8 +2291,9 @@ async function openSiteCopy() {
   const ep = episode();
   const [src, dest] = [await ensureEdition(ep, from), await ensureEdition(ep, to)];
   const next = `第${nextEditionNo(dest.list)}稿`;
-  $('site-copy-title').textContent = `${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
-  $('site-copy-desc').textContent = `「${episodeName(ep)}」の、メインの今の稿（${src.cur.name}）を${SITES[to].label}の書き方に変換して、サブ側へ写します。メイン側は変わりません。`;
+  // コピーするのは開いているエピソードだけ（題に話数を出して分かるようにする）
+  $('site-copy-title').textContent = `第${project.episodes.indexOf(ep) + 1}話：${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
+  $('site-copy-desc').textContent = `このエピソード「${episodeName(ep)}」だけが対象です（ほかのエピソードは変わりません）。メインの今の稿（${src.cur.name}）を${SITES[to].label}の書き方に変換して、サブ側へ写します。メイン側は変わりません。`;
   $('site-copy-mode-new').textContent = `新しい稿（${SITES[to].short}用の${next}）として追加（おすすめ。今の${dest.cur.name}はそのまま残ります）`;
   $('site-copy-mode-over').textContent = `${SITES[to].short}用の今の稿（${dest.cur.name}）に上書き`;
   $('site-copy-form').dataset.overName = dest.cur.name;
@@ -4120,25 +4125,89 @@ function jumpField(key, to) {
   }
 }
 
-// 入力欄の中の位置を選んで、見える所までスクロールする
+// 入力欄の中で index の文字が、内容の上から何ピクセル目にあるか（同じ書式の見えない箱に並べて測る）
+function textOffsetTop(t, index) {
+  const cs = getComputedStyle(t);
+  const m = document.createElement('div');
+  for (const p of ['fontFamily', 'fontSize', 'fontWeight', 'fontStyle', 'fontFeatureSettings', 'letterSpacing', 'wordSpacing', 'lineHeight',
+    'textIndent', 'tabSize', 'wordBreak', 'lineBreak', 'overflowWrap', 'paddingTop', 'paddingRight', 'paddingBottom', 'paddingLeft',
+    'borderTopWidth', 'borderRightWidth', 'borderBottomWidth', 'borderLeftWidth']) m.style[p] = cs[p];
+  Object.assign(m.style, {
+    position: 'absolute', visibility: 'hidden', left: '-9999px', top: '0', boxSizing: 'border-box', borderStyle: 'solid',
+    whiteSpace: 'pre-wrap', width: t.clientWidth + (parseFloat(cs.borderLeftWidth) || 0) + (parseFloat(cs.borderRightWidth) || 0) + 'px',
+  });
+  m.textContent = t.value.slice(0, index);
+  const mark = document.createElement('span');
+  mark.textContent = '\u200b';
+  m.append(mark);
+  document.body.append(m);
+  const top = mark.offsetTop;
+  m.remove();
+  return top;
+}
+
+// 画面（またはスクロールする親）を動かして、入力欄の y の行が見える所へ
+function scrollLineIntoView(t, y) {
+  const lh = parseFloat(getComputedStyle(t).lineHeight) || 30;
+  const lineTop = t.getBoundingClientRect().top + (y - t.scrollTop);
+  let box = t.parentElement;
+  while (box && box !== document.body) {
+    const o = getComputedStyle(box).overflowY;
+    if ((o === 'auto' || o === 'scroll') && box.scrollHeight > box.clientHeight + 1) break;
+    box = box.parentElement;
+  }
+  const vv = window.visualViewport;
+  const viewTop = vv ? vv.offsetTop : 0;
+  const viewH = vv ? vv.height : window.innerHeight;
+  const area = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const top = Math.max(area.top, viewTop);
+  const bottom = Math.min(area.bottom, viewTop + viewH);
+  if (lineTop >= top && lineTop + lh <= bottom) return; // もう見えている
+  const delta = lineTop - (top + (bottom - top) / 3);
+  if (box && box !== document.body) box.scrollTop += delta;
+  else window.scrollBy(0, delta);
+}
+
+// 入力欄の中の位置を選んで、見える所までスクロールする（本文の検索・画像の一覧の「本文のこの位置へ」）
+// focus と setSelectionRange だけでは、スマホ・タブレットや、画面ごとスクロールする狭い画面でその位置まで動かないことがあるので、
+// 位置を測って、入力欄の中と画面の両方をスクロールする
 function jumpToText(t, index, length) {
   const pane = t.closest('[data-pane]');
   if (pane) selectTab(pane.dataset.pane);
-  t.focus();
-  t.setSelectionRange(index, index);
-  // 選択した位置までスクロールさせるため、一度その位置まで選び直す
-  t.blur();
-  t.focus();
+  t.focus({ preventScroll: true });
   t.setSelectionRange(index, index + length);
+  const go = () => {
+    const y = textOffsetTop(t, index);
+    if (t.scrollHeight > t.clientHeight + 1) t.scrollTop = Math.max(0, y - t.clientHeight / 3);
+    scrollLineIntoView(t, y);
+  };
+  go();
+  requestAnimationFrame(go);
+  // 指で触る端末では、キーボードが出て見える範囲が変わるので、出終わったころにもう一度合わせる
+  if (matchMedia('(pointer: coarse)').matches) setTimeout(go, 450);
 }
 
+// なろう用の本文・前書き・後書きへの貼り付け
+//   アルファポリスの書き方（ルビ #漢字__かんじ__#・傍点 《《傍点》》）→ なろうの書き方に変換する。画像タグはそのまま
+//   みてみんの画像ページの URL → なろうの挿絵タグ
 function onBodyPaste(e) {
   if (editSite !== 'narou') return;
+  const t = e.currentTarget;
   const text = e.clipboardData?.getData('text/plain');
-  if (!text || !hasMiteminUrl(text)) return;
+  if (!text) return;
+  const alpha = countAlphaNotation(text);
+  const mitemin = hasMiteminUrl(text);
+  if (!alpha && !mitemin) return;
   e.preventDefault();
-  replaceSelection(el.body, miteminToTag(text));
-  toast('みてみんのURLを挿絵タグに変換しました');
+  const conv = convertText('alpha', 'narou', text, { keepImages: true });
+  replaceSelection(t, conv.text);
+  const msg = [];
+  if (alpha) msg.push(`アルファポリスのルビ・傍点（${alpha}件）を、なろうの書き方に変換して貼り付けました`);
+  if (mitemin) msg.push('みてみんのURLを挿絵タグに変換しました');
+  const images = countAlphaImages(text);
+  if (images) msg.push(`アルファポリスの画像タグ（${images}件）はそのままです`);
+  for (const w of conv.warnings) msg.push(`⚠ ${w.message}（${w.count}件）`);
+  toast(msg.join('\n'));
 }
 
 function selectTab(name) {
@@ -5402,7 +5471,9 @@ function bindEvents() {
     });
   }
   el.site.addEventListener('change', () => changeSite(el.site.value));
-  el.body.addEventListener('paste', onBodyPaste);
+  bodyHL = attachImageHighlight(el.body);
+  bodyHL.update();
+  for (const t of [el.body, el.foreword, el.afterword]) t.addEventListener('paste', onBodyPaste);
   for (const t of [el.foreword, el.body, el.afterword]) t.addEventListener('focus', () => { editTarget = t; });
   document.addEventListener('focusin', (e) => {
     if (e.target.matches('textarea, input[type="text"], input[type="url"]') && !e.target.closest('dialog')) lastEditable = e.target;

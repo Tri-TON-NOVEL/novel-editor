@@ -1314,3 +1314,23 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .fs-filter input[type="search"], .fs-list-filter input[type="search"], .fs-list-filter input[type="number"] {
   background: var(--surface); color: var(--text); border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; font: inherit; min-height: 36px; box-sizing: border-box;
 }
+
+/* 本文の画像の書き方に色を付ける（0.68）。入力欄の後ろに置いた下敷きで、画像の部分にだけ黄色の下地を塗る */
+:root { --img-hl: #ffe45c; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --img-hl: rgba(255, 208, 0, 0.42); } }
+:root[data-theme="dark"] { --img-hl: rgba(255, 208, 0, 0.42); }
+.text-hl-host:not(.maximized) { position: relative; } /* 最大化中は position: fixed のまま（それでも位置の基準になる） */
+.text-hl {
+  position: absolute; box-sizing: border-box; border-style: solid; border-color: transparent;
+  background: var(--surface); overflow: hidden; pointer-events: none; z-index: 0;
+  white-space: pre-wrap; color: transparent; margin: 0;
+}
+.text-hl[hidden] { display: none; }
+.text-hl mark { background: var(--img-hl); color: transparent; border-radius: 3px; }
+textarea.text-hl-on { background: transparent !important; position: relative; z-index: 1; }
+/* 伏線タブ：これまでの伏線は「表示する」を押したときだけ出す（0.68） */
+.fs-past-head { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--border); margin-top: 6px; }
+.fs-past-head .fs-section-title { flex: 1; border-bottom: 0; margin: 0; }
+.fs-past-head .tool { margin-bottom: 3px; }
+.fs-past { display: flex; flex-direction: column; gap: 8px; }
+.fs-past[hidden] { display: none; }
