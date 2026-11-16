@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.16-0.74';
+const APP_VERSION = '2026.11.17-0.75';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3339,14 +3339,6 @@ function renderSyncState() {
   sel.value = m;
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
   cloudOpt.disabled = !cloud?.isConfigured() && m !== 'cloud';
-  $('sync-mode-hint').textContent = m === 'cloud'
-    ? `${cloudLabel}の、自分で作ったフォルダ（名前は自由）を選ぶと、そのフォルダに直接保存します。選ぶ画面で新しいフォルダも作れます。端末どうしで同期するときは、すべての端末で同じクラウド・同じフォルダを選んでください。`
-      + (cloud?.id === 'onedrive' ? 'ログインは約1日続きます（使っているあいだは自動で更新します）。切れたら上に出るボタンを押してください。' : 'ログインは約1時間で切れます。切れたら上に出るボタンを押してください。')
-    : m === 'folder'
-      ? '自分で作ったフォルダを選ぶと、そのフォルダに直接保存します。PC のネットワークドライブ（NAS など）や、OneDrive・iCloud Drive・Google ドライブ（パソコン版）の同期フォルダも選べます。iPhone・iPad（クラウド方式）と同期するときは、OneDrive なら、パソコン版 OneDrive の「アプリ」（Apps）の中のあや綴りのフォルダの中の、iPhone・iPad と同じフォルダを選んでください。Google ドライブは、パソコン版の同期フォルダで書いたファイルを iPhone・iPad のあや綴りから読めないため、PC もクラウド方式にしてください。'
-      : sync.folderSupported
-        ? `iPhone・iPad と同期するときは「${cloudLabel}」がおすすめです（「クラウド」タブで選んで、接続IDを入れると使えます）。`
-        : `この端末では「${cloudLabel}」を選べます（「クラウド」タブで選んで、接続IDを入れると使えます）。`;
 
   // バックアップ先のフォルダ（フォルダ方式：端末のフォルダ／クラウド方式：クラウドのフォルダ）
   const backupInfo = m === 'cloud' ? cloud?.backupFolderInfo?.() : null;
@@ -4906,7 +4898,6 @@ function renderUiProfileEditor(profile = uiEditing || uiActive()) {
   document.querySelectorAll('[data-ui]').forEach((c) => { c.checked = uiPref(c.dataset.ui, profile); });
   const defaults = { font: 'serif', fontSize: '18' };
   document.querySelectorAll('[data-uiv]').forEach((s) => { s.value = String(uiValue(s.dataset.uiv, defaults[s.dataset.uiv], profile)); });
-  $('ui-prof-note').textContent = `「${UI_PROFILES[profile]}」の表示項目を設定しています。変更はすぐに画面へ反映されます。`;
 }
 
 // 表示・非表示を切り替える部品（キー → 要素）
@@ -5213,7 +5204,7 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
       input.addEventListener('change', () => { commitProviderSetting(p, s.key, input.value); renderFileDestination(); });
       label.append(input);
       box.append(label);
-      if (s.hint) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: s.hint }));
+      // 0.75：設定画面の説明文は出さない（s.hint は使わない）
     }
   }
   editingLinks = structuredClone(links());

@@ -1168,9 +1168,7 @@
         <label><input type="radio" name="ui-active" value="simple"> 簡易</label>
         <label><input type="radio" name="ui-active" value="detail"> 詳細</label>
       </div>
-      <p class="hint">「簡易」「詳細」を選ぶと、実際の画面と下の設定項目が同時に切り替わります。選んだ表示の内容を、そのまま下で設定できます。</p>
     </fieldset>
-    <p class="hint ui-prof-note" id="ui-prof-note"></p>
     <div class="ui-prof-body">
     <fieldset>
       <legend>入力欄の書体・文字サイズ</legend>
@@ -1189,12 +1187,10 @@
         </select>
       </label>
     </fieldset>
-    <p class="hint">隠しても、機能や内容は消えません（自動保存も続きます）。</p>
     <fieldset class="checks">
       <legend>上部バー</legend>
       <label><input type="checkbox" data-ui="editor.file"> ファイル</label>
       <label><input type="checkbox" data-ui="editor.links"> リンク</label>
-      <p class="hint">「戻す」「やり直す」「設定」は常に表示します。「編集エピソード保存」はエピソードの編集エリアに表示します。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>小説全体（目次）</legend>
@@ -1216,11 +1212,9 @@
       <label><input type="checkbox" data-ui="nav.sort-dir"> 昇順／降順</label>
       <label><input type="checkbox" data-ui="nav.search"> 検索欄</label>
       <label><input type="checkbox" data-ui="nav.ep-menu"> 各話・各章の操作ボタン（…）</label>
-      <p class="hint">隠した項目も、最後に選んだ設定のまま使われます。たとえば「章あり／章なし」と「並び順」を隠しても、「昇順／降順」はそのとき選んであった章あり・なしと並び順（タイトルなど）で並べ替えます。</p>
     </fieldset>
     <fieldset class="checks" id="show-settings">
       <legend>エピソード画面に表示する項目</legend>
-      <p class="hint">タイトルと本文は常に表示します。</p>
       <label><input type="checkbox" data-ui="show.foreword"> 前書き</label>
       <label><input type="checkbox" data-ui="show.afterword"> 後書き</label>
       <label><input type="checkbox" data-ui="show.plot"> プロット</label>
@@ -1255,7 +1249,6 @@
       <label><input type="checkbox" data-ui="selall.x-text"> X の投稿文</label>
       <label><input type="checkbox" data-ui="selall.narou-report-title"> 活動報告のタイトル</label>
       <label><input type="checkbox" data-ui="selall.narou-report-body"> 活動報告の本文</label>
-      <p class="hint">押すと、その欄の文字をすべて選択します（PC の Ctrl+A／⌘A もそのまま使えます）。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>コピーボタン</legend>
@@ -1287,7 +1280,6 @@
       <label><input type="checkbox" data-ui="paste.x-text"> X の投稿文</label>
       <label><input type="checkbox" data-ui="paste.narou-report-title"> 活動報告のタイトル</label>
       <label><input type="checkbox" data-ui="paste.narou-report-body"> 活動報告の本文</label>
-      <p class="hint">押すと、クリップボードの文字をカーソルの位置へ貼り付けます（選んでいる文字があれば置き換え）。なろう用の本文・前書き・後書きでは、Ctrl+V と同じくアルファポリスのルビ・傍点を変換します。初めて押したとき、ブラウザーがクリップボードの読み取りを許可するか聞くことがあります。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>最大化ボタン</legend>
@@ -1308,7 +1300,6 @@
       <label><input type="checkbox" data-ui="tool.find"> 検索</label>
       <label><input type="checkbox" data-ui="tool.replace"> 置換</label>
       <label><input type="checkbox" data-ui="tool.image-list"> 画像</label>
-      <p class="hint">本文の上に並ぶボタンです。最大化しているときは「本文の最大化中」の設定に従います。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>本文の最大化中</legend>
@@ -1325,19 +1316,15 @@
       <label><input type="checkbox" data-ui="max.tool.paste"> 貼り付け</label>
       <label><input type="checkbox" data-ui="max.tool.jump-top"> 本文の一番上へ</label>
       <label><input type="checkbox" data-ui="max.tool.jump-bottom"> 本文の一番下へ</label>
-      <p class="hint">最大化中に必要なボタンだけを選べます。ボタンを減らすと、本文入力欄をより広く使えます。</p>
     </fieldset>
     <fieldset class="checks">
       <legend>その他</legend>
       <label><input type="checkbox" data-ui="other.hints"> 機能の説明ラベルを表示</label>
-      <p class="hint">オフにすると、画面内の補足説明をまとめて隠します。入力内容や警告・保存状態は隠しません。</p>
       <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル（画面上部の「端末に保存済み」「サーバ保存」など）</label>
-      <p class="hint">オフにしても、保存の失敗などの警告（⚠）が出たときは表示します。</p>
     </fieldset>
     </div>
     <fieldset id="iphone-max" hidden>
       <legend>iPhone：最大化したときの入力欄の高さ</legend>
-      <p class="hint">キーボードの上の部分（予測変換など）に入力欄が隠れるときは、高さを決めてください。変えるとすぐに反映されます（この端末だけ）。</p>
       <label>高さ
         <select id="iphone-max-mode">
           <option value="auto">自動（見えている範囲いっぱい）</option>
@@ -1355,7 +1342,6 @@
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
       <legend>書き出しなどで使う保存先（この端末）</legend>
-      <p class="hint">「ファイル」→「開く」「保存」は、この設定にかかわらず、いつも「この端末・その他」（端末の画面で、ファイル・場所を自由に選ぶ）を使います。クラウドのバックアップは「設定」→「バックアップ」で扱います。この設定は、TXT の書き出しなど、ほかの保存・読み込みに使います。</p>
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>
@@ -1364,14 +1350,12 @@
         </select>
       </label>
       <p class="hint" id="file-destination-hint"></p>
-      <p class="hint">クラウドは「クラウド」タブの「利用できるクラウド」で選んだものです。「だけを使う」にすると、選ぶ画面は出さずに、すぐにそれぞれの画面（クラウドの画面、またはこの端末の保存・ファイル選択の画面／共有メニュー）を開きます。        変えるとすぐに反映されます。</p>
     </fieldset>
 
     </div>
 
     <!-- クラウド：ファイルとバックアップで共通する基本設定だけ -->
     <div class="settings-panel" data-spanel="cloud" role="tabpanel" hidden>
-    <p class="hint">ここでは、この端末で利用できるクラウドと接続IDだけを設定します。ファイルとバックアップの保存先は、それぞれのタブで選びます。</p>
     <fieldset id="cloud-choice">
       <legend>利用できるクラウド</legend>
       <label>クラウド
@@ -1381,7 +1365,6 @@
           <option value="onedrive">OneDrive</option>
         </select>
       </label>
-      <p class="hint">「なし」を選ぶとクラウドを使いません。Google DriveまたはOneDriveを選ぶと、「ファイル」と「バックアップ」のクラウド保存で共通して利用します。切り替えると画面を読み直します。</p>
     </fieldset>
     <fieldset id="provider-settings">
       <legend>ドライブの接続の設定</legend>
@@ -1394,7 +1377,6 @@
 
     <!-- 投稿サイト -->
     <div class="settings-panel" data-spanel="sites" role="tabpanel" hidden>
-    <p class="hint">TXT をインポートするとき、TXT の【ユーザ情報】【Nコード】などと、ここに登録した内容が合っているかを確認します（違っていたら確認が出ます）。</p>
     <fieldset class="account-grid">
       <legend>小説家になろうのアカウント（全作品共通・この端末）</legend>
       <label>ユーザID <input type="text" name="acc.narou.userId" inputmode="numeric" autocomplete="off" placeholder="例：12345"></label>
@@ -1407,15 +1389,12 @@
       <label>ユーザ名 <input type="text" name="acc.alpha.userName" autocomplete="off"></label>
       <label>作者名（ペンネーム） <input type="text" name="acc.alpha.author" autocomplete="off"></label>
     </fieldset>
-    <p class="hint">作品ごとの Nコード・作品ID・作品URLは、左の目次の「小説投稿サイト情報」で入れます（作品ごとに別々・入れなくても使えます）。</p>
     </div>
 
     <!-- リンク -->
     <div class="settings-panel" data-spanel="links" role="tabpanel" hidden>
     <fieldset id="link-settings">
       <legend>リンク（よく使うサイト）</legend>
-      <p class="hint">「リンク」メニューに表示されます。名前を押すと別のウインドウで開きます。
-        「活動報告用」の X・なろう活動報告は、活動報告の画面の「X を開く」「なろう活動報告を開く」ボタンと見出しで開くリンクです（削除はできません。URL を自分のページに変えられます）。</p>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
     </fieldset>
@@ -1425,7 +1404,6 @@
     <div class="settings-panel" data-spanel="templates" role="tabpanel" hidden>
     <fieldset>
       <legend>ひな型の管理</legend>
-      <p class="hint">X・活動報告・前書き・後書きのひな型です（全作品共通）。それぞれの画面の「ひな型を使う」で差し込みます。</p>
       <p class="hint">使える差し込み文字：<span id="template-vars"></span></p>
       <ul class="list" id="template-list"></ul>
     </fieldset>
@@ -1433,14 +1411,11 @@
 
     <!-- バックアップ -->
     <div class="settings-panel" data-spanel="backup" role="tabpanel" hidden>
-    <p class="hint">この端末には常に最新状態を保存します。「変更履歴と復元ポイント」は端末内、「サーバへの自動バックアップ」は端末外に保存します。</p>
     <fieldset>
       <legend>変更履歴と復元ポイント</legend>
-      <p class="hint">作品全体（全エピソード・プロット・世界観・用語など）の過去状態は、ローカル（この端末内）に自動的に保存されます。ここでは、その端末内の履歴から以前の状態へ復元できます。書いている間は10分ごと、画面を閉じるときにも自動で残ります。手動の復元ポイントは自動削除しません。</p>
       <label>自動履歴の保存数
         <input type="number" name="projectVersionKeep" min="1" max="500" step="1" value="30">
       </label>
-      <p class="hint">自動保存された変更履歴だけを、作品ごとに設定件数まで残します。件数を減らすと、古い自動履歴から削除します。</p>
       <div class="button-row">
         <button type="button" data-action="project-version-save">＋ 復元ポイントを作成…</button>
       </div>
@@ -1448,7 +1423,6 @@
     </fieldset>
     <fieldset id="sync-settings">
       <legend>サーバへの自動バックアップ</legend>
-      <p class="hint">選択したエピソードを、保存間隔ごとと画面を閉じるときに一つのバックアップパックとして保存します。「編集エピソード保存」は、表示中のエピソードだけを直ちに保存します。</p>
       <label>保存先（この端末）
         <select id="sync-mode">
           <option value="off">使わない</option>
@@ -1456,7 +1430,6 @@
           <option value="cloud">クラウド</option>
         </select>
       </label>
-      <p class="hint" id="sync-mode-hint"></p>
       <p class="sync-folder-line" id="sync-folder-line"></p>
       <div class="button-row" id="sync-folder-row">
         <button type="button" id="sync-choose">フォルダを選ぶ…</button>
@@ -1483,8 +1456,6 @@
           <input name="autoBackupKeep" type="number" min="10" max="2000" step="10" inputmode="numeric">
         </label>
       </div>
-      <p class="hint">自動バックアップは、変更してから入力が5分止まったときに保存します。書き続けていて5分止まらないときは、上の「書き続けているときの保存間隔」ごとに保存します。ファイル名には「あや綴り」、保存内容、端末、日時を入れます。画面上では分かりやすい名前で表示します。残す件数を超えると、この端末が保存した古いものから消えます（他の端末のファイルには触りません）。
-        設定は変えるとすぐに反映されます。</p>
       <div class="button-row" id="sync-presync-row" hidden>
         <button type="button" id="sync-presync">同期の前の状態を書き出す…</button>
       </div>
@@ -1495,13 +1466,10 @@
     <div class="settings-panel" data-spanel="import" role="tabpanel" hidden>
     <fieldset>
       <legend>TXT の一括インポート</legend>
-      <p class="hint">TXT を、章・話に分けて取り込みます。「書式あり（なろう系）」と「書式なし（アルファ系）」の2方式があり、作成した書式は名前を付けて保存できます。手で直してからプレビューで確認して確定します。
-        UTF-8（BOM の有無）と Shift_JIS（CP932）に対応しています。途中の作業は自動で残り、あとから再開できます。</p>
       <div class="button-row">
         <button type="button" data-action="open-import" class="primary">TXT をインポート…</button>
       </div>
     </fieldset>
-    <p class="hint">プレーンテキストの読み込み・書き出しは「ファイル」メニューにあります。</p>
     </div>
 
     <!-- このアプリについて -->
@@ -1509,7 +1477,6 @@
     <fieldset>
       <legend>あや綴り</legend>
        <p class="about-catch">文（あや）と文（あや）で綾（あや）を綴る。</p>
-       <p class="hint">小説家になろう・アルファポリス向けの小説執筆エディターです。使い方は README を参照してください。</p>
       <p id="app-version"></p>
     </fieldset>
     <fieldset class="disclaimer">
@@ -1527,7 +1494,6 @@
 
     <!-- 設定は変えた時点で反映・保存するので、「閉じる」だけ -->
     <div class="dialog-foot">
-      <span class="hint settings-note">変更はすぐに反映・保存されます</span>
       <button type="button" value="cancel" class="primary">閉じる</button>
     </div>
   </form>
