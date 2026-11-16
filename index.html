@@ -759,9 +759,13 @@
         <label>タイトル一覧ファイル
           <input type="file" id="imp-title-list-file" accept=".txt,text/plain">
         </label>
-        <label>または、タイトル一覧を貼り付ける
-          <textarea id="imp-title-list-text" rows="8" placeholder="作品ページのタイトル一覧をコピーして、ここへ貼り付けます"></textarea>
-        </label>
+        <div class="imp-paste-field">
+          <div class="imp-paste-head">
+            <label for="imp-title-list-text">または、タイトル一覧を貼り付ける</label>
+            <button type="button" id="imp-title-list-paste" class="tool" title="コピーしてあるタイトル一覧を、この欄へ貼り付けます">貼り付け</button>
+          </div>
+          <textarea id="imp-title-list-text" rows="8" placeholder="作品ページのタイトル一覧をコピーして、ここへ貼り付けます（右上の「貼り付け」でも入ります）"></textarea>
+        </div>
         <p class="hint">原稿TXTとは別に、章名・エピソード名・掲載日時・文字数などが並んだタイトル一覧が必要です。ファイルを選ぶと貼り付け欄へ読み込みます。</p>
       </div>
       </div>

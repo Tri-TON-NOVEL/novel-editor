@@ -951,6 +951,13 @@ label.inline { display: inline-flex; align-items: center; gap: 6px; font-size: 1
 .imp-preview select { padding: 4px 6px; font-size: 13px; width: auto; max-width: 220px; }
 .imp-preview .dup-same { color: var(--muted); }
 .imp-preview .dup-title { color: var(--danger); font-weight: 700; }
+.imp-preview .rel-overwrite { color: var(--text); }
+.imp-preview .rel-skip { color: var(--muted); }
+.imp-preview .rel-add { color: var(--rel-add); }
+.imp-preview .rel-unmatched { color: var(--danger); font-weight: 700; }
+.imp-paste-field { display: flex; flex-direction: column; gap: 4px; }
+.imp-paste-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.imp-paste-head label { font-size: 13px; font-weight: 700; }
 @media (max-width: 899px) {
   .imp-split { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 2fr) minmax(0, 1fr); }
   .imp-rule { grid-template-columns: 1fr 1fr; }
@@ -1316,9 +1323,9 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 }
 
 /* 本文の画像の書き方に色を付ける（0.68）。入力欄の後ろに置いた下敷きで、画像の部分にだけ黄色の下地を塗る */
-:root { --img-hl: #ffe45c; }
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --img-hl: rgba(255, 208, 0, 0.42); } }
-:root[data-theme="dark"] { --img-hl: rgba(255, 208, 0, 0.42); }
+:root { --img-hl: #ffe45c; --rel-add: #1f5fbf; }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --img-hl: rgba(255, 208, 0, 0.42); --rel-add: #7fb2ff; } }
+:root[data-theme="dark"] { --img-hl: rgba(255, 208, 0, 0.42); --rel-add: #7fb2ff; }
 .text-hl-host:not(.maximized) { position: relative; } /* 最大化中は position: fixed のまま（それでも位置の基準になる） */
 .text-hl {
   position: absolute; box-sizing: border-box; border-style: solid; border-color: transparent;

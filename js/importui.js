@@ -894,7 +894,7 @@ export function initImport(ctx) {
           title: `同じタイトル：${targetEpName(dup.target)}`,
           similar: `似たタイトル：${targetEpName(dup.target)}`,
         }[dup.kind] || (row.action === 'unmatched' ? correspondenceError(row) : '新しい話');
-        td(relation, row.action === 'unmatched' ? 'warn' : dup.kind === 'same' ? 'dup-same' : dup.kind !== 'none' ? 'dup-title' : '');
+        const relCell = td(relation, relClass(row.action));
         const cell = td('');
         const act = document.createElement('select');
         act.setAttribute('aria-label', '扱い');
@@ -911,6 +911,7 @@ export function initImport(ctx) {
         act.addEventListener('change', () => {
           row.action = act.value;
           r.dataset.action = row.action;
+          relCell.className = relClass(row.action);
           pick.hidden = row.action !== 'manual';
           if (row.action === 'manual') row.target = pick.value;
           if (row.action === 'overwrite') row.target = dup.target;
@@ -923,6 +924,11 @@ export function initImport(ctx) {
     });
     table.replaceChildren(thead, tbody);
     updateCommitSummary();
+  }
+
+  // 既存との関係の文字色は「扱い」で決める（0.71）：上書き・取り込み先指定＝黒、スキップ＝灰色、新しい話として追加＝青、対応なし＝赤
+  function relClass(action) {
+    return { skip: 'rel-skip', add: 'rel-add', unmatched: 'rel-unmatched' }[action] || 'rel-overwrite';
   }
 
   function applyActionFilter() {
@@ -1265,6 +1271,24 @@ export function initImport(ctx) {
     $('imp-title-list-text').value = state.titleListText;
     updateNextButton();
     saveSession();
+  });
+  // 「貼り付け」ボタン：クリップボードの文字を貼り付け欄へ入れる（欄の中身は入れ替え）
+  $('imp-title-list-paste').addEventListener('click', async () => {
+    const box = $('imp-title-list-text');
+    let text = '';
+    try {
+      if (!navigator.clipboard?.readText) throw new Error('unsupported');
+      text = await navigator.clipboard.readText();
+    } catch {
+      ctx.toast('クリップボードを読めませんでした。欄を長押し（パソコンは Ctrl+V）で貼り付けてください', true);
+      box.focus();
+      return;
+    }
+    if (!text.trim()) { ctx.toast('クリップボードに文字がありません', true); return; }
+    if (box.value.trim() && box.value !== text && !(await ask('貼り付け欄の今の内容を、クリップボードの内容に入れ替えますか？', { ok: '入れ替える' }))) return;
+    box.value = text;
+    box.dispatchEvent(new Event('input', { bubbles: true }));
+    ctx.toast(`タイトル一覧を貼り付けました（${text.split(/\r\n|\r|\n/).length.toLocaleString()}行）`);
   });
   $('imp-title-list-text').addEventListener('input', (e) => {
     state.titleListText = e.target.value;
