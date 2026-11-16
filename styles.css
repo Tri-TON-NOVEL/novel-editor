@@ -1338,3 +1338,26 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 /* 伏線タブ：これまでの伏線は「表示する」を押したときだけ出す（0.68） */
 .fs-past { display: flex; flex-direction: column; gap: 8px; }
 .fs-cards[hidden] { display: none; }
+
+/* 串刺し検索（0.74） */
+.cs-form { display: flex; flex-direction: column; gap: 10px; margin: 8px 0 12px; }
+.cs-query-row { display: flex; gap: 8px; }
+.cs-query-row input[type="search"] { flex: 1 1 auto; min-width: 0; font-size: 16px; }
+.cs-mode { display: flex; flex-wrap: wrap; gap: 4px 16px; font-size: 14px; }
+.cs-targets { margin: 0; }
+.cs-checks { display: flex; flex-wrap: wrap; gap: 4px 14px; }
+.cs-site-row { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 10px; margin-top: 6px; font-size: 13px; color: var(--muted); }
+.cs-site-row label { color: var(--text); }
+.cs-bulk { display: flex; flex-wrap: wrap; gap: 8px; }
+.cs-summary { font-size: 14px; margin: 4px 0 8px; }
+.cs-results { display: flex; flex-direction: column; gap: 14px; padding-bottom: 24px; }
+.cs-group-title { font-size: 15px; margin: 0 0 6px; padding-bottom: 4px; border-bottom: 1px solid var(--border); }
+.cs-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.cs-item { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px 8px; background: var(--panel, var(--bg)); }
+.cs-open { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 10px; width: 100%; text-align: left; background: none; border: 0; padding: 2px 0; min-height: 0; cursor: pointer; color: var(--accent); font: inherit; }
+.cs-open:hover .cs-title, .cs-open:focus-visible .cs-title { text-decoration: underline; }
+.cs-title { font-weight: 700; }
+.cs-sub { font-size: 13px; color: var(--muted); }
+.cs-count { margin-left: auto; font-size: 12px; color: var(--muted); }
+.cs-snippet { font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; margin-top: 2px; }
+.cs-snippet mark { background: var(--img-hl); color: inherit; border-radius: 2px; padding: 0 1px; }

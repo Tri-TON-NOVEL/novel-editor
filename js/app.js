@@ -20,6 +20,7 @@ import {
 import * as sync from './sync.js';
 import { initImport } from './importui.js';
 import { initForeshadow } from './foreshadowui.js';
+import { initCrossSearch } from './crosssearchui.js';
 import { stampEpisodeNo } from './foreshadow.js';
 import { decodeText } from './importer.js';
 import { ask, askText, choose, inform } from './dialogs.js';
@@ -36,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.16-0.73';
+const APP_VERSION = '2026.11.16-0.74';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -60,8 +61,9 @@ let project = null;     // 編集中の作品
 let epIndex = 0;        // 編集中のエピソード
 let view = 'episode';   // VIEWS のいずれか
 // 活動報告はエピソードの画面の中（「活動報告」タブ）。6.0 より前は独立した画面だった
-const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows'];
+const VIEWS = ['episode', 'synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows', 'search'];
 let fsUI = null;        // 伏線の画面（initForeshadow）
+let csUI = null;        // 串刺し検索の画面（initCrossSearch。0.74）
 let bodyHL = null;      // 本文の画像の書き方に色を付ける（attachImageHighlight）
 let fileHandle = null;  // 開いている／保存したローカルファイル（Chrome・Edge のみ）
 let saveTimer = null;
@@ -962,6 +964,7 @@ function setView(next) {
   if (view === 'world') worldTable.render();
   if (view === 'characters') characterTable.render();
   if (view === 'foreshadows') fsUI?.renderList();
+  if (view === 'search') csUI?.show();
   renderEpisodeList();
   document.body.classList.remove('drawer-open');
 }
@@ -976,6 +979,7 @@ function selectEpisode(i) {
 function showProject(p, handle = null) {
   if (project?.id !== p.id && epSearch) { epSearch = ''; $('ep-search').value = ''; } // 作品を替えたら検索を消す
   if (project?.id !== p.id) fsUI?.reset(); // 伏線の編集中の欄も消す
+  if (project?.id !== p.id) csUI?.reset(); // 串刺し検索の結果も消す
   project = normalize(p);
   fileHandle = handle;
   el.novelTitle.value = project.title;
@@ -3907,6 +3911,85 @@ fsUI = initForeshadow({
   openEpisode: (id, tab) => openEpisodeAt(id, tab),
 });
 
+csUI = initCrossSearch({
+  prefs,
+  getProject: () => project,
+  openHit: (ref, first) => openSearchHit(ref, first),
+});
+
+// 入力欄の中の文字を選んで見せる（1行の欄は、その欄までスクロールするだけ）
+function selectInField(t, index, length) {
+  if (!t) return;
+  if (t.tagName === 'INPUT') {
+    t.focus({ preventScroll: true });
+    t.setSelectionRange(index, index + length);
+    t.scrollIntoView({ block: 'center' });
+  } else jumpToText(t, index, length);
+}
+
+// 串刺し検索の結果を押したとき：その内容を、対応する画面（あらすじ・全体プロット・表・メモ・伏線一覧・エピソード）で開く
+function openSearchHit(ref, first) {
+  if (!project) return;
+  const { index, length } = first;
+  switch (ref.kind) {
+    case 'synopsis':
+      setView('synopsis');
+      selectInField(el.synopsis, index, length);
+      break;
+    case 'outline': {
+      if (!project.chapters.some((c) => c.id === ref.chapterId)) { toast('その章は削除されています'); return; }
+      outline.select(ref.chapterId);
+      setView('outline');
+      const box = $('chapters');
+      if (index < ref.titleLen) selectInField(box.querySelector('.chapter-title'), index, length);
+      else selectInField(box.querySelector('.chapter-plot'), index - ref.titleLen, length);
+      break;
+    }
+    case 'world':
+    case 'characters':
+      setView(ref.kind);
+      (ref.kind === 'world' ? worldTable : characterTable).showOnly(ref.itemId);
+      break;
+    case 'memo':
+      if (!project.memos.some((m) => m.id === ref.memoId)) { toast('そのメモは削除されています'); return; }
+      setView('project-memo');
+      selectMemo(ref.memoId);
+      if (ref.inTitle) selectInField($('memo-title'), index, length);
+      else selectInField($('project-memo'), index, length);
+      break;
+    case 'foreshadow': {
+      const fs = (project.foreshadows || []).find((f) => f.id === ref.fsId);
+      if (!fs) { toast('その伏線は削除されています'); return; }
+      // 伏線一覧を、その伏線の名前で絞り込んで出す（状態のチェックで隠れていれば、その状態も出す）
+      const st = document.querySelector(`[data-fsl-status="${fs.status}"]`);
+      if (st && !st.checked) { st.checked = true; st.dispatchEvent(new Event('change', { bubbles: true })); }
+      $('fsl-field').value = fs.title ? 'title' : 'all';
+      $('fsl-search').value = fs.title;
+      $('fsl-from').value = '';
+      $('fsl-to').value = '';
+      setView('foreshadows');
+      break;
+    }
+    case 'episode': {
+      const i = project.episodes.findIndex((e) => e.id === ref.episodeId);
+      if (i < 0) { toast('そのエピソードは削除されています'); return; }
+      selectEpisode(i);
+      const isReport = ['x-text', 'narou-report-title', 'narou-report-body'].includes(ref.field);
+      if (isReport) {
+        if (!uiPref('show.report')) { toast('活動報告は表示の設定で隠れています'); return; }
+        setReportMode(true);
+      } else {
+        if (reportMode) setReportMode(false);
+        if (ref.site && ref.site !== editSite) setEditSite(ref.site);
+      }
+      const t = revealField(ref.field);
+      if (!t || !t.offsetParent) { toast('その欄は表示の設定で隠れています'); return; }
+      selectInField(t, index, length);
+      break;
+    }
+  }
+}
+
 async function copyField(key) {
   const [label, text] = copySources[key]();
   if (!text) { toast(label + 'は空です'); return; }
@@ -4836,6 +4919,7 @@ const UI_TARGETS = {
   'novel.characters': () => document.querySelector('.nav-item[data-view="characters"]'),
   'novel.project-memo': () => document.querySelector('.nav-item[data-view="project-memo"]'),
   'novel.foreshadows': () => document.querySelector('.nav-item[data-view="foreshadows"]'),
+  'novel.search': () => document.querySelector('.nav-item[data-view="search"]'),
   'novel.workcodes': () => $('work-codes'),
   'show.report': () => $('report-tab'),
   'nav.add-episode': () => document.querySelector('.nav-add [data-action="add-episode"]'),
@@ -4855,7 +4939,7 @@ const UI_TARGETS = {
 function applyUiPrefs() {
   for (const [key, target] of Object.entries(UI_TARGETS)) target()?.classList.toggle('ui-off', !uiPref(key));
   // 隠した画面を開いていたら、エピソードの画面へ
-  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo', foreshadows: 'novel.foreshadows' }[view];
+  const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo', foreshadows: 'novel.foreshadows', search: 'novel.search' }[view];
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
   if (reportMode && !uiPref('show.report')) setReportMode(false);
   // 左の一覧を開くボタンは「作品」と呼ぶ（作品の資料とエピソードを選ぶ場所のため。7.7.7 から全端末・全表示で同じ）
@@ -4885,7 +4969,7 @@ function applyUiPrefs() {
 }
 
 // 左の作品情報メニューは、利用者が決めた順番を環境設定として保存する。
-const PROJECT_NAV_DEFAULT = ['synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows'];
+const PROJECT_NAV_DEFAULT = ['synopsis', 'outline', 'world', 'characters', 'project-memo', 'foreshadows', 'search'];
 function applyProjectNavOrder() {
   const box = $('project-nav');
   const saved = prefs.get('nav.projectOrder', []);

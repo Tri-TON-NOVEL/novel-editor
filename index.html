@@ -78,6 +78,7 @@
         <button type="button" class="nav-item" draggable="true" data-view="characters">登場人物</button>
         <button type="button" class="nav-item" draggable="true" data-view="project-memo">メモ</button>
         <button type="button" class="nav-item" draggable="true" data-view="foreshadows">伏線</button>
+        <button type="button" class="nav-item" draggable="true" data-view="search">串刺し検索</button>
       </div>
       <details class="work-codes" id="work-codes">
         <summary>小説投稿サイト情報 <span class="work-codes-state" id="work-codes-state"></span></summary>
@@ -451,6 +452,37 @@
         </div>
         <textarea id="project-memo" spellcheck="false" placeholder="作品全体についてのメモ（エピソードごとのフリーメモとは別です）"></textarea>
       </section>
+    </section>
+
+    <!-- 串刺し検索（0.74）：作品のすべての文字をまとめて検索する -->
+    <section class="view scroll" id="view-search" hidden>
+      <h1 class="view-title">串刺し検索</h1>
+      <p class="hint">あらすじ・全体プロット・世界観・登場人物・メモ・伏線と、すべてのエピソードのタイトル・本文・前書き・後書き・プロット・フリーメモ・活動報告を、まとめて検索します。結果を押すと、その場所を開いて当たった文字を選びます。</p>
+      <form id="cs-form" class="cs-form" role="search" autocomplete="off">
+        <div class="cs-query-row">
+          <input type="search" id="cs-query" placeholder="検索する言葉（スペースで区切って複数。&quot;…&quot; で囲むとスペースも含めて1語）" aria-label="串刺し検索の言葉" enterkeyhint="search" spellcheck="false">
+          <button type="submit" class="primary">検索</button>
+        </div>
+        <div class="cs-mode" role="radiogroup" aria-label="複数の言葉の扱い">
+          <label><input type="radio" name="cs-mode" value="and" checked> AND（すべての言葉を含む）</label>
+          <label><input type="radio" name="cs-mode" value="or"> OR（どれかの言葉を含む）</label>
+        </div>
+        <fieldset class="checks cs-targets">
+          <legend>作品の資料</legend>
+          <div id="cs-targets-work" class="cs-checks"></div>
+        </fieldset>
+        <fieldset class="checks cs-targets">
+          <legend>エピソード</legend>
+          <div id="cs-targets-episode" class="cs-checks"></div>
+          <div class="cs-site-row">タイトル・本文・前書き・後書きの原稿：<span id="cs-sites" class="cs-checks"></span></div>
+        </fieldset>
+        <div class="cs-bulk">
+          <button type="button" class="tool" id="cs-all">対象をすべて選ぶ</button>
+          <button type="button" class="tool" id="cs-none">対象をすべて外す</button>
+        </div>
+      </form>
+      <p class="cs-summary" id="cs-summary" role="status"></p>
+      <div id="cs-results" class="cs-results"></div>
     </section>
 
     <!-- 伏線一覧（発生と回収の対応） -->
@@ -1172,6 +1204,7 @@
       <label><input type="checkbox" data-ui="novel.characters"> 登場人物</label>
       <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
       <label><input type="checkbox" data-ui="novel.foreshadows"> 伏線一覧</label>
+      <label><input type="checkbox" data-ui="novel.search"> 串刺し検索</label>
       <label><input type="checkbox" data-ui="novel.workcodes"> 小説投稿サイト情報</label>
     </fieldset>
     <fieldset class="checks">

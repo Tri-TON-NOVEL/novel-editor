@@ -691,7 +691,21 @@ export function categorizedTable(container, getData, opts) {
     return out.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n';
   }
 
-  return { render };
+  // 串刺し検索から：絞り込みを外して全部出し、その行までスクロールして光らせる（0.74）
+  function showOnly(itemId) {
+    clearTimeout(timer);
+    query = ''; catFilter = ''; field = '';
+    searchInput.value = ''; catSelect.value = ''; fieldSelect.value = '';
+    render();
+    const tr = body.querySelector(`tr[data-id="${CSS.escape(itemId)}"]`);
+    if (!tr) return;
+    tr.scrollIntoView({ block: 'center' });
+    tr.classList.remove('flash');
+    void tr.offsetWidth;
+    tr.classList.add('flash');
+  }
+
+  return { render, showOnly };
 }
 
 /**
