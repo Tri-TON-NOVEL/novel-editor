@@ -347,20 +347,18 @@
               </form>
               <h3 class="fs-section-title">この話で張った伏線</h3>
               <ul class="fs-cards" id="fs-here"></ul>
-              <div class="fs-past-head">
-                <h3 class="fs-section-title">これまでの伏線（回収候補）</h3>
-                <button type="button" class="tool" id="fs-past-toggle" aria-expanded="false" aria-controls="fs-past">表示する</button>
-              </div>
-              <!-- 前の話までの伏線は、押したときだけ出す（多くなっても、話を開くたびに並べ直さない） -->
-              <div class="fs-past" id="fs-past" hidden>
-                <div class="fs-filter" id="payoff-filter">
+              <h3 class="fs-section-title">これまでの伏線（回収候補）</h3>
+              <!-- 前の話までの伏線は、「検索」を押したときだけ出す（多くなっても、話を開くたびに並べ直さない）。条件は常に出しておく -->
+              <div class="fs-past">
+                <form class="fs-filter" id="payoff-filter" role="search">
                   <label><input type="checkbox" data-payoff-status="open"> 未回収</label>
                   <label><input type="checkbox" data-payoff-status="partial"> 部分回収済み</label>
                   <label><input type="checkbox" data-payoff-status="resolved"> 回収済み</label>
                   <label><input type="checkbox" data-payoff-status="dropped"> 取りやめ</label>
-                  <input type="search" id="payoff-search" placeholder="名前・内容で絞り込み" aria-label="これまでの伏線を絞り込み">
-                </div>
-                <ul class="fs-cards" id="payoff-list"></ul>
+                  <input type="search" id="payoff-search" placeholder="名前・内容で絞り込み（空なら全部）" aria-label="これまでの伏線を絞り込み">
+                  <button type="submit" class="primary" id="fs-past-search" aria-controls="payoff-list">検索</button>
+                </form>
+                <ul class="fs-cards" id="payoff-list" hidden></ul>
               </div>
             </div>
           </section>

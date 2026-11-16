@@ -1336,8 +1336,5 @@ dialog:not(.fullscreen) > .dialog > * { flex-shrink: 0; }
 .text-hl mark { background: var(--img-hl); color: transparent; border-radius: 3px; }
 textarea.text-hl-on { background: transparent !important; position: relative; z-index: 1; }
 /* 伏線タブ：これまでの伏線は「表示する」を押したときだけ出す（0.68） */
-.fs-past-head { display: flex; align-items: flex-end; gap: 8px; border-bottom: 1px solid var(--border); margin-top: 6px; }
-.fs-past-head .fs-section-title { flex: 1; border-bottom: 0; margin: 0; }
-.fs-past-head .tool { margin-bottom: 3px; }
 .fs-past { display: flex; flex-direction: column; gap: 8px; }
-.fs-past[hidden] { display: none; }
+.fs-cards[hidden] { display: none; }

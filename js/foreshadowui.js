@@ -123,16 +123,18 @@ export function initForeshadow(opts) {
     const saved = prefs.get('payoff.filter', PAYOFF_DEFAULT);
     return Array.isArray(saved) ? saved.filter((s) => FS_STATUS_KEYS.includes(s)) : PAYOFF_DEFAULT;
   };
+  // 条件は常に出しておき、「検索」で結果を並べる（0.72）。一度検索したあとは、条件を変えるとそのまま並べ直す
+  const pastShown = () => pastFor === getEpisode()?.id;
   document.querySelectorAll('[data-payoff-status]').forEach((c) => {
     c.addEventListener('change', () => {
       prefs.set('payoff.filter', [...document.querySelectorAll('[data-payoff-status]:checked')].map((x) => x.dataset.payoffStatus));
-      renderEpisode();
+      if (pastShown()) renderEpisode();
     });
   });
-  $('payoff-search').addEventListener('input', () => renderEpisode());
-  $('fs-past-toggle').addEventListener('click', () => {
-    const ep = getEpisode();
-    pastFor = pastFor === ep.id ? '' : ep.id;
+  $('payoff-search').addEventListener('input', () => { if (pastShown()) renderEpisode(); });
+  $('payoff-filter').addEventListener('submit', (e) => {
+    e.preventDefault();
+    pastFor = getEpisode().id;
     renderEpisode();
   });
 
@@ -223,19 +225,16 @@ export function initForeshadow(opts) {
     $('fs-here').replaceChildren(...(mine.length ? mine.map((r) => card(r, ep, ref, true))
       : [h('li', { class: 'fs-empty', text: 'この話で張った伏線はまだありません。「＋伏線を追加」から登録できます。' })]));
 
-    // これまでの伏線（前の話までに張ったもの）。「表示する」を押したときだけ並べる
+    // これまでの伏線（前の話までに張ったもの）。条件は常に出し、「検索」を押したときだけ並べる
+    const statuses = payoffStatuses();
+    document.querySelectorAll('[data-payoff-status]').forEach((c) => { c.checked = statuses.includes(c.dataset.payoffStatus); });
     const showPast = pastFor === ep.id;
-    $('fs-past').hidden = !showPast;
-    const toggle = $('fs-past-toggle');
-    toggle.textContent = showPast ? '隠す' : '表示する';
-    toggle.setAttribute('aria-expanded', String(showPast));
+    $('payoff-list').hidden = !showPast;
     if (!showPast) {
       $('payoff-list').replaceChildren();
       if (draft && !mine.some((r) => r.fs.id === draft.fsId)) draft = null;
       return;
     }
-    const statuses = payoffStatuses();
-    document.querySelectorAll('[data-payoff-status]').forEach((c) => { c.checked = statuses.includes(c.dataset.payoffStatus); });
     const q = $('payoff-search').value;
     const past = payoffCandidates(project, ep.id, statuses).filter((r) => r.fs.episodeId !== ep.id && matchesQuery(r, q, 'all'));
     if (draft && !past.some((r) => r.fs.id === draft.fsId) && !mine.some((r) => r.fs.id === draft.fsId)) draft = null;
