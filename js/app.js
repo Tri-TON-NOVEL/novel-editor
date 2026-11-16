@@ -36,7 +36,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.16-0.68';
+const APP_VERSION = '2026.11.16-0.70';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2513,6 +2513,36 @@ async function storeEdition(ep, site, cur) {
   return v;
 }
 
+
+// インポート（0.70）：取り込む原稿を、そのエピソードのそのサイトの「新しい稿」にする。
+// 今の稿は今の内容のまま残し、次の番号の稿に取り込んだ内容を入れて、それを今の稿にする（もう一方のサイトは変えない）。
+// p は取り込み先の作品（今開いている作品とは限らない。保存はインポート側で switchTo する）、ep はその中のエピソード。
+// 戻り値：新しい稿の名前（「第3稿」など）
+async function importAsNewEdition(p, ep, site, draft) {
+  if (p.id === project?.id) await migrateLegacyEditions(ep); // 6.0 より前の版が残っていれば先に分ける
+  const list = (await versions.editions(p.id)).filter((v) => v.episodeId === ep.id && v.kind === 'episode' && v.site === site);
+  const now = new Date().toISOString();
+  const put = async (name, data) => {
+    const v = { id: newVersionId(), kind: 'episode', site, projectId: p.id, episodeId: ep.id, name, memo: '', createdAt: now, updatedAt: now, chars: countChars(data.body).all, data: editionData(data) };
+    await versions.put(v);
+    list.push(v);
+    return v;
+  };
+  // 今の内容を、今の稿にしまう（今の稿がなければ、今の内容で稿を作る）
+  const before = editionSnapshot(ep, site);
+  const cur = list.find((v) => v.id === ep.editionIds?.[site]);
+  if (!cur) await put(`第${nextEditionNo(list)}稿`, before);
+  else if (JSON.stringify(editionData(cur.data)) !== JSON.stringify(before)) {
+    await versions.put({ ...cur, data: before, chars: countChars(before.body).all, updatedAt: ep.siteUpdatedAt?.[site] || now });
+  }
+  // 取り込んだ内容を新しい稿にする
+  const d = ep.drafts[site];
+  for (const f of EDITION_FIELDS) if (draft[f] !== undefined) d[f] = draft[f];
+  const v = await put(`第${nextEditionNo(list)}稿`, editionSnapshot(ep, site));
+  ep.editionIds = { ...(ep.editionIds || {}), [site]: v.id };
+  ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [site]: now };
+  return v.name;
+}
 // 稿を上げる（前の稿は今の内容のまま残り、同じ内容の新しい番号の稿を編集する）。もう一方のサイトは変えない
 async function raiseEdition(ep = episode(), site = editSite) {
   await flush();
@@ -3820,6 +3850,7 @@ const importScreen = initImport({
   getProject: () => project,
   flush: () => flush(),
   switchTo: (p) => switchTo(p),
+  importAsNewEdition: (p, ep, site, draft) => importAsNewEdition(p, ep, site, draft),
   closeSettings: () => $('settings-dialog').close(),
   withBusy,
   returnToEditor,
