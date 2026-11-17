@@ -20,7 +20,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：0.84（`2026.11.17-0.84`）
+- **バージョン**：0.86（`2026.11.17-0.86`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **画像付き操作マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/画像付き操作マニュアル.html](https://tri-ton-novel.github.io/novel-editor/docs/%E7%94%BB%E5%83%8F%E4%BB%98%E3%81%8D%E6%93%8D%E4%BD%9C%E3%83%9E%E3%83%8B%E3%83%A5%E3%82%A2%E3%83%AB.html)（ブラウザーでページとして開きます）
 - **簡易マニュアル（逆引き）**：[docs/簡易マニュアル_逆引き.md](docs/簡易マニュアル_逆引き.md)

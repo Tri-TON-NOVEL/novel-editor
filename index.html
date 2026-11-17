@@ -206,7 +206,6 @@
           <label for="ep-title" id="ep-label">エピソードタイトル</label>
           <span class="count" id="count-ep-title"></span>
           <span class="spacer"></span>
-          <button type="button" class="tool" data-find="ep-title">検索</button>
           <button type="button" class="tool max-btn" data-max="title" aria-label="エピソードタイトルを最大化" title="最大化">⤢</button>
           <button type="button" class="tool selall-btn" data-selall="ep-title">全て選択</button>
           <button type="button" class="copy" data-copy="ep-title">コピー</button>
@@ -1202,6 +1201,13 @@
       <label><input type="checkbox" data-ui="show.report"> 活動報告タブ</label>
     </fieldset>
     <fieldset class="checks">
+      <legend>稿</legend>
+      <label><input type="checkbox" data-ui="draft.select"> 稿の一覧</label>
+      <label><input type="checkbox" data-ui="draft.up"> ＋ 稿を上げる</label>
+      <label><input type="checkbox" data-ui="draft.final"> 最終稿にする</label>
+      <label><input type="checkbox" data-ui="draft.delete"> この稿を削除</label>
+    </fieldset>
+    <fieldset class="checks">
       <legend>文字数ラベル</legend>
       <label><input type="checkbox" data-ui="count.novel-title"> 小説タイトル</label>
       <label><input type="checkbox" data-ui="count.ep-title"> エピソードタイトル</label>
@@ -1270,6 +1276,12 @@
       <label><input type="checkbox" data-ui="max.memo"> フリーメモ</label>
     </fieldset>
     <fieldset class="checks">
+      <legend>↑↓ボタン</legend>
+      <label><input type="checkbox" data-ui="jump.body"> 本文</label>
+      <label><input type="checkbox" data-ui="jump.plot"> プロット</label>
+      <label><input type="checkbox" data-ui="jump.free-memo"> フリーメモ</label>
+    </fieldset>
+    <fieldset class="checks">
       <legend>編集機能</legend>
       <label><input type="checkbox" data-ui="tool.ruby"> ルビ</label>
       <label><input type="checkbox" data-ui="tool.dots"> 傍点</label>
@@ -1299,6 +1311,8 @@
     <fieldset class="checks">
       <legend>その他</legend>
       <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル</label>
+      <label><input type="checkbox" data-ui="other.sub-site"> サブ側の原稿タブ</label>
+      <label><input type="checkbox" data-ui="other.sync-save"> 編集エピソード保存</label>
     </fieldset>
     </div>
     <fieldset id="iphone-max" hidden>

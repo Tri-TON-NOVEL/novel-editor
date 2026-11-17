@@ -38,7 +38,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.84';
+const APP_VERSION = '2026.11.17-0.86';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -942,6 +942,7 @@ function renderSiteTabs() {
     const filled = d.body || d.title ? '' : '（空）';
     b.replaceChildren(document.createTextNode(`${SITES[s].short}用${filled}`));
     if (s === project.site) b.append(Object.assign(document.createElement('span'), { className: 'main-mark', textContent: 'メイン' }));
+    b.classList.toggle('sub-site', s !== project.site);
     b.setAttribute('aria-selected', String(s === editSite && !reportMode));
   });
   const copyBtn = $('copy-main-to-sub');
@@ -3747,10 +3748,28 @@ function renderCloudActions() {
   const login = $('cloud-login');
   const configured = !!p?.isConfigured?.();
   login.disabled = !configured;
-  login.textContent = p ? `${p.label}にログイン` : 'ログイン';
+  // 0.85：ログイン・ログアウトは1つのボタンで切り替える
+  const signedIn = configured && !!p.isSignedIn?.();
+  login.textContent = !p ? 'ログイン' : signedIn ? `${p.label}からログアウト` : `${p.label}にログイン`;
   $('cloud-login-state').textContent = !p ? '利用するクラウドを選んでください。'
     : !configured ? '先に接続IDを設定してください。'
-      : p.isSignedIn?.() ? 'ログイン済みです。必要ならログインし直せます。' : 'ログインしていません。';
+      : signedIn ? 'ログイン中' : 'ログインしていません';
+}
+
+async function toggleCloudLogin() {
+  const p = activeProvider();
+  if (p?.isConfigured?.() && p.isSignedIn?.()) return logoutCloud(p);
+  return loginCloud();
+}
+
+async function logoutCloud(p) {
+  if (!(await ask(`${p.label}からログアウトしますか？\nサーバへの自動バックアップは、ログインし直すまで止まります。`, { ok: 'ログアウト' }))) return;
+  await flush();
+  p.signOut();
+  renderCloudActions();
+  await sync.refresh().catch(() => {});
+  renderSyncState();
+  toast(`${p.label}からログアウトしました`);
 }
 
 async function loginCloud() {
@@ -4911,6 +4930,12 @@ const UI_TARGETS = {
   'nav.sort': () => $('ep-sort'),
   'nav.sort-dir': () => $('ep-sort-dir'),
   'nav.search': () => document.querySelector('.ep-search'),
+  // 0.86：稿の部品と「編集エピソード保存」
+  'draft.select': () => $('ep-version'),
+  'draft.up': () => document.querySelector('[data-action="ep-version-up"]'),
+  'draft.final': () => document.querySelector('[data-action="ep-version-final"]'),
+  'draft.delete': () => document.querySelector('[data-action="ep-version-delete"]'),
+  'other.sync-save': () => $('sync-save-btn'),
   ...Object.fromEntries(['novel-title', 'ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'synopsis', 'project-memo', 'x', 'narou-report-title', 'narou-report-body']
     .map((k) => ['count.' + k, () => $('count-' + k)])),
   ...Object.fromEntries(['ep-title', 'body', 'foreword', 'afterword', 'plot', 'free-memo', 'project-memo', 'x-text', 'narou-report-title', 'narou-report-body']
@@ -4942,8 +4967,17 @@ function applyUiPrefs() {
   document.querySelectorAll('[data-max-tool]').forEach((tool) => {
     tool.classList.toggle('max-tool-off', !uiPref(`max.tool.${tool.dataset.maxTool}`));
     // 編集機能（最大化していないとき）：ルビ〜画像だけ。全て選択・コピーなどは別のグループで設定する
-    tool.classList.toggle('edit-tool-off', EDIT_TOOLS.includes(tool.dataset.maxTool) && !uiPref(`tool.${tool.dataset.maxTool}`));
+    // 本文の「↑」「↓」（最大化していないとき）は「↑↓ボタン」のグループで設定する（0.86）
+    const name = tool.dataset.maxTool;
+    tool.classList.toggle('edit-tool-off', (EDIT_TOOLS.includes(name) && !uiPref(`tool.${name}`))
+      || ((name === 'jump-top' || name === 'jump-bottom') && !uiPref('jump.body')));
   });
+  // プロット・フリーメモの「↑」「↓」は2つで1組（0.86）
+  for (const k of ['plot', 'free-memo']) {
+    document.querySelectorAll(`[data-jump="${k}"]`).forEach((b) => b.classList.toggle('ui-off', !uiPref('jump.' + k)));
+  }
+  // サブ側（メインでないほう）の原稿タブ。編集中のときは、戻れなくならないよう出しておく（0.86）
+  cls.toggle('hide-sub-site', !uiPref('other.sub-site'));
   cls.toggle('hide-nav-ep-menu', !uiPref('nav.ep-menu'));
   cls.toggle('hide-status', !uiPref('other.status'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ
@@ -5276,7 +5310,7 @@ function bindSettingsInputs() {
   });
   // 使うクラウド（Google ドライブ／OneDrive）
   $('cloud-provider').addEventListener('change', (e) => changeCloudProvider(e.target.value).catch(fail));
-  $('cloud-login').addEventListener('click', () => loginCloud().catch(fail));
+  $('cloud-login').addEventListener('click', () => toggleCloudLogin().catch(fail));
   $('file-destination').addEventListener('change', (e) => { if (driveProvider()) prefs.set(DEST_KEY, e.target.value); });
   form.querySelectorAll('[name^="acc."]').forEach((input) => input.addEventListener('input', commitAccounts));
 }
