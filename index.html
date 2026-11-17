@@ -750,10 +750,11 @@
         <span class="imp-file-head">TXT／ZIP ファイル</span>
         <div class="imp-file-buttons">
           <!-- ラベルを押すと端末のファイル選択が開く（iPhone でも確実に開くよう、入力欄はラベルの中に置く） -->
-          <label class="imp-file-button">この端末・その他から選ぶ…
+          <!-- 0.83：選ぶ場所は「設定」→「ファイル」に従う。この端末だけ＝ラベル（端末の画面を直接開く）／クラウド・両方＝ボタン -->
+          <label class="imp-file-button" id="imp-file-label">ファイルを選ぶ…
             <input type="file" id="imp-file" class="visually-hidden" accept=".txt,.zip,text/plain,application/zip">
           </label>
-          <button type="button" id="imp-cloud-file" hidden></button>
+          <button type="button" id="imp-cloud-file" hidden>ファイルを選ぶ…</button>
         </div>
         <span class="hint" id="imp-file-name"></span>
       </div>
@@ -774,9 +775,15 @@
       <div class="import-step-body">
       <h3 class="imp-step-title">タイトル一覧</h3>
       <div id="imp-title-list-source" class="imp-title-list-source">
-        <label>タイトル一覧ファイル
-          <input type="file" id="imp-title-list-file" accept=".txt,text/plain">
-        </label>
+        <div class="imp-file-pick">
+          <span class="imp-file-head">タイトル一覧ファイル</span>
+          <div class="imp-file-buttons">
+            <label class="imp-file-button" id="imp-title-list-label">ファイルを選ぶ…
+              <input type="file" id="imp-title-list-file" class="visually-hidden" accept=".txt,text/plain">
+            </label>
+            <button type="button" id="imp-title-list-pick" hidden>ファイルを選ぶ…</button>
+          </div>
+        </div>
         <div class="imp-paste-field">
           <div class="imp-paste-head">
             <label for="imp-title-list-text">または、タイトル一覧を貼り付ける</label>
@@ -1312,7 +1319,7 @@
     <!-- ファイル -->
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
-      <legend>ファイルの保存先</legend>
+      <legend>ファイルを開く・保存する場所</legend>
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う</option>
