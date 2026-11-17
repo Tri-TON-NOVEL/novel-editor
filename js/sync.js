@@ -446,7 +446,7 @@ async function savedAnyway(t, name, err) {
 export function savePack(name, text) {
   return exclusive(async () => {
     const t = target();
-    if (!t) throw new Error('自動バックアップの保存先が使えません（「設定」→「自動バックアップ」で保存先とフォルダを確かめてください）');
+    if (!t) throw new Error('自動バックアップの保存先が使えません（「設定」→「バックアップ」で保存先とフォルダを確かめてください）');
     running = true;
     listener();
     try {

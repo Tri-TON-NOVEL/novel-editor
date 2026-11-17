@@ -38,7 +38,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.86';
+const APP_VERSION = '2026.11.17-0.88';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1976,7 +1976,7 @@ async function createBackupPack(btn = $('backup-pack-save')) {
   const dialog = $('backup-pack-dialog');
   const mode = packMode;
   if (mode === 'pack' && sync.getState() !== 'on') {
-    setTaskError(dialog, '自動バックアップの保存先が使えません。「設定」→「自動バックアップ」で保存先とフォルダを確かめてください（好きな場所に保存するときは「ファイル」→「保存」）');
+    setTaskError(dialog, '自動バックアップの保存先が使えません。「設定」→「バックアップ」で保存先とフォルダを確かめてください（好きな場所に保存するときは「ファイル」→「保存」）');
     return false;
   }
   const saved = await runTask('backup', async () => {
@@ -2917,8 +2917,8 @@ async function remindBackup() {
   const days = last ? Math.floor((Date.now() - new Date(last)) / 86400000) : null;
   if (days === null || days >= BACKUP_REMIND_DAYS) {
     toast(days === null
-      ? 'まだ全体のバックアップがありません。「設定」→「自動バックアップ」で保存先を選ぶか、「ファイル」→ 全体の「名前を付けて保存」で保存しておくと安心です'
-      : `最後のバックアップから${days}日たっています。「ファイル」→ 全体の「名前を付けて保存」か、「設定」→「自動バックアップ」をおすすめします`);
+      ? 'まだ全体のバックアップがありません。「設定」→「バックアップ」で自動バックアップの保存先を選ぶか、「ファイル」→「保存…」で保存しておくと安心です'
+      : `最後のバックアップから${days}日たっています。「ファイル」→「保存…」か、「設定」→「バックアップ」の自動バックアップをおすすめします`);
   }
 }
 
@@ -3364,7 +3364,7 @@ function renderSyncState() {
 // 起動したとき・保存先を変えたとき・「他の端末の更新を確認」：他の端末のほうが新しいバックアップを保存していないか調べる
 async function runSyncCheck({ manual = false } = {}) {
   if (sync.getState() !== 'on') {
-    if (manual) toast('自動バックアップの保存先が使えません（設定 → 自動バックアップ）', true);
+    if (manual) toast('自動バックアップの保存先が使えません（設定 → バックアップ）', true);
     return;
   }
   let r;
@@ -3420,7 +3420,7 @@ function environmentFollowUp(res) {
   const lines = [];
   if (res.providerChanged || res.idsChanged) lines.push('・使うクラウドかクライアントIDが変わりました。「設定」→「クラウド」でログインし直してください。');
   if (res.cloudChanged?.some((k) => /folder|backupFolder/i.test(k))) lines.push('・保存先フォルダの設定を読み込みました。この端末で使えないときは「設定」でフォルダを選び直してください。');
-  if (res.cloudChanged?.includes('sync.mode')) lines.push('・自動バックアップの方式を読み込みました。「設定」→「自動バックアップ」で保存先が使えるか確かめてください（フォルダ方式は、この端末でフォルダを選び直す必要があります）。');
+  if (res.cloudChanged?.includes('sync.mode')) lines.push('・自動バックアップの方式を読み込みました。「設定」→「バックアップ」で保存先が使えるか確かめてください（フォルダ方式は、この端末でフォルダを選び直す必要があります）。');
   return lines.length ? `\n\n${lines.join('\n')}` : '';
 }
 
@@ -3796,7 +3796,7 @@ function renderCloudFolder(p) {
     if (!folder) return;
     renderCloudActions();
     renderSyncState();
-    toast(`「ファイル」の保存先を「${folder.name}」にしました（自動バックアップの場所は「自動バックアップ」タブで決めます）`);
+    toast(`「ファイル」の保存先を「${folder.name}」にしました（自動バックアップの場所は「バックアップ」タブで決めます）`);
   };
   // エディター内の画面で、クラウドのフォルダを選ぶ・作る（iPhone・iPad でも使える）
   const choose = button('フォルダを選ぶ・作る…', async () => {
@@ -5359,7 +5359,7 @@ async function saveNow() {
   await flush();
   let st = sync.getState();
   if (st === 'off' || st === 'unsupported' || st === 'need-folder') {
-    toast('保存先が決まっていません。「自動バックアップ」の保存先とフォルダを選んでください（書いた内容は端末の中に自動で保存されています）', true);
+    toast('保存先が決まっていません。「バックアップ」タブで、自動バックアップの保存先とフォルダを選んでください（書いた内容は端末の中に自動で保存されています）', true);
     openSettings('backup');
     return;
   }

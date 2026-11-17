@@ -20,12 +20,9 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：0.86（`2026.11.17-0.86`）
+- **バージョン**：0.88（`2026.11.17-0.88`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
-- **画像付き操作マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/画像付き操作マニュアル.html](https://tri-ton-novel.github.io/novel-editor/docs/%E7%94%BB%E5%83%8F%E4%BB%98%E3%81%8D%E6%93%8D%E4%BD%9C%E3%83%9E%E3%83%8B%E3%83%A5%E3%82%A2%E3%83%AB.html)（ブラウザーでページとして開きます）
-- **簡易マニュアル（逆引き）**：[docs/簡易マニュアル_逆引き.md](docs/簡易マニュアル_逆引き.md)
-- **設定マニュアル**：[docs/設定マニュアル.md](docs/設定マニュアル.md)
-- **使い方の詳細**：[docs/使い方.md](docs/使い方.md)
+- **マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/manual.html](https://tri-ton-novel.github.io/novel-editor/docs/manual.html)
 
 > [!IMPORTANT]
 > 本アプリは無保証です。利用によって生じた損害について、作者は一切の責任を負いません。詳しくは下の[免責事項](#免責事項)をお読みください。
@@ -164,7 +161,7 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
   - このソフトは使う人専用で、各自が自分で登録したクライアントID で、自分のクラウドに使う前提です。
   - エディターが消すのは、自分の端末のプレフィックスの古い自動バックアップだけです。
 - iPhone・iPad では、Safari で開いたときとホーム画面のアプリで開いたときで、データが別々になります。
-- ブラウザのデータを消すと、作品も消えます。**自動バックアップ**か、「ファイル」→ 全体の「名前を付けて保存」で、こまめに残してください。
+- ブラウザのデータを消すと、作品も消えます。**自動バックアップ**か、「ファイル」→「保存…」で、こまめに残してください。
 
 ## はじめかた
 
