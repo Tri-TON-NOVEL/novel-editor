@@ -87,7 +87,6 @@
           <label>なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
           <label>アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
           <label>アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
-          <p class="hint">この作品だけの情報です（作品ごとに別々）。入れなくても使えます。Nコード・作品IDか作品URLのどちらかを入れると、もう一方は空なら自動で入ります。</p>
         </div>
       </details>
       <div class="nav-head">
@@ -144,7 +143,7 @@
 
       <!-- 活動報告（このエピソードの。「活動報告」タブで開く） -->
       <div class="report-pane" id="report-pane" hidden>
-      <p class="hint report-url-hint"><strong id="report-ep-name"></strong> の活動報告です（エピソードごとに保存します）。ひな型の話数・タイトル・{URL} は、このエピソードのものが入ります。{URL} には、目次の<button type="button" class="link-btn" data-action="open-work-codes">「小説投稿サイト情報」</button>に入れた作品URLが入ります（なろうは「作品URL＋何番目のエピソードか」）。<span id="report-url-state"></span></p>
+      <p class="hint report-url-hint"><strong id="report-ep-name"></strong>　<span id="report-url-state"></span></p>
       <div class="report-grid">
         <section class="card">
           <h2><a class="report-site-link" id="report-link-x" data-report-link="x" rel="noopener noreferrer">X（旧Twitter）</a></h2>
@@ -229,7 +228,6 @@
               <label for="body">本文</label>
               <span class="count" id="count-body"></span>
               <span class="fold-info" id="fold-info-body"></span>
-              <span class="site-badge" id="site-badge"></span>
             </div>
             <div class="editor-tools" role="toolbar" aria-label="入力補助">
               <button type="button" class="tool" data-insert="ruby" data-max-tool="ruby" title="選択した文字にルビを振る">ルビ</button>
@@ -380,7 +378,6 @@
     <dialog id="episode-notes-copy-dialog" class="wide-dialog" aria-labelledby="episode-notes-copy-title">
       <form method="dialog" class="dialog" id="episode-notes-copy-form">
         <h2 id="episode-notes-copy-title">他のエピソードからコピー</h2>
-        <p class="hint">同じ作品の別のエピソードから、プロットとフリーメモを現在のエピソードへコピーします。本文やサイト別の原稿は変わりません。</p>
         <label class="stack">コピー元のエピソード
           <select id="episode-notes-copy-source"></select>
         </label>
@@ -421,14 +418,12 @@
     <!-- 設定（分類つきの表） -->
     <section class="view scroll" id="view-world" hidden>
       <h1 class="view-title">世界観・用語</h1>
-      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。国・種族・組織などをここに書いておくと、登場人物の「所属」に選べます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="world-tables"></div>
     </section>
 
     <!-- 登場人物（分類つきの表） -->
     <section class="view scroll" id="view-characters" hidden>
       <h1 class="view-title">登場人物</h1>
-      <p class="hint">分類ごとの表です。行の「分類」を変えると、別の分類へ移せます。「コピー」は表計算ソフトに貼り付けられる形式です。「所属」には「世界観・用語」の項目（国・種族・組織など）をいくつでも選べます。名前を変えた同じ人物は「同一人物」でつなげます。行の先頭に「＃」を付けた行は非公開の扱いになり、「テキストに書き出す」の公開用では書き出されません。</p>
       <div class="tables" id="character-tables"></div>
     </section>
 
@@ -457,7 +452,6 @@
     <!-- 串刺し検索（0.74）：作品のすべての文字をまとめて検索する -->
     <section class="view scroll" id="view-search" hidden>
       <h1 class="view-title">串刺し検索</h1>
-      <p class="hint">あらすじ・全体プロット・世界観・登場人物・メモ・伏線と、すべてのエピソードのタイトル・本文・前書き・後書き・プロット・フリーメモ・活動報告を、まとめて検索します。結果を押すと、その場所を開いて当たった文字を選びます。</p>
       <form id="cs-form" class="cs-form" role="search" autocomplete="off">
         <div class="cs-query-row">
           <input type="search" id="cs-query" placeholder="検索する言葉（スペースで区切って複数。&quot;…&quot; で囲むとスペースも含めて1語）" aria-label="串刺し検索の言葉" enterkeyhint="search" spellcheck="false">
@@ -488,7 +482,6 @@
     <!-- 伏線一覧（発生と回収の対応） -->
     <section class="view scroll" id="view-foreshadows" hidden>
       <h1 class="view-title">伏線一覧</h1>
-      <p class="hint">伏線は、エピソードの「伏線」タブで登録し、回収・部分回収も同じタブで記録します。話数は目次の並び順（第1話からの通し番号）です。状態はここで選び直せます。話数を押すと、そのエピソードへ移ります。</p>
       <div class="fs-list-filter">
         <fieldset class="fs-status-filter">
           <legend>状態</legend>
@@ -562,7 +555,6 @@
     <fieldset class="checks">
       <legend>保存する内容</legend>
       <label><input type="checkbox" name="environment"> 環境設定を含める <span class="changed-tag" id="backup-pack-env-changed"></span></label>
-      <p class="hint sub-check">ログインの情報（アクセストークンなど）と OAuth の Client ID は保存しません。</p>
       <label><input type="checkbox" name="includeNovel" checked> 小説を含める</label>
     </fieldset>
     <fieldset id="backup-pack-novel-data">
@@ -583,7 +575,7 @@
           <button type="button" class="tool" id="backup-pack-no-episodes">全て解除</button>
         </div>
         <div class="pack-episode-list" id="backup-pack-episodes"></div>
-        <label class="check"><input type="checkbox" name="autoTargets" checked> 選んだエピソードをサーバへの自動バックアップ対象にもする</label>
+        <label class="check"><input type="checkbox" name="autoTargets" checked> 自動バックアップの対象にもする</label>
       </div>
     </fieldset>
     <label class="stack" id="backup-pack-file-row" hidden>ファイル名 <input name="fileName" type="text" autocomplete="off" spellcheck="false"></label>
@@ -616,7 +608,6 @@
 <dialog id="sync-target-dialog" class="wide-dialog">
   <form method="dialog" class="dialog" id="sync-target-form">
     <h2>自動保存するエピソードを選ぶ</h2>
-    <p class="hint">選んだエピソードを、指定間隔ごとに一つのバックアップパックへ保存します。各エピソードには両サイトの全稿、プロット、フリーメモ、活動報告を含めます。</p>
     <div class="button-row">
       <button type="button" class="tool" id="sync-target-all">全て選択</button>
       <button type="button" class="tool" id="sync-target-none">全て解除</button>
@@ -668,7 +659,6 @@
       <select id="sync-restore-filter"></select>
     </label>
     <ul class="list" id="sync-restore-list"></ul>
-    <p class="hint">一覧に出るのは、バックアップ先のフォルダの中のバックアップ（Win_・iPad_ など全端末の分）です。それ以外の場所にあるファイルは「ファイルから選ぶ」で選べます。</p>
     <div class="dialog-foot">
       <button type="button" id="sync-from-file">ファイルから選ぶ…</button>
       <button type="button" id="sync-keep-mine" hidden>この端末の記録を使う（すぐ保存）</button>
@@ -706,7 +696,6 @@
     <label class="stack">みてみんの画像ページURL、または挿絵タグ
       <input name="url" type="text" autocomplete="off" placeholder="https://12345.mitemin.net/i1234569/">
     </label>
-    <p class="hint">本文に直接 URL を貼り付けても自動で <code>&lt;i1234569|12345&gt;</code> に変わります。アルファポリス用にコピーすると、挿絵の位置に目印が入ります。</p>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
       <button value="ok" class="primary">挿入</button>
@@ -761,11 +750,11 @@
       </div>
       <fieldset class="imp-mode" id="imp-mode-row" hidden>
         <legend>既存の作品への取り込み方</legend>
-        <label class="check"><input type="radio" name="imp-mode" value="overwrite" checked> 置き換える（おすすめ。TXT の話を、タイトルが同じ既存の話と対にして、取り込む投稿先の原稿だけを置き換える。もう一方の投稿先の原稿はそのまま）</label>
-        <label class="check"><input type="radio" name="imp-mode" value="edition"> 新しい稿として追加（対になった話に、取り込む投稿先の原稿がすでにあれば、今の稿を残して新しい稿にする）</label>
-        <label class="check"><input type="radio" name="imp-mode" value="rebuild"> 作り直す（今のエピソード・章をすべて削除して、TXT の内容に入れ替える。もう一方の投稿先の原稿も消えます）</label>
+        <label class="check"><input type="radio" name="imp-mode" value="overwrite" checked> 置き換える（おすすめ）</label>
+        <label class="check"><input type="radio" name="imp-mode" value="edition"> 新しい稿として追加</label>
+        <label class="check"><input type="radio" name="imp-mode" value="rebuild"> 作り直す（今の話・章をすべて削除）</label>
       </fieldset>
-      <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける（対応しない話は勝手に追加せず、エラーとして表示）</label>
+      <label class="check" id="imp-strict-match-row" hidden><input type="checkbox" id="imp-strict-match" checked> 既存エピソードへ対応付ける</label>
       <div class="imp-file-pick">
         <span class="imp-file-head">TXT／ZIP ファイル</span>
         <div class="imp-file-buttons">
@@ -775,14 +764,12 @@
           </label>
           <button type="button" id="imp-cloud-file" hidden></button>
         </div>
-        <span class="hint" id="imp-file-name">上の設定を選んでからファイルを選ぶと、読み込んで次の画面へ進みます。</span>
+        <span class="hint" id="imp-file-name"></span>
       </div>
       <fieldset id="imp-zip-entry-row" class="imp-zip-picker" hidden>
         <legend>ZIP内のTXT</legend>
-        <p class="hint">取り込むTXTを一つ選んでください。選ぶと読み込んで次の画面へ進みます。フォルダー内のTXTも一覧に表示します。</p>
         <div id="imp-zip-entry-list" class="imp-zip-entry-list"></div>
       </fieldset>
-      <p class="hint">TXTの読み取り方法と、取り込む原稿の投稿先は別々に選べます。既存作品を選ぶと、TXT の話を、タイトルが同じ既存の話（もう一方の投稿先のタイトルでも探します）と対にします。「置き換える」は取り込む投稿先の原稿だけを置き換え、「新しい稿として追加」は今の稿を残して新しい稿にします。どちらも、もう一方の投稿先の原稿とプロット・フリーメモは変えません。「作り直す」は、今のエピソード・章をすべて削除して TXT の内容に入れ替えます（取り込む前の状態はバックアップ版に残ります）。確定するまで作品は一切変更しません。</p>
       <div id="imp-decode-info" class="imp-info" hidden></div>
       </div>
       <footer class="import-foot">
@@ -806,7 +793,6 @@
           </div>
           <textarea id="imp-title-list-text" rows="8" placeholder="作品ページのタイトル一覧をコピーして、ここへ貼り付けます（右上の「貼り付け」でも入ります）"></textarea>
         </div>
-        <p class="hint">原稿TXTとは別に、章名・エピソード名・掲載日時・文字数などが並んだタイトル一覧が必要です。ファイルを選ぶと貼り付け欄へ読み込みます。</p>
       </div>
       </div>
       <footer class="import-foot">
@@ -866,7 +852,6 @@
           <label>タイトル一覧の書式
             <textarea id="imp-title-list-template" rows="12" spellcheck="false"></textarea>
           </label>
-          <p class="hint">「#よみとばし」では「改行」「空白」「コメント 記号」を指定できます。「#エピソード」「#章」では「章タイトル」「エピソードタイトル」「テキスト」を並べます。「テキスト」は1行を読み飛ばします。</p>
         </div>
         <div class="imp-rule-actions" id="imp-rule-actions">
           <button type="button" id="imp-detect" class="primary">この条件で自動検出</button>
@@ -874,7 +859,6 @@
           <span id="imp-pending" class="imp-pending" hidden>条件を変えました。全文に反映するには「この条件で自動検出」を押してください（プレビューへ進むときにも反映されます）</span>
           <span id="imp-rule-error" class="imp-error" role="alert"></span>
         </div>
-        <p class="hint" id="imp-manual-hint">左の行の「−」を押すと、その行の区切りを「話の開始 → 章の開始 → 解除」の順に切り替えられます（手動の指定は太枠で表示）。</p>
       </div>
       <div class="imp-split" id="imp-split">
         <div class="imp-lines" id="imp-lines" aria-label="全文"></div>
@@ -998,19 +982,18 @@
     <h2 id="site-copy-title">メイン → サブにコピー</h2>
     <p class="hint" id="site-copy-desc"></p>
     <fieldset class="checks site-copy-mode">
-      <legend>コピー先（このエピソードだけ）</legend>
+      <legend>コピー先</legend>
       <label><input type="radio" name="mode" value="new" checked> <span id="site-copy-mode-new">新しい稿として追加（おすすめ）</span></label>
       <label><input type="radio" name="mode" value="overwrite"> <span id="site-copy-mode-over">今の稿に上書き</span></label>
     </fieldset>
     <fieldset class="checks" id="site-copy-fields">
-      <legend>コピーする項目（プロット・フリーメモ・章プロットは対象外）</legend>
+      <legend>コピーする項目</legend>
     </fieldset>
     <div id="site-copy-overwrite" class="overwrite" hidden></div>
     <div id="site-copy-warnings" class="warnings" hidden></div>
     <label class="stack">変換後の本文（プレビュー）
       <textarea id="site-copy-preview" rows="8" readonly></textarea>
     </label>
-    <p class="hint">コピーするのは、メインの今の稿（このエピソードだけ）です。メイン側は変わりません。「新しい稿として追加」では、コピー先の今の稿はそのまま残り、その次の番号の稿にコピーします。</p>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
       <button value="ok" class="primary" id="site-copy-ok">コピーする</button>
@@ -1021,7 +1004,6 @@
 <dialog id="version-save-dialog">
   <form method="dialog" class="dialog" id="version-save-form">
     <h2>復元ポイントを作成</h2>
-    <p class="hint">今の作品全体（全エピソード・プロット・世界観・用語・登場人物など）を、この名前で復元ポイントとして残します。</p>
     <label class="stack">名前 <input name="name" type="text" autocomplete="off" required></label>
     <label class="stack">メモ（任意） <textarea name="memo" rows="3" spellcheck="false" placeholder="例：第2章を大幅に書き直す前"></textarea></label>
     <div class="dialog-foot">
@@ -1035,7 +1017,6 @@
   <form method="dialog" class="dialog" id="version-form">
     <h2 id="version-title">変更履歴・復元ポイント</h2>
     <dl class="version-info" id="version-info"></dl>
-    <p class="hint">「この状態に戻す」を押すと、戻す直前の状態も変更履歴に残るので、あとから元に戻せます。</p>
     <div class="dialog-foot wrap">
       <button type="button" value="cancel">閉じる</button>
       <button value="delete" class="danger">削除</button>
@@ -1049,8 +1030,6 @@
   <form method="dialog" class="dialog" id="restore-form">
     <h2>バックアップから復元</h2>
     <p id="restore-info"></p>
-    <p class="hint">「追加・上書き」：バックアップの作品を戻します。この端末にしかない作品は残ります。<br>
-      「すべて入れ替え」：この端末の作品をすべて消してから、バックアップの内容にします。</p>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
       <button value="replace" class="danger">すべて入れ替え</button>
@@ -1084,7 +1063,7 @@
     <label class="stack">置換後の文字列 <input name="to" type="text" autocomplete="off"></label>
     <label class="stack">範囲
       <select name="scope">
-        <option value="all">全文（この入力欄の中すべて）</option>
+        <option value="all">全文</option>
         <option value="selection">選択した範囲</option>
       </select>
     </label>
@@ -1122,7 +1101,6 @@
         <span>差し込み欄（％1％・％2％ …）</span>
         <button type="button" class="tool" id="template-add-field">＋ 差し込み欄を追加</button>
       </div>
-      <p class="hint">タイトルや本文に ％1％・％2％ … と書くと、ひな型を使うときに入力欄が出て、入れた文字に置き換わります（半角の %1% でも同じ）。「いつもの内容」は、入力欄に最初から入る文字です。話数・エピソード名などは、上の差し込み文字（{エピソード名} など）で自動で入ります。</p>
       <div id="template-fields"></div>
     </div>
     <div class="dialog-foot">
@@ -1136,7 +1114,7 @@
   <form method="dialog" class="dialog" id="template-fill-form">
     <h2 id="template-fill-heading">ひな型の差し込み欄</h2>
     <div id="template-fill-fields"></div>
-    <label class="check"><input type="checkbox" name="remember" checked> 入れた文字をひな型に保存する（次に使うときも最初から入る）</label>
+    <label class="check"><input type="checkbox" name="remember" checked> 入れた文字をひな型に保存する</label>
     <div class="stack"><span>できあがり</span><div class="template-preview" id="template-fill-preview"></div></div>
     <div class="dialog-foot">
       <button type="button" value="cancel">キャンセル</button>
@@ -1208,10 +1186,10 @@
       <label><input type="checkbox" data-ui="nav.add-episode"> ＋ 話</label>
       <label><input type="checkbox" data-ui="nav.add-chapter"> ＋ 章</label>
       <label><input type="checkbox" data-ui="nav.grouping"> 章あり／章なし</label>
-      <label><input type="checkbox" data-ui="nav.sort"> 並び順（ファイル順・タイトルなど）</label>
+      <label><input type="checkbox" data-ui="nav.sort"> 並び順</label>
       <label><input type="checkbox" data-ui="nav.sort-dir"> 昇順／降順</label>
       <label><input type="checkbox" data-ui="nav.search"> 検索欄</label>
-      <label><input type="checkbox" data-ui="nav.ep-menu"> 各話・各章の操作ボタン（…）</label>
+      <label><input type="checkbox" data-ui="nav.ep-menu"> 各話・各章の操作ボタン</label>
     </fieldset>
     <fieldset class="checks" id="show-settings">
       <legend>エピソード画面に表示する項目</legend>
@@ -1319,15 +1297,14 @@
     </fieldset>
     <fieldset class="checks">
       <legend>その他</legend>
-      <label><input type="checkbox" data-ui="other.hints"> 機能の説明ラベルを表示</label>
-      <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル（画面上部の「端末に保存済み」「サーバ保存」など）</label>
+      <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル</label>
     </fieldset>
     </div>
     <fieldset id="iphone-max" hidden>
-      <legend>iPhone：最大化したときの入力欄の高さ</legend>
+      <legend>iPhone：最大化時の高さ</legend>
       <label>高さ
         <select id="iphone-max-mode">
-          <option value="auto">自動（見えている範囲いっぱい）</option>
+          <option value="auto">自動</option>
           <option value="half">画面の縦の半分</option>
           <option value="px">ピクセルで指定</option>
         </select>
@@ -1341,12 +1318,12 @@
     <!-- ファイル -->
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
-      <legend>書き出しなどで使う保存先（この端末）</legend>
+      <legend>書き出しの保存先</legend>
       <label>保存先
         <select name="fileDestination" id="file-destination">
-          <option value="ask">両方を使う（毎回「どこに保存／どこから開きますか？」で選ぶ）</option>
+          <option value="ask">両方を使う（毎回選ぶ）</option>
           <option value="cloud">クラウドだけを使う</option>
-          <option value="local">この端末・その他（iCloud など）だけを使う</option>
+          <option value="local">この端末・その他だけを使う</option>
         </select>
       </label>
       <p class="hint" id="file-destination-hint"></p>
@@ -1378,13 +1355,13 @@
     <!-- 投稿サイト -->
     <div class="settings-panel" data-spanel="sites" role="tabpanel" hidden>
     <fieldset class="account-grid">
-      <legend>小説家になろうのアカウント（全作品共通・この端末）</legend>
+      <legend>小説家になろうのアカウント</legend>
       <label>ユーザID <input type="text" name="acc.narou.userId" inputmode="numeric" autocomplete="off" placeholder="例：12345"></label>
       <label>ユーザ名 <input type="text" name="acc.narou.userName" autocomplete="off"></label>
       <label>作者名（ペンネーム） <input type="text" name="acc.narou.author" autocomplete="off"></label>
     </fieldset>
     <fieldset class="account-grid">
-      <legend>アルファポリスのアカウント（全作品共通・この端末）</legend>
+      <legend>アルファポリスのアカウント</legend>
       <label>ユーザID <input type="text" name="acc.alpha.userId" autocomplete="off"></label>
       <label>ユーザ名 <input type="text" name="acc.alpha.userName" autocomplete="off"></label>
       <label>作者名（ペンネーム） <input type="text" name="acc.alpha.author" autocomplete="off"></label>
@@ -1394,7 +1371,7 @@
     <!-- リンク -->
     <div class="settings-panel" data-spanel="links" role="tabpanel" hidden>
     <fieldset id="link-settings">
-      <legend>リンク（よく使うサイト）</legend>
+      <legend>リンク</legend>
       <ul class="link-list" id="link-list"></ul>
       <button type="button" class="tool add-link" id="add-link">＋ サイトを追加</button>
     </fieldset>
@@ -1423,10 +1400,11 @@
     </fieldset>
     <fieldset id="sync-settings">
       <legend>サーバへの自動バックアップ</legend>
+      <p id="sync-status"></p>
       <label>保存先（この端末）
         <select id="sync-mode">
           <option value="off">使わない</option>
-          <option value="folder">フォルダ（PC の Chrome・Edge／Android の Chrome。ネットワークドライブも可）</option>
+          <option value="folder">フォルダ</option>
           <option value="cloud">クラウド</option>
         </select>
       </label>
@@ -1434,7 +1412,6 @@
       <div class="button-row" id="sync-folder-row">
         <button type="button" id="sync-choose">フォルダを選ぶ…</button>
       </div>
-      <p id="sync-status"></p>
       <div class="button-row">
         <button type="button" data-action="backup-pack-create">バックアップパックを作成…</button>
         <button type="button" id="sync-manage">バックアップファイルを管理…</button>
@@ -1443,7 +1420,7 @@
         <label>ファイル名の先頭（プレフィックス）
           <input type="text" id="sync-prefix" autocomplete="off" spellcheck="false">
         </label>
-        <label>書き続けているときの保存間隔
+        <label>保存間隔
           <select name="autoBackupInterval">
             <option value="5">5分ごと</option>
             <option value="10">10分ごと</option>

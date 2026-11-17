@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.75';
+const APP_VERSION = '2026.11.17-0.76';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -925,7 +925,6 @@ async function migrateProjectReports() {
 // 編集中の原稿（なろう用／アルファ用）に合わせて、使える機能（ボタン・前書き・後書き）を切り替える
 function applySite() {
   document.body.dataset.site = editSite;
-  $('site-badge').textContent = SITES[editSite].label + '用の原稿' + (editSite === project.site ? '（メイン）' : '（サブ）');
   el.body.placeholder = editSite === 'narou'
     ? '本文\n\nみてみんの画像URL（https://〜.mitemin.net/i〜/）を貼り付けると、挿絵タグに自動で変わります'
     : '本文';
@@ -1219,7 +1218,7 @@ function openNewItem(kind) {
     form.chapter.replaceChildren(new Option('章なし（未分類）', ''), ...project.chapters.map((c) => new Option(chapterName(c), c.id)));
     form.chapter.value = episode()?.chapterId || '';
   }
-  $('new-item-hint').textContent = isCh ? '章の中身（エピソード）は空で作ります。' : '章がなくても登録できます（「章なし（未分類）」）。登録すると、そのエピソードを開きます。';
+  $('new-item-hint').textContent = '';
   fillNewItemPositions();
   $('new-item-dialog').showModal();
   form.title.focus();
@@ -1473,7 +1472,6 @@ function driveBrowse({ p, mode, kind = 'json', title, name = '', text = '', work
     $('drive-ok').textContent = mode === 'folder' ? 'このフォルダにする' : '保存';
     $('drive-local').hidden = mode === 'folder';
     $('drive-local').textContent = mode === 'open' ? 'この端末・その他から開く…' : 'この端末・その他に保存…';
-    $('drive-hint').textContent = p.browseHint || '';
     $('drive-dialog').showModal();
     withBusy('一覧を読み込み中…', loadDriveFolders).catch((e) => { finishDrive(null); fail(e); });
   });
@@ -1890,11 +1888,6 @@ function packTargets() {
   return [...map.values()];
 }
 
-const PACK_SCOPE_HINT = {
-  all: 'すべての作品を、稿・履歴とあわせて保存します。',
-  project: '選んだ作品を丸ごと（作品情報・全エピソード・稿・履歴）保存します。',
-  episodes: '作品ごとに、エピソード（複数可）と作品情報（あらすじ・全体プロット・章・世界観／用語・登場人物・メモ）を選べます。エピソードは両サイトの全稿・プロット・フリーメモ・活動報告とあわせて保存します。エピソードを選ばず「作品情報も含む」だけでも保存できます。',
-};
 
 // バックアップパックの画面は二つの使い方で共通：
 //   'pack' … 「バックアップパックを作成」。自動バックアップの保存先フォルダに、決まった名前で置く（ほかの端末に更新として知らせが出る）
@@ -1927,7 +1920,6 @@ function updatePackForm() {
   $('backup-pack-novel-data').disabled = !includeNovel;
   $('backup-pack-project-row').hidden = scope !== 'project';
   $('backup-pack-custom').hidden = scope !== 'episodes';
-  $('backup-pack-scope-hint').textContent = PACK_SCOPE_HINT[scope] || '';
   const hasNovel = includeNovel && items.length > 0;
   const has = env || hasNovel;
   $('backup-pack-save').disabled = !has;
@@ -1961,9 +1953,7 @@ async function openPackDialog(mode = 'pack') {
   renderPackEpisodes(projects, changes);
   const usable = sync.getState() === 'on';
   $('backup-pack-heading').textContent = mode === 'file' ? 'ファイルに保存' : 'バックアップパックを作成';
-  $('backup-pack-lead').textContent = mode === 'file'
-    ? '選んだ内容を、バックアップパックと同じ形式の一つのファイルにまとめ、好きな場所・好きな名前で保存します。「変更あり」は、前にこの端末で保存したときから変わったものです。'
-    : `選んだ内容を一つのファイルにまとめ、自動バックアップの保存先${usable ? `「${sync.folderName()}」` : ''}に保存します（ほかの端末では、更新として知らせが出ます）。「変更あり」は、前にこの端末で保存したときから変わったものです。`;
+  $('backup-pack-lead').textContent = '';
   $('backup-pack-file-row').hidden = mode !== 'file';
   $('backup-pack-name-row').hidden = mode === 'file';
   $('backup-pack-save').textContent = '保存'; // ファイル保存でも「保存」（押すと端末の保存画面が開く）
@@ -2333,7 +2323,7 @@ async function openSiteCopy() {
   const next = `第${nextEditionNo(dest.list)}稿`;
   // コピーするのは開いているエピソードだけ（題に話数を出して分かるようにする）
   $('site-copy-title').textContent = `第${project.episodes.indexOf(ep) + 1}話：${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
-  $('site-copy-desc').textContent = `このエピソード「${episodeName(ep)}」だけが対象です（ほかのエピソードは変わりません）。メインの今の稿（${src.cur.name}）を${SITES[to].label}の書き方に変換して、サブ側へ写します。メイン側は変わりません。`;
+  $('site-copy-desc').textContent = '';
   $('site-copy-mode-new').textContent = `新しい稿（${SITES[to].short}用の${next}）として追加（おすすめ。今の${dest.cur.name}はそのまま残ります）`;
   $('site-copy-mode-over').textContent = `${SITES[to].short}用の今の稿（${dest.cur.name}）に上書き`;
   $('site-copy-form').dataset.overName = dest.cur.name;
@@ -3251,7 +3241,7 @@ function inspectBackupFile(f) {
 async function openBackupManager() {
   const usable = sync.getState() === 'on';
   $('backup-manage-hint').textContent = usable
-    ? `自動バックアップの保存先「${sync.folderName()}」にあるバックアップ（.ayabackup と、前の版の .json）を、すべて表示します。「バックアップパックを作成」などで別のフォルダに保存したファイルは、ここには出ません（そのようなファイルは「ファイル」→「開く…」で開くと、内容を確かめて読み込めます）。`
+    ? ''
     : '保存先が利用できません。サーバへの自動バックアップで保存先を設定してください。';
   $('backup-files-delete').disabled = !usable;
   $('backup-file-inspect').disabled = !usable;
@@ -3358,7 +3348,7 @@ function renderSyncState() {
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
         : st === 'need-login' ? `⚠ ${cloudLabel}へのログインが必要です。上のボタン（または下の「${cloudLabel}にログイン」）を押してください。`
           : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
-            : `✅ 「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
+            : `「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
   $('sync-status').textContent = text + lastText + err;
   // 保存先が使えないときは一覧を出せない（ほかの場所のファイルは「ファイル」→「開く…」で開ける）
   $('sync-manage').disabled = st !== 'on';
@@ -3581,9 +3571,7 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
       + '\n下の一覧から読み込むものを選んでください（先頭の「最新」が候補です）。'
       + (localChanged ? '\n他の端末の記録を使わないときは「この端末の記録を使う」を押すと、今の内容をすぐ保存して最新にします。' : '');
   }
-  $('sync-restore-hint').textContent = isSync
-    ? '選んだファイルの内容を使います。この端末のほうが新しい作品があるときは、置き換えるかを聞きます。この端末にしかない作品は消えません。'
-    : '戻したいバックアップを選んでください。次の画面で「まとめる／入れ替える」を選べます。';
+  $('sync-restore-hint').textContent = '';
   // お知らせのときは「この端末の記録を使う」「あとで／読み込まない」、そうでなければ「閉じる」
   const keep = $('sync-keep-mine');
   const later = $('sync-later');
@@ -3803,11 +3791,7 @@ function renderCloudFolder(p) {
       renderSyncState();
     }));
   }
-  wrap.append(row, Object.assign(document.createElement('p'), {
-    className: 'hint',
-    textContent: `「ファイル」で ${p.label} に保存・開くとき、最初に開くフォルダです（端末ごとの設定）。自動バックアップの場所は「自動バックアップ」タブで決めます。`
-      + '保存先を変えても、すでに保存したファイルは移動しません。同じフォルダに同じ名前のファイルがあるときは、上書きせずに名前の後ろに番号を付けます。',
-  }));
+  wrap.append(row);
   return wrap;
 }
 
@@ -4953,7 +4937,6 @@ function applyUiPrefs() {
     tool.classList.toggle('edit-tool-off', EDIT_TOOLS.includes(tool.dataset.maxTool) && !uiPref(`tool.${tool.dataset.maxTool}`));
   });
   cls.toggle('hide-nav-ep-menu', !uiPref('nav.ep-menu'));
-  cls.toggle('hide-help-labels', !uiPref('other.hints'));
   cls.toggle('hide-status', !uiPref('other.status'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ
   if (cls.contains('hide-side') && document.querySelector('[data-tab="side"][aria-selected="true"]')) selectTab('body');
@@ -5192,7 +5175,6 @@ function openSettings(tab = prefs.get('settingsTab', 'display')) {
   // 利用できるクラウドの接続IDだけ出す（もう一方の設定も消さずに残っている）
   const selectedCloud = activeProvider();
   box.querySelector('legend').textContent = selectedCloud ? `${selectedCloud.label}：ドライブの接続の設定` : 'ドライブの接続の設定';
-  if (!selectedCloud) box.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '「利用できるクラウド」でGoogle DriveまたはOneDriveを選ぶと、ここに接続IDの設定欄を表示します。' }));
   for (const p of selectedCloud ? [selectedCloud] : []) {
     for (const s of p.settings) {
       const label = document.createElement('label');

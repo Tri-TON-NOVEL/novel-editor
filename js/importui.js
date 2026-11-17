@@ -1144,7 +1144,7 @@ export function initImport(ctx) {
     fillPresets();
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
-    $('imp-file-name').textContent = '上の設定を選んでからファイルを選ぶと、読み込んで次の画面へ進みます。';
+    $('imp-file-name').textContent = '';
     const cloud = ctx.cloudLabel?.() || '';
     $('imp-cloud-file').hidden = !cloud;
     $('imp-cloud-file').textContent = `${cloud}から選ぶ…`;
@@ -1163,7 +1163,6 @@ export function initImport(ctx) {
     $('imp-rule-actions').hidden = false;
     $('imp-split').hidden = false;
     $('imp-step2-foot').hidden = false;
-    $('imp-manual-hint').hidden = false;
     await fillTargets();
     await showResume();
     await go(1);
