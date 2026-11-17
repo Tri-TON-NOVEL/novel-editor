@@ -692,17 +692,20 @@ export function categorizedTable(container, getData, opts) {
   }
 
   // 串刺し検索から：絞り込みを外して全部出し、その行までスクロールして光らせる（0.74）
+  // 戻り値：その行があれば true（なければ絞り込みは変えずに false。0.80）
   function showOnly(itemId) {
+    if (!(getData().items || []).some((x) => x.id === itemId)) return false;
     clearTimeout(timer);
     query = ''; catFilter = ''; field = '';
     searchInput.value = ''; catSelect.value = ''; fieldSelect.value = '';
     render();
     const tr = body.querySelector(`tr[data-id="${CSS.escape(itemId)}"]`);
-    if (!tr) return;
+    if (!tr) return true;
     tr.scrollIntoView({ block: 'center' });
     tr.classList.remove('flash');
     void tr.offsetWidth;
     tr.classList.add('flash');
+    return true;
   }
 
   return { render, showOnly };

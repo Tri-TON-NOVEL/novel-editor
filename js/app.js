@@ -36,8 +36,9 @@ import { providers, activeProvider } from './providers/index.js';
 const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
+const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.79';
+const APP_VERSION = '2026.11.17-0.80';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -430,6 +431,9 @@ async function flush() {
     saveError = e.message || String(e);
     toast('端末への保存に失敗しました：' + saveError, true);
     console.error(e);
+    // 0.80：次の入力を待たずに、しばらくしてからもう一度保存する（入力があれば、そちらの予定で保存する）
+    clearTimeout(saveTimer);
+    saveTimer = setTimeout(flush, SAVE_RETRY_MS);
   }
   updateStatus();
 }
@@ -1951,7 +1955,6 @@ async function openPackDialog(mode = 'pack') {
   form.elements.scope.value = changes.works.size ? 'episodes' : 'project';
   form.elements.autoTargets.checked = true;
   renderPackEpisodes(projects, changes);
-  const usable = sync.getState() === 'on';
   $('backup-pack-heading').textContent = mode === 'file' ? 'ファイルに保存' : 'バックアップパックを作成';
   $('backup-pack-lead').textContent = '';
   $('backup-pack-file-row').hidden = mode !== 'file';
@@ -3925,6 +3928,7 @@ function openSearchHit(ref, first) {
     }
     case 'world':
     case 'characters':
+      if (!(ref.kind === 'world' ? project.world : project.characters)?.items?.some((x) => x.id === ref.itemId)) { toast('その項目は削除されています'); return; }
       setView(ref.kind);
       (ref.kind === 'world' ? worldTable : characterTable).showOnly(ref.itemId);
       break;
