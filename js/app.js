@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.76';
+const APP_VERSION = '2026.11.17-0.77';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1414,7 +1414,7 @@ const cloudDestinationLabel = () => `${cloudName()}（クラウドで設定し�
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 // force：設定にかかわらず選ぶ画面を出す（設定のほうを目立つボタンにする）
-// only：選ぶ画面を出さず、その保存先だけを使う（「ファイル」→「開く」「保存」は、この端末用なので 'local'。クラウドはバックアップの画面で使う）
+// only：選ぶ画面を出さず、その保存先だけを使う（「ファイル」→「開く」「保存」とプレーンテキストのインポート・エクスポートは、この端末用なので 'local'。クラウドには最初から接続しない。クラウドはバックアップの画面で使う）
 async function chooseDestination(kind, { force = false, only = '' } = {}) {
   if (only) return only;
   const p = driveProvider();
@@ -2238,7 +2238,7 @@ async function epOpen({ force = false, only = '' } = {}) {
 
 // プレーンテキスト → 今のエピソードの本文（開いている側の原稿）
 async function importText() {
-  const src = await openFrom('プレーンテキストを開く', { kind: 'txt' });
+  const src = await openFrom('プレーンテキストを開く', { kind: 'txt', only: 'local' });
   if (!src) return;
   const text = src.file
     ? await withBusy('ファイルを読み込み中…', async () => decodeText(await src.file.arrayBuffer()).text)
@@ -2264,7 +2264,7 @@ async function exportEpisode() {
   const d = cur();
   if (!d.body) { toast('本文は空です'); return; }
   const name = fileName(`${project.title || '無題'}_${d.title || epIndex + 1}`, '.txt');
-  const r = await saveTextTo(convert(editSite, d.body), name, { title: `${cloudName()}に保存（このエピソードのテキスト）`, kind: 'txt' });
+  const r = await saveTextTo(convert(editSite, d.body), name, { title: `${cloudName()}に保存（このエピソードのテキスト）`, kind: 'txt', only: 'local' });
   if (r) toast(savedMessage(r, `「${d.title || '（無題）'}」のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -2274,7 +2274,7 @@ async function exportAll() {
     .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
     .join('\n\n――――――――――\n\n');
   const head = project.title ? project.title + '\n\n' : '';
-  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: `${cloudName()}に保存（全エピソードのテキスト）`, kind: 'txt' });
+  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: `${cloudName()}に保存（全エピソードのテキスト）`, kind: 'txt', only: 'local' });
   if (r) toast(savedMessage(r, `全${project.episodes.length}話のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -3850,7 +3850,7 @@ const outline = chapterList($('chapters'), () => project.chapters, {
 const tableOpts = {
   ...sectionOpts,
   fileBase: () => project.title || '作品',
-  save: (text, name, what) => saveTextTo(text, name, { title: `${what}を保存`, kind: 'txt' })
+  save: (text, name, what) => saveTextTo(text, name, { title: `${what}を保存`, kind: 'txt', only: 'local' })
     .then((r) => { if (r) toast(savedMessage(r, what)); }).catch(fail),
 };
 const worldTable = categorizedTable($('world-tables'), () => project.world, {
