@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.78';
+const APP_VERSION = '2026.11.17-0.79';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1956,7 +1956,9 @@ async function openPackDialog(mode = 'pack') {
   $('backup-pack-lead').textContent = '';
   $('backup-pack-file-row').hidden = mode !== 'file';
   $('backup-pack-name-row').hidden = mode === 'file';
-  $('backup-pack-save').textContent = '保存'; // ファイル保存でも「保存」（押すと端末の保存画面が開く）
+  // 0.79：「ファイル」→「保存」で保存先が「両方を使う」なら、押すと保存先を選ぶ画面が出るので「保存先を選ぶ」
+  const askWhere = mode === 'file' && !!driveProvider() && oldCloud(prefs.get(DEST_KEY, 'ask')) === 'ask';
+  $('backup-pack-save').textContent = askWhere ? '保存先を選ぶ' : '保存';
   setTaskError($('backup-pack-dialog'), '');
   updatePackForm();
   $('backup-pack-dialog').showModal();
