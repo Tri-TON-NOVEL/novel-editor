@@ -30,6 +30,7 @@ import {
   countAlphaNotation, countAlphaImages,
 } from './notation.js';
 import { localFile, WORK_TYPES, TEXT_TYPES, BACKUP_TYPES } from './localfile.js';
+import { imageSlots, contextOf, suggestPairs, pairScore, applyImageMap, PAIR_WEAK } from './imagematch.js';
 import { attachImageHighlight } from './bodyhighlight.js';
 import { providers, activeProvider } from './providers/index.js';
 
@@ -38,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.88';
+const APP_VERSION = '2026.11.18-0.89';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2315,7 +2316,7 @@ function buildCopyPlan() {
       const conv = convertText(from, to, src);
       mergeWarnings(warnings, conv.warnings);
       const before = draftOf(ep, to)[f];
-      if (conv.text !== before) changes.push({ ep, f, text: conv.text, before });
+      if (conv.text !== before) changes.push({ ep, f, text: conv.text, before, src });
     }
   }
   return { from, to, mode, fields, eps, changes, warnings };
@@ -2394,6 +2395,13 @@ async function runSiteCopy() {
   const toName = SITES[plan.to].short;
   const over = plan.mode === 'overwrite' ? plan.changes.filter((c) => c.before) : [];
   const { cur: dest } = await ensureEdition(ep, plan.to);
+  // 0.89：コピー先にすでに画像があるときは、画像の対応を確かめる。コピー先の画像タグはそのまま残し、文章だけを入れ替える
+  const withImages = plan.changes.filter((c) => imageSlots(c.before).length);
+  if (withImages.length) {
+    const maps = await imageMatchDialog(withImages.map((c) => ({ f: c.f, src: c.src, dest: c.before })), plan.from, plan.to);
+    if (!maps) return;
+    for (const c of withImages) c.text = applyImageMap(plan.from, plan.to, c.src, c.before, maps.get(c.f)).text;
+  }
   if (over.length && !(await ask(`${toName}用の今の稿（${dest.name}）の内容を、メインからのコピーで上書きします。\n上書きした内容は元に戻せません（残したいときは「新しい稿として追加」を選んでください）。よろしいですか？`, { ok: '上書きする', danger: true }))) return;
   // 新しい稿として追加：サブ側の今の稿はそのまま残し、次の番号の稿にコピーする
   let target = dest;
@@ -2409,6 +2417,98 @@ async function runSiteCopy() {
   toast(plan.mode === 'new'
     ? `${toName}用の新しい稿（${target.name}）にコピーしました（${dest.name}はそのまま残っています）`
     : `${toName}用の今の稿（${dest.name}）に上書きしてコピーしました`);
+}
+
+// ---------- 画像の対応（メイン → サブにコピー、0.89） ----------
+// 確認の画面：コピー元とコピー先の画像を、前後の文といっしょに並べる。「対応を直す…」で組み合わせを選び直せる。
+// コピー先の画像タグはすべてそのまま残り、文章だけが入れ替わる。
+// 戻り値：Map（項目 → コピー元の画像ごとのコピー先の番号）。キャンセルなら null
+function imageMatchDialog(items, from, to) {
+  const dlg = $('image-match-dialog');
+  const label = Object.fromEntries(COPY_FIELDS);
+  const state = items.map((it) => {
+    const sc = imageSlots(it.src).map((s) => contextOf(it.src, s));
+    const dc = imageSlots(it.dest).map((d) => contextOf(it.dest, d));
+    return { ...it, sc, dc, map: suggestPairs(sc, dc) };
+  });
+  let editing = false;
+  const mk = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+  const ctxView = (c) => {
+    const box = mk('div', 'imgm-ctx');
+    box.append(mk('span', 'imgm-text', c.before ? ([...c.before].length >= 40 ? '…' : '') + c.before : '（前の文なし）'),
+      mk('span', 'imgm-tag', c.tag),
+      mk('span', 'imgm-text', c.after ? c.after + ([...c.after].length >= 40 ? '…' : '') : '（後の文なし）'));
+    return box;
+  };
+  const render = () => {
+    const body = $('imgm-body');
+    body.replaceChildren();
+    for (const st of state) {
+      const sec = mk('section', 'imgm-field');
+      if (state.length > 1 || st.f !== 'body') sec.append(mk('h3', '', label[st.f]));
+      const differ = st.sc.length !== st.dc.length;
+      const head = `${SITES[from].short}（コピー元）${st.sc.length}枚　${SITES[to].short}（コピー先）${st.dc.length}枚`;
+      sec.append(mk('p', 'imgm-count' + (differ ? ' warn' : ''), differ ? `⚠ ${head}` : head));
+      const grid = mk('div', 'imgm-grid');
+      grid.append(mk('div', 'imgm-col', `${SITES[from].short}（コピー元）`), mk('div', 'imgm-col', `${SITES[to].short}（コピー先）`));
+      st.sc.forEach((c, k) => {
+        const j = st.map[k];
+        const weak = j >= 0 && pairScore(c, st.dc[j]) < PAIR_WEAK;
+        const left = mk('div', 'imgm-cell' + (weak ? ' weak' : ''));
+        left.append(mk('div', 'imgm-no', `${k + 1}枚目${weak ? '　⚠ 前後の文が違います' : ''}`), ctxView(c));
+        const right = mk('div', 'imgm-cell' + (weak ? ' weak' : ''));
+        if (editing) {
+          const sel = mk('select', 'imgm-pick');
+          sel.append(new Option('対応なし', '-1'));
+          st.dc.forEach((d, n) => sel.append(new Option(`${n + 1}枚目：${d.before ? '…' + [...d.before].slice(-14).join('') : '（前の文なし）'}`, String(n))));
+          sel.value = String(j);
+          sel.addEventListener('change', () => {
+            const v = Number(sel.value);
+            st.map = st.map.map((x, i) => (i === k ? v : x === v && v >= 0 ? -1 : x));
+            render();
+          });
+          right.append(sel);
+          if (j >= 0) right.append(ctxView(st.dc[j]), mk('div', 'imgm-note', 'このタグのまま入れます'));
+        } else if (j >= 0) {
+          right.append(mk('div', 'imgm-no', `${j + 1}枚目`), ctxView(st.dc[j]), mk('div', 'imgm-note', 'このタグのまま入れます'));
+        } else {
+          right.append(mk('div', 'imgm-no', '対応なし'), mk('div', 'imgm-note', 'コピー元の画像を変換して入れます'));
+        }
+        grid.append(left, right);
+      });
+      // コピー先だけにある画像（タグはそのまま残す）
+      const res = applyImageMap(from, to, st.src, st.dest, st.map);
+      st.dc.forEach((d, n) => {
+        if (st.map.includes(n)) return;
+        const ok = res.placed.includes(n);
+        const left = mk('div', 'imgm-cell');
+        left.append(mk('div', 'imgm-no', '対応なし'));
+        const right = mk('div', 'imgm-cell' + (ok ? '' : ' weak'));
+        right.append(mk('div', 'imgm-no', `${n + 1}枚目`), ctxView(d),
+          mk('div', 'imgm-note', ok ? 'このタグのまま、同じ前の行の次に入れます' : '⚠ 同じ前の行がないため、だいたい同じ位置に入れます'));
+        grid.append(left, right);
+      });
+      sec.append(grid);
+      body.append(sec);
+    }
+    $('imgm-edit').hidden = editing;
+  };
+  return new Promise((resolve) => {
+    let result = null;
+    const ac = new AbortController();
+    const finish = (v) => { result = v; dlg.close(); };
+    $('imgm-ok').addEventListener('click', () => finish(new Map(state.map((st) => [st.f, st.map]))), { signal: ac.signal });
+    $('imgm-cancel').addEventListener('click', () => finish(null), { signal: ac.signal });
+    $('imgm-edit').addEventListener('click', () => { editing = true; render(); }, { signal: ac.signal });
+    dlg.addEventListener('close', () => { ac.abort(); resolve(result); }, { signal: ac.signal });
+    render();
+    dlg.showModal();
+  });
 }
 
 // ---------- 稿と版 ----------

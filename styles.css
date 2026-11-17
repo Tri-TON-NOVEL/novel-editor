@@ -1365,3 +1365,27 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 .imp-advanced { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
 .imp-advanced > summary { cursor: pointer; font-weight: 600; }
 .imp-advanced[open] > summary { margin-bottom: 8px; }
+
+/* 0.89：画像の対応（メイン → サブにコピー） */
+#image-match-dialog { width: min(960px, calc(100vw - 24px)); }
+.imgm-field + .imgm-field { margin-top: 14px; }
+.imgm-field h3 { margin: 0 0 4px; font-size: 15px; }
+.imgm-count { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.imgm-count.warn { color: var(--danger); font-weight: 700; }
+.imgm-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 6px 10px; }
+.imgm-col { font-size: 12px; font-weight: 700; color: var(--muted); }
+.imgm-cell { border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; font-size: 13px; line-height: 1.6; min-width: 0; }
+.imgm-cell.weak { border-color: var(--danger); }
+.imgm-no { font-size: 12px; font-weight: 700; color: var(--muted); }
+.imgm-cell.weak .imgm-no { color: var(--danger); }
+.imgm-ctx { display: flex; flex-direction: column; gap: 2px; }
+.imgm-text { overflow-wrap: anywhere; }
+.imgm-tag { align-self: flex-start; padding: 0 6px; border-radius: 4px; background: #fff3b0; color: #5a4a00; font-family: ui-monospace, Consolas, monospace; font-size: 12px; overflow-wrap: anywhere; }
+.imgm-note { font-size: 12px; color: var(--muted); }
+.imgm-cell.weak .imgm-note { color: var(--danger); }
+.imgm-pick { width: 100%; min-width: 0; margin-bottom: 4px; }
+@media (max-width: 600px) {
+  .imgm-grid { grid-template-columns: 1fr; }
+  .imgm-col { display: none; }
+  .imgm-grid > .imgm-cell:nth-child(even) { margin-bottom: 8px; }
+}

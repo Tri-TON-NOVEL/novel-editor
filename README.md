@@ -20,7 +20,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：0.88（`2026.11.17-0.88`）
+- **バージョン**：0.89（`2026.11.18-0.89`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/manual.html](https://tri-ton-novel.github.io/novel-editor/docs/manual.html)
 
@@ -33,7 +33,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 一つのエピソードに、投稿サイトごとの本文と複数の稿を保存できます。
 
-現在編集中の稿だけを別サイト用へコピーし、ルビ・傍点・挿絵などの記法も変換できます。
+現在編集中の稿だけを別サイト用へコピーし、ルビ・傍点・挿絵などの記法も変換できます。コピー先にすでに画像があるときは、前後の文で画像の対応を確かめ、コピー先の画像タグを残したまま文章だけを入れ替えます。
 
 ### 2. パソコン、スマートフォン、タブレットで同じアプリを使える
 

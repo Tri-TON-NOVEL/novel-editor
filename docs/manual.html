@@ -109,7 +109,7 @@
     <div class="brand"><img src="images/manual/header-icon.png" alt=""><strong>あや綴り</strong></div>
     <h1>あや綴り マニュアル</h1>
     <p>作品・章・エピソードの管理から、投稿サイト別の原稿と稿、伏線、TXT インポート、バックアップ、設定までをまとめています。画面の画像は、説明用の架空の作品です。</p>
-    <div class="meta"><span>バージョン 0.88</span><span>2026年11月17日</span><a href="https://tri-ton-novel.github.io/novel-editor/">アプリを開く</a><a href="https://github.com/Tri-TON-NOVEL/novel-editor">GitHub</a></div>
+    <div class="meta"><span>バージョン 0.89</span><span>2026年11月18日</span><a href="https://tri-ton-novel.github.io/novel-editor/">アプリを開く</a><a href="https://github.com/Tri-TON-NOVEL/novel-editor">GitHub</a></div>
   </header>
 
   <div class="layout">
@@ -276,6 +276,22 @@
           </tbody>
         </table>
         <p>なろう → アルファでは、挿絵タグはみてみんの URL になります。アルファ → なろうでは、アルファの画像タグは <code>【ここに画像を挿入：識別子】</code> の目印になります。変換できない書き方は元のまま残し、注意を出します。</p>
+        <h4 id="copy-images">コピー先にすでに画像があるとき</h4>
+        <p>サブ側の原稿にもう画像が入っているときは、コピーの前に「画像の対応」の画面が出ます。<b>コピー先の画像タグはそのまま残り、文章だけが入れ替わります。</b>コピー先に画像がなければ、この画面は出ず、今までどおりコピーします。</p>
+        <ul>
+          <li>コピー元とコピー先の画像を、それぞれの<b>前後1行ずつ（40字まで）</b>といっしょに並べます。前後の文が似ているもの同士を、順番を崩さずに自動で組みます。</li>
+          <li>前後の文が違う組には ⚠ が付きます。画像の数が違うときは、枚数の行に ⚠ が付きます。</li>
+          <li>組み合わせがおかしいときは「対応を直す…」で、コピー元の画像ごとにコピー先の画像を選び直します。ほかの行で選んでいた画像を選ぶと、その行は「対応なし」になります。</li>
+        </ul>
+        <table>
+          <thead><tr><th>画像</th><th>コピー後</th></tr></thead>
+          <tbody>
+            <tr><td>組んだ画像</td><td>コピー先の画像タグのまま入ります</td></tr>
+            <tr><td>コピー元だけの画像</td><td>今までどおり、変換した書き方（みてみんの URL・目印）で入ります</td></tr>
+            <tr><td>コピー先だけの画像</td><td>タグのまま残し、コピー先ですぐ前にあった行と同じ行の次に入れます。その行がなくなっていれば、だいたい同じ位置に入れます（⚠ が付きます）</td></tr>
+          </tbody>
+        </table>
+        <p>「キャンセル」を押すと、何もコピーしません。</p>
         <p class="back-top"><a href="#top">ページの先頭へ</a></p>
       </section>
 
@@ -703,7 +719,7 @@
     </main>
   </div>
 
-  <footer>あや綴り マニュアル　バージョン 0.88</footer>
+  <footer>あや綴り マニュアル　バージョン 0.89</footer>
   <dialog id="lightbox" aria-label="画像の拡大表示"><form method="dialog"><button type="submit">閉じる</button></form><img src="" alt=""></dialog>
   <script>
     const lightbox = document.querySelector('#lightbox');
