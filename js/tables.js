@@ -594,7 +594,7 @@ export function categorizedTable(container, getData, opts) {
     const pubCb = h('input', { type: 'checkbox', checked: st.pub });
     pubCb.addEventListener('change', () => { st.pub = pubCb.checked; update(); });
     const styleSel = h('select');
-    styleSel.append(new Option('見出し形式（■名前 ＋ 項目ごとに改行）', 'heading'), new Option('1人1行（項目を「／」で区切る）', 'line'), new Option('表（タブ区切り。表計算ソフト用）', 'table'));
+    styleSel.append(new Option('見出し形式', 'heading'), new Option('1人1行', 'line'), new Option('表', 'table'));
     styleSel.value = st.style;
     styleSel.addEventListener('change', () => { st.style = styleSel.value; update(); });
     const catCb = h('input', { type: 'checkbox', checked: st.catHeads });

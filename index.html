@@ -661,7 +661,7 @@
     <ul class="list" id="sync-restore-list"></ul>
     <div class="dialog-foot">
       <button type="button" id="sync-from-file">ファイルから選ぶ…</button>
-      <button type="button" id="sync-keep-mine" hidden>この端末の記録を使う（すぐ保存）</button>
+      <button type="button" id="sync-keep-mine" hidden>この端末の記録を使う</button>
       <button type="button" id="sync-later" hidden>あとで</button>
       <button value="close" id="sync-restore-close">閉じる</button>
     </div>
@@ -710,7 +710,7 @@
       <ol class="import-steps" aria-label="手順">
         <li data-step-label="1">1 ファイル</li>
         <li data-step-label="2" id="imp-step-label-titles">2 タイトル一覧</li>
-        <li data-step-label="3" id="imp-step-label-rules">3 書式設定</li>
+        <li data-step-label="3" id="imp-step-label-rules">3 区切り確認</li>
         <li data-step-label="4" id="imp-step-label-preview">4 プレビュー</li>
       </ol>
       <span class="spacer"></span>
@@ -726,20 +726,11 @@
         <button type="button" id="imp-resume-discard">破棄する</button>
       </div>
       <div class="import-grid">
-        <label>TXTの読み取り方法
-          <select id="imp-type">
-            <option value="rules">書式あり（なろう系）</option>
-            <option value="title-list">書式なし（アルファ系）</option>
+        <label>インポート元
+          <select id="imp-source">
+            <option value="narou">小説家になろう</option>
+            <option value="alpha">アルファポリス</option>
           </select>
-        </label>
-        <label>取り込む原稿
-          <select id="imp-site">
-            <option value="narou">なろう用</option>
-            <option value="alpha">アルファ用</option>
-          </select>
-        </label>
-        <label>書式
-          <select id="imp-preset"></select>
         </label>
         <label>取り込み先
           <select id="imp-target"></select>
@@ -798,7 +789,7 @@
       <footer class="import-foot">
         <button type="button" data-imp-go="1">戻る</button>
         <span class="spacer"></span>
-        <button type="button" id="imp-title-to-rules" class="primary" disabled>次へ：書式設定</button>
+        <button type="button" id="imp-title-to-rules" class="primary" disabled>次へ：区切り確認</button>
       </footer>
     </section>
 
@@ -806,6 +797,8 @@
     <section class="import-step" data-istep="3" hidden>
       <div class="import-step-body">
       <div class="imp-rules">
+        <details class="imp-advanced" id="imp-advanced">
+        <summary>詳しい設定</summary>
         <div class="imp-preset">
           <label>書式
             <select id="imp-preset-edit"></select>
@@ -859,6 +852,7 @@
           <span id="imp-pending" class="imp-pending" hidden>条件を変えました。全文に反映するには「この条件で自動検出」を押してください（プレビューへ進むときにも反映されます）</span>
           <span id="imp-rule-error" class="imp-error" role="alert"></span>
         </div>
+        </details>
       </div>
       <div class="imp-split" id="imp-split">
         <div class="imp-lines" id="imp-lines" aria-label="全文"></div>
@@ -1321,7 +1315,7 @@
       <legend>ファイルの保存先</legend>
       <label>保存先
         <select name="fileDestination" id="file-destination">
-          <option value="ask">両方を使う（毎回選ぶ）</option>
+          <option value="ask">両方を使う</option>
           <option value="cloud">クラウドだけを使う</option>
           <option value="local">この端末・その他だけを使う</option>
         </select>

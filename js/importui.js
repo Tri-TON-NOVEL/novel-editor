@@ -4,7 +4,7 @@
 import * as I from './importer.js';
 import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS } from './format.js';
 import { SITES, countImages } from './notation.js';
-import { ask, askText, choose } from './dialogs.js';
+import { ask, askText } from './dialogs.js';
 import { listZipTextEntries, extractZipEntry, ZipError } from './zip.js';
 
 const KINDS = [
@@ -58,13 +58,35 @@ export function initImport(ctx) {
     return format ? { id, format } : { id: 'b:' + I.PRESETS[0].id, format: I.PRESETS[0] };
   }
 
+  // 0.82：インポート元（なろう／アルファ）だけを選ぶ。読み取り方法・取り込む原稿・書式は、インポート元で決まる
+  //   なろう → 書式あり（区切りのルール）・なろう用の原稿／アルファ → 書式なし（タイトル一覧）・アルファ用の原稿
+  const SOURCE_TYPE = { narou: 'rules', alpha: 'title-list' };
+  function siteOfType(type) { return type === 'title-list' ? 'alpha' : 'narou'; } // 宣言の前（state = fresh()）でも使うので function
+  // そのインポート元で使う書式：既定の書式が同じ方式ならそれ、違えば標準の書式
+  function sourceFormat(site) {
+    const def = defaultPreset();
+    if ((def.format.type || 'rules') === SOURCE_TYPE[site]) return def;
+    const f = I.PRESETS.find((p) => p.site === site);
+    return { id: 'b:' + f.id, format: f };
+  }
+  // なろうの標準の書式は、連載か短編かを TXT の中身で見分ける（「詳しい設定」で書式を選んだとき・手動の区切りがあるときはそのまま）
+  const NAROU_BUILT_IN = ['b:narou-download', 'b:narou-download-short'];
+  function autoNarouFormat() {
+    if (!state.text || state.presetPicked || state.manual.size || !NAROU_BUILT_IN.includes(state.presetId)) return;
+    const series = I.PRESETS.find((p) => p.id === 'narou-download');
+    const re = new RegExp(series.rules.episode.pattern);
+    const short = !state.lines.some((l) => re.test(l)) && state.lines.some((l) => l.trim() === '【タイトル】');
+    const want = short ? 'b:narou-download-short' : 'b:narou-download';
+    if (want !== state.presetId) applyFormat(formatOf(want), want);
+  }
+
   function fresh() {
     const preset = defaultPreset();
     const type = preset.format.type || 'rules';
     return {
       fileName: '', buffer: null, archiveName: '', archiveBuffer: null, zipEntries: [], zipEntryIndex: 0, text: '', lines: [], decode: null,
-      encoding: 'auto', site: preset.format.site || 'narou', target: 'new', mode: 'overwrite', strictMatch: true,
-      presetId: preset.id, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
+      encoding: 'auto', site: siteOfType(type), target: 'new', mode: 'overwrite', strictMatch: true,
+      presetId: preset.id, presetPicked: false, type, rules: completeRules(preset.format.rules), template: preset.format.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: '', titleListFileName: '',
       auto: new Map(), manual: new Map(),
       result: null, rows: [], actionFilter: 'all', workTitle: '', workTitleEdited: false, txtTitle: '', useHead: true, step: 1, siteInfo: null, mismatches: [],
@@ -109,10 +131,9 @@ export function initImport(ctx) {
       mode: ['overwrite', 'edition', 'rebuild'].includes(s.mode) ? s.mode : 'overwrite', strictMatch: s.strictMatch !== false,
       presetId: s.presetId, type: s.type || 'rules', rules: completeRules(s.rules), template: s.template || I.ALPHA_TITLE_LIST_TEMPLATE,
       titleListText: s.titleListText || '', titleListFileName: s.titleListFileName || '', manual: new Map(s.manual) };
-    $('imp-site').value = state.site;
-    $('imp-type').value = state.type;
+    state.site = siteOfType(state.type); // 前の版の作業（取り込む原稿を別に選べた）も、読み取り方法に合わせる
+    $('imp-source').value = state.site;
     fillPresets();
-    $('imp-preset').value = state.presetId;
     $('imp-title-list-text').value = state.titleListText;
     showTitleListSource();
     await fillTargets();
@@ -246,7 +267,7 @@ export function initImport(ctx) {
     const savedFormats = userFormats()
       .filter((p) => (p.type || 'rules') === state.type)
       .sort((a, b) => (b.updatedAt || '').localeCompare(a.updatedAt || ''));
-    for (const sel of [$('imp-preset'), $('imp-preset-edit')]) {
+    for (const sel of [$('imp-preset-edit')]) {
       sel.replaceChildren(
         ...builtInFormats.map((p) => new Option(p.name + mark('b:' + p.id), 'b:' + p.id)),
         ...savedFormats.map((p) => new Option(p.name + mark('u:' + p.id), 'u:' + p.id)));
@@ -266,16 +287,13 @@ export function initImport(ctx) {
     if (!format) return;
     state.presetId = id;
     state.type = format.type || 'rules';
-    $('imp-type').value = state.type;
     state.rules = completeRules(format.rules);
     state.template = format.template || I.ALPHA_TITLE_LIST_TEMPLATE;
     state.auto = new Map();
     state.manual = new Map();
-    // 標準の書式はサイトが決まっているので、「取り込む原稿」もそれに合わせる（前回の選択を持ち越さない）
-    if (format.site) {
-      state.site = format.site;
-      $('imp-site').value = state.site;
-    }
+    // 取り込む原稿は、読み取り方法（インポート元）で決まる
+    state.site = siteOfType(state.type);
+    $('imp-source').value = state.site;
     showTitleListSource();
   }
 
@@ -283,9 +301,9 @@ export function initImport(ctx) {
     const on = state.type === 'title-list';
     $('imp-title-list-source').hidden = !on;
     $('imp-step-label-titles').hidden = !on;
-    $('imp-step-label-rules').textContent = on ? '3 書式設定' : '2 区切り設定';
+    $('imp-step-label-rules').textContent = on ? '3 区切り確認' : '2 区切り確認';
     $('imp-step-label-preview').textContent = on ? '4 プレビュー' : '3 プレビュー';
-    $('imp-to-2').textContent = on ? '次へ：タイトル一覧' : '次へ：区切り設定';
+    $('imp-to-2').textContent = on ? '次へ：タイトル一覧' : '次へ：区切り確認';
     $('imp-detect').textContent = on ? 'タイトル一覧と照合' : 'この条件で自動検出';
     $('imp-pending').textContent = on
       ? '書式を変えました。全文に反映するには「タイトル一覧と照合」を押してください（プレビューへ進むときにも反映されます）'
@@ -752,14 +770,16 @@ export function initImport(ctx) {
       const now = SITES[state.site].short;
       const box = Object.assign(document.createElement('div'), {
         className: 'imp-info warn imp-site-mismatch',
-        textContent: `⚠ この TXT は${looks}の TXT に見えますが、「取り込む原稿」が「${now}用」になっています（前回の選択が残っていることがあります）。\n`,
+        textContent: `⚠ この TXT は${looks}の TXT に見えますが、「インポート元」が「${now}」になっています。\n`,
       });
       const fix = Object.assign(document.createElement('button'), { type: 'button', className: 'tool primary', textContent: `${looks}用に切り替える` });
       fix.addEventListener('click', () => ctx.withBusy('プレビューを作り直しています…', async () => {
-        state.site = state.siteMismatch;
-        $('imp-site').value = state.site;
+        const sf = sourceFormat(state.siteMismatch);
+        applyFormat(sf.format, sf.id);
         ctx.prefs.set('importSite', state.site);
-        await go(4);
+        fillPresets();
+        renderRuleForm();
+        await go(state.type === 'title-list' ? 2 : 3, { detect: true });
       }).catch(ctx.fail));
       const keep = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: `このまま${now}用として取り込む` });
       keep.addEventListener('click', () => {
@@ -1116,6 +1136,7 @@ export function initImport(ctx) {
     if (step === 2 && state.type !== 'title-list') step = 3;
     if (step >= 3 && state.type === 'title-list' && !state.titleListText.trim()) { ctx.toast('タイトル一覧のファイルを選ぶか、一覧を貼り付けてください'); return; }
     if (step === 3) {
+      autoNarouFormat();
       fillPresets();
       renderRuleForm();
       if (doDetect || !state.auto.size) detect({ confirmFirst: false });
@@ -1137,10 +1158,10 @@ export function initImport(ctx) {
 
   async function open() {
     state = fresh();
-    // 標準の書式ならそのサイト。自分で保存した書式（サイトを持たない）なら、前に選んだもの
-    state.site = formatOf(state.presetId)?.site || ctx.prefs.get('importSite', ctx.getProject()?.site || 'narou');
-    $('imp-site').value = state.site;
-    $('imp-type').value = state.type;
+    // インポート元は前に選んだもの（なければ今の作品の投稿先）
+    const sf = sourceFormat(ctx.prefs.get('importSite', ctx.getProject()?.site || 'narou') === 'alpha' ? 'alpha' : 'narou');
+    applyFormat(sf.format, sf.id);
+    $('imp-advanced').open = false;
     fillPresets();
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
@@ -1183,17 +1204,13 @@ export function initImport(ctx) {
   $('imp-close').addEventListener('click', () => close());
   dlg.addEventListener('cancel', (e) => { e.preventDefault(); close(); });
   window.addEventListener('popstate', () => { if (dlg.open) { dlg.close(); } });
-  $('imp-type').addEventListener('change', (e) => {
-    state.type = e.target.value;
-    const format = I.PRESETS.find((p) => (p.type || 'rules') === state.type);
-    if (format) applyFormat(format, 'b:' + format.id);
+  $('imp-source').addEventListener('change', (e) => {
+    const sf = sourceFormat(e.target.value);
+    applyFormat(sf.format, sf.id);
+    state.presetPicked = false;
+    ctx.prefs.set('importSite', state.site);
     fillPresets();
     renderRuleForm();
-    saveSession();
-  });
-  $('imp-site').addEventListener('change', (e) => {
-    state.site = e.target.value;
-    ctx.prefs.set('importSite', state.site);
     saveSession();
   });
   $('imp-target').addEventListener('change', (e) => {
@@ -1371,12 +1388,12 @@ export function initImport(ctx) {
     const format = formatOf(e.target.value);
     if (!format) return;
     applyFormat(format, e.target.value);
+    state.presetPicked = true;
     fillPresets();
     renderRuleForm();
     if (state.text && (state.type !== 'title-list' || state.titleListText.trim())) detect({ confirmFirst: false });
     saveSession();
   };
-  $('imp-preset').addEventListener('change', changeFormat);
   $('imp-preset-edit').addEventListener('change', changeFormat);
 
   function formatData(id, name) {
@@ -1407,14 +1424,9 @@ export function initImport(ctx) {
   }
 
   $('imp-format-new').addEventListener('click', async () => {
-    const type = await choose('どの方法でTXTを分けますか？', [
-      { value: 'rules', label: '書式あり（なろう系）', primary: true },
-      { value: 'title-list', label: '書式なし（アルファ系）' },
-    ]);
-    if (!type) return;
+    // 0.82：方式は今のインポート元のまま（なろう＝書式あり／アルファ＝書式なし）
     state.presetId = 'draft:' + (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()));
-    state.type = type;
-    $('imp-type').value = state.type;
+    state.presetPicked = true;
     state.rules = completeRules({
       chapter: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },
       episode: { enabled: true, pattern: '', position: 'start', method: 'prefix', title: 'include' },

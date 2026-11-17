@@ -1,0 +1,351 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="小説執筆アプリ あや綴り バージョン0.81の画像付き操作マニュアル">
+  <link rel="icon" href="images/manual/header-icon.png" type="image/png">
+  <title>あや綴り 画像付き操作マニュアル</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18201d;
+      --muted: #5e6a65;
+      --brand: #2f5d50;
+      --brand-dark: #183c32;
+      --soft: #edf5f1;
+      --line: #d7dfdb;
+      --paper: #fff;
+      --back: #f5f7f6;
+      --warn: #8b332d;
+      --shadow: 0 12px 34px rgba(25, 55, 45, .10);
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      color: var(--ink);
+      background: var(--back);
+      font-family: "Yu Gothic", "Hiragino Kaku Gothic ProN", "Noto Sans JP", sans-serif;
+      line-height: 1.8;
+    }
+    a { color: #185b8c; text-underline-offset: .2em; }
+    a:hover { text-decoration-thickness: 2px; }
+    .skip {
+      position: fixed; left: 1rem; top: -5rem; z-index: 100;
+      padding: .7rem 1rem; color: #fff; background: var(--brand-dark);
+      border-radius: .5rem;
+    }
+    .skip:focus { top: 1rem; }
+    .hero {
+      color: #fff;
+      background: linear-gradient(135deg, #102f29 0%, #2f5d50 72%, #6e988c 100%);
+      padding: 3.2rem max(1.25rem, calc((100vw - 1180px) / 2));
+    }
+    .brand { display: flex; align-items: center; gap: .9rem; }
+    .brand img { width: 58px; height: 58px; border-radius: 14px; }
+    .brand strong { font-size: 1.25rem; letter-spacing: .04em; }
+    .hero h1 { margin: 1.4rem 0 .5rem; font-size: clamp(2rem, 5vw, 3.3rem); line-height: 1.25; }
+    .hero p { max-width: 820px; margin: .7rem 0; font-size: 1.05rem; }
+    .meta { display: flex; flex-wrap: wrap; gap: .55rem; margin-top: 1.4rem; }
+    .meta span { padding: .32rem .72rem; border: 1px solid rgba(255,255,255,.42); border-radius: 999px; background: rgba(255,255,255,.08); }
+    .layout { display: grid; grid-template-columns: 265px minmax(0, 1fr); gap: 2rem; max-width: 1240px; margin: 0 auto; padding: 2rem 1.25rem 5rem; }
+    nav.toc {
+      position: sticky; top: 1rem; align-self: start; max-height: calc(100vh - 2rem); overflow: auto;
+      background: var(--paper); border: 1px solid var(--line); border-radius: 14px; padding: 1rem;
+      box-shadow: var(--shadow);
+    }
+    nav.toc h2 { margin: 0 0 .7rem; font-size: 1rem; }
+    nav.toc ol { margin: 0; padding-left: 1.25rem; }
+    nav.toc li { margin: .24rem 0; }
+    nav.toc a { color: var(--ink); text-decoration: none; font-size: .92rem; }
+    nav.toc a:hover { color: var(--brand); text-decoration: underline; }
+    main { min-width: 0; }
+    section {
+      margin: 0 0 1.5rem; padding: clamp(1.25rem, 3vw, 2.2rem);
+      background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
+      box-shadow: var(--shadow); scroll-margin-top: 1rem;
+    }
+    h2 { margin: 0 0 1rem; font-size: clamp(1.45rem, 3vw, 2rem); line-height: 1.4; }
+    h3 { margin: 1.8rem 0 .45rem; font-size: 1.18rem; line-height: 1.5; }
+    h2::before { content: ""; display: inline-block; width: .32rem; height: 1.1em; margin-right: .65rem; vertical-align: -.14em; border-radius: 5px; background: var(--brand); }
+    p { margin: .55rem 0; }
+    ul, ol { padding-left: 1.5rem; }
+    li { margin: .3rem 0; }
+    .lead { font-size: 1.06rem; }
+    .notice { margin: 1rem 0; padding: .8rem 0 .8rem 1rem; border-left: 4px solid var(--warn); color: #53211e; }
+    .tip { margin: 1rem 0; padding: .8rem 0 .8rem 1rem; border-left: 4px solid var(--brand); }
+    .quick-grid { display: grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: .8rem; margin-top: 1rem; }
+    .quick-grid a { display: block; padding: .8rem 1rem; color: var(--ink); background: var(--soft); border: 1px solid #cfe0d8; border-radius: 10px; text-decoration: none; font-weight: 700; }
+    .quick-grid a:hover { background: #deeee7; }
+    figure { margin: 1.25rem 0 1.5rem; }
+    figure button { display: block; width: 100%; padding: 0; border: 1px solid var(--line); border-radius: 12px; background: #fff; cursor: zoom-in; overflow: hidden; }
+    figure img { display: block; width: 100%; height: auto; }
+    figcaption { margin-top: .5rem; color: var(--muted); font-size: .9rem; text-align: center; }
+    figure.mobile { max-width: 390px; margin-left: auto; margin-right: auto; }
+    table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .95rem; }
+    th, td { border: 1px solid var(--line); padding: .65rem .75rem; vertical-align: top; }
+    th { color: #fff; background: #294c66; text-align: left; }
+    tbody tr:nth-child(even) { background: #f7faf9; }
+    kbd { padding: .1rem .4rem; border: 1px solid #bbc6c1; border-bottom-width: 2px; border-radius: .35rem; background: #fff; font-family: inherit; font-size: .9em; }
+    .back-top { text-align: right; margin-top: 1.2rem; font-size: .9rem; }
+    footer { padding: 1.8rem; color: #dceae4; background: #102f29; text-align: center; }
+    dialog { width: min(96vw, 1500px); max-height: 94vh; padding: 0; border: 0; border-radius: 12px; background: #111; box-shadow: 0 24px 90px rgba(0,0,0,.45); }
+    dialog::backdrop { background: rgba(0,0,0,.78); }
+    dialog img { display: block; max-width: 100%; max-height: 88vh; margin: auto; }
+    dialog form { position: sticky; top: 0; z-index: 1; display: flex; justify-content: flex-end; padding: .55rem; background: rgba(0,0,0,.72); }
+    dialog button { padding: .5rem .9rem; color: #fff; border: 1px solid #aaa; border-radius: .5rem; background: #222; cursor: pointer; }
+    @media (max-width: 850px) {
+      .layout { display: block; padding: 1rem .75rem 3rem; }
+      nav.toc { position: static; max-height: none; margin-bottom: 1rem; }
+      nav.toc ol { columns: 2; }
+      section { padding: 1.15rem; border-radius: 12px; }
+      .quick-grid { grid-template-columns: 1fr; }
+    }
+    @media (max-width: 520px) {
+      .hero { padding-top: 2rem; padding-bottom: 2rem; }
+      .brand img { width: 48px; height: 48px; }
+      nav.toc ol { columns: 1; }
+      table { display: block; overflow-x: auto; white-space: normal; }
+      th, td { min-width: 8rem; }
+    }
+    @media print {
+      body { background: #fff; }
+      .hero { color: #000; background: #fff; padding: 1cm 0; }
+      .layout { display: block; max-width: none; padding: 0; }
+      nav.toc { position: static; box-shadow: none; page-break-after: always; }
+      section { box-shadow: none; border: 0; page-break-before: always; }
+      figure button { cursor: default; }
+      .back-top, dialog { display: none; }
+    }
+  </style>
+</head>
+<body id="top">
+  <a class="skip" href="#main">本文へ移動</a>
+  <header class="hero">
+    <div class="brand"><img src="images/manual/header-icon.png" alt=""><strong>あや綴り</strong></div>
+    <h1>画像付き操作マニュアル</h1>
+    <p>作品の登録、章とエピソードの管理、投稿サイト別の稿、TXTインポート、伏線、クラウドバックアップまでを、最新版の画面で説明します。</p>
+    <div class="meta"><span>バージョン 0.81</span><span>更新日 2026年11月17日</span><span>推奨ブラウザー Chrome</span></div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="目次">
+      <h2>目次</h2>
+      <ol>
+        <li><a href="#start">最初の5分で始める</a></li>
+        <li><a href="#screen">基本画面と執筆</a></li>
+        <li><a href="#projects">作品 章 エピソード</a></li>
+        <li><a href="#editions">投稿サイト別の原稿と稿</a></li>
+        <li><a href="#materials">作品資料</a></li>
+        <li><a href="#search">伏線と串刺し検索</a></li>
+        <li><a href="#files">ファイル保存</a></li>
+        <li><a href="#import">TXT一括インポート</a></li>
+        <li><a href="#backup">バックアップ</a></li>
+        <li><a href="#cloud">クラウド設定</a></li>
+        <li><a href="#display">表示設定</a></li>
+        <li><a href="#mobile">スマートフォン</a></li>
+        <li><a href="#trouble">困ったとき</a></li>
+      </ol>
+    </nav>
+
+    <main id="main">
+      <section id="start">
+        <h2>最初の5分で始める</h2>
+        <p class="lead">初めて使う場合は、次の順に進めると執筆とバックアップをすぐに始められます。</p>
+        <ol>
+          <li>Chromeであや綴りを開きます。必要ならホーム画面またはデスクトップへPWAとして追加します。</li>
+          <li><b>ファイル</b>から<b>新しい作品</b>を作り、小説タイトルを入力します。</li>
+          <li><b>＋章</b>と<b>＋話</b>で目次を作り、エピソードタイトルと本文を入力します。</li>
+          <li><b>設定 → バックアップ</b>で、Google Drive、OneDrive、または端末フォルダーを保存先に設定します。</li>
+          <li><b>編集エピソード保存</b>を押し、表示中のエピソードを端末外へバックアップします。</li>
+        </ol>
+        <p class="notice"><b>重要</b>　原稿は端末のブラウザー内に保存されます。ブラウザーのデータ消去や端末故障に備え、端末外へのバックアップを設定してください。</p>
+        <h3>目的から探す</h3>
+        <div class="quick-grid">
+          <a href="#screen">本文を書きたい</a><a href="#projects">章や話を増やしたい</a>
+          <a href="#editions">以前の稿を残したい</a><a href="#import">投稿サイトのTXTを読みたい</a>
+          <a href="#search">伏線や設定を探したい</a><a href="#backup">別端末で続きを書きたい</a>
+        </div>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="screen">
+        <h2>基本画面と執筆</h2>
+        <p>画面は、左の作品情報と目次、中央の本文、右のプロットとメモを中心に構成されています。画面幅が狭い端末では、必要な領域を切り替えて表示します。</p>
+        <figure><button type="button" data-zoom="images/manual/01_main_editor.png" aria-label="基本の執筆画面を拡大"><img src="images/manual/01_main_editor.png" alt="左に作品情報と目次、中央に本文、右にプロットとメモを表示した執筆画面"></button><figcaption>図1　基本の執筆画面　説明用の架空作品を表示</figcaption></figure>
+        <table><thead><tr><th>場所</th><th>役割</th></tr></thead><tbody>
+          <tr><td>上段</td><td>ファイル、戻す、やり直す、保存状態、リンク、設定</td></tr>
+          <tr><td>左側</td><td>小説タイトル、あらすじ、作品資料、章とエピソード</td></tr>
+          <tr><td>中央</td><td>エピソードタイトル、本文、前書き、後書き</td></tr>
+          <tr><td>右側</td><td>プロット、フリーメモ、伏線</td></tr>
+        </tbody></table>
+        <h3>本文を書く</h3>
+        <ol><li>左の目次から編集するエピソードを選びます。</li><li>エピソードタイトルと本文を入力します。内容はブラウザー内へ自動保存されます。</li><li>必要に応じて、ルビ、傍点、挿絵、記号、字下げ、検索、置換を使います。</li><li>端末外にも残すときは、編集エピソード保存を押します。</li></ol>
+        <p class="tip"><b>保存状態</b>　上段に「端末に保存済み」と表示されれば、ブラウザー内への保存は完了しています。編集エピソード保存は、表示中のエピソードを設定済みのバックアップ先へ保存する操作です。</p>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="projects">
+        <h2>作品 章 エピソード</h2>
+        <h3>新しい作品を作る</h3>
+        <ol><li>上段のファイルを開きます。</li><li>新しい作品を選びます。</li><li>作成された作品を開き、小説タイトル、あらすじ、全体プロットなどを入力します。</li></ol>
+        <figure><button type="button" data-zoom="images/manual/02_file_menu.png" aria-label="ファイルメニューを拡大"><img src="images/manual/02_file_menu.png" alt="作品作成、保存、インポート、エクスポートが並ぶファイルメニュー"></button><figcaption>図2　作品作成、保存、インポート、エクスポートをまとめたファイルメニュー</figcaption></figure>
+        <h3>章とエピソードを管理する</h3>
+        <ul><li><b>＋章</b>で章を追加し、<b>＋話</b>でエピソードを追加します。</li><li><b>章あり</b>では章とその中の話をまとめて表示し、<b>章なし</b>では全エピソードを一覧にします。</li><li>並び順はファイル順、タイトル、更新日時、作成日時、文字数、プロットの有無から選べます。</li><li>章やエピソードの右にある操作ボタンから、名称変更、移動、削除などを行います。</li></ul>
+        <h3>本文とプロットを並べる</h3>
+        <p>本文を見ながら、その回の構成、修正事項、思いつきをプロットとフリーメモへ書けます。境界をドラッグすると表示領域を変えられます。</p>
+        <figure><button type="button" data-zoom="images/manual/03_plot_memo.png" aria-label="本文とプロットメモ画面を拡大"><img src="images/manual/03_plot_memo.png" alt="本文とプロット、フリーメモを並べた画面"></button><figcaption>図3　本文を確認しながらプロットとフリーメモを書く</figcaption></figure>
+        <ul><li><b>他の話から</b>で、別のエピソードのプロットまたはフリーメモをコピーできます。</li><li>各領域は折りたたみ、最大化、検索、全て選択、コピーに対応します。</li><li>伏線タブでは、その話で張る伏線と前の話までの回収候補を管理できます。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="editions">
+        <h2>投稿サイト別の原稿と稿</h2>
+        <p>一つのエピソードの中に、なろう用とアルファポリス用の原稿を別々に保存できます。両方の内容が同じである必要はありません。</p>
+        <h3>原稿を切り替える</h3>
+        <ol><li>エピソード上部の<b>なろう用</b>または<b>アルファ用</b>を選びます。</li><li>選んだ投稿サイト用のタイトル、本文、前書き、後書きを編集します。</li><li>メイン投稿先を変更すると、コピーの向きと案内も切り替わります。</li></ol>
+        <h3>稿を残して改稿する</h3>
+        <ul><li><b>＋稿を上げる</b>で、現在の稿を残したまま次の稿を作ります。</li><li>稿の一覧から以前の稿を選び、内容を確認できます。</li><li>稿の削除はなろう用とアルファ用で独立しています。</li></ul>
+        <h3>別サイト用へコピーする</h3>
+        <p>コピーされるのは、現在表示している一つの稿だけです。コピー時には、ルビ、傍点、挿絵などの記法をコピー先に合わせて変換できます。</p>
+        <h3>活動報告を作る</h3>
+        <p>活動報告はエピソードごとに保存します。Xの投稿文となろう活動報告のタイトルと本文を同じ画面で作成できます。</p>
+        <figure><button type="button" data-zoom="images/manual/10_activity_report.png" aria-label="活動報告画面を拡大"><img src="images/manual/10_activity_report.png" alt="X投稿文となろう活動報告を左右に表示した画面"></button><figcaption>図4　エピソードごとの活動報告</figcaption></figure>
+        <ul><li>設定のひな型で、話数、エピソード名、作品URLなどを自動挿入できます。</li><li>投稿先を開くボタンは、設定のリンクに登録したページを開きます。</li><li>投稿文はコピーして、投稿サイト側へ貼り付けます。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="materials">
+        <h2>作品資料</h2>
+        <p>作品全体の資料は、左側のあらすじ、全体プロット、世界観 用語、登場人物、メモから開きます。</p>
+        <h3>世界観と用語</h3>
+        <figure><button type="button" data-zoom="images/manual/12_world_terms.png" aria-label="世界観用語画面を拡大"><img src="images/manual/12_world_terms.png" alt="世界観と用語を分類別の表で整理する画面"></button><figcaption>図5　世界観と用語を表形式で整理</figcaption></figure>
+        <ul><li>国、組織、種族、地名、道具などの分類を作れます。</li><li>検索と分類で絞り込み、必要な行と列だけをテキストへ書き出せます。</li><li>先頭に＃を付けた行は、公開用の書き出しから除外できます。</li></ul>
+        <h3>登場人物</h3>
+        <figure><button type="button" data-zoom="images/manual/13_characters.png" aria-label="登場人物画面を拡大"><img src="images/manual/13_characters.png" alt="登場人物を分類別の表で整理する画面"></button><figcaption>図6　登場人物を表形式で整理</figcaption></figure>
+        <ul><li>名前、読み、性別、年齢、自己人称、立場、性格、外見などを管理できます。</li><li>世界観 用語の項目を人物の所属として結び付けられます。</li><li>改名や別名は、同一人物として複数の行を関連付けられます。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="search">
+        <h2>伏線と串刺し検索</h2>
+        <h3>伏線を登録して回収する</h3>
+        <p>伏線を張ったエピソードに登録し、後のエピソードで部分回収または回収を記録します。状態は自動で変わります。</p>
+        <figure><button type="button" data-zoom="images/manual/11_foreshadows.png" aria-label="伏線一覧を拡大"><img src="images/manual/11_foreshadows.png" alt="状態や話数で伏線を絞り込む伏線一覧"></button><figcaption>図7　作品全体の伏線一覧</figcaption></figure>
+        <ol><li>エピソードのプロット メモ 伏線タブを開きます。</li><li>伏線を追加し、名前、内容、キーワードを入力します。</li><li>回収する話で、これまでの伏線から対象を探します。</li><li>部分回収または回収を記録します。</li></ol>
+        <h3>作品全体から探す</h3>
+        <p>串刺し検索では、作品資料と全エピソードをまとめて検索します。AND検索とOR検索を選べます。</p>
+        <figure><button type="button" data-zoom="images/manual/14_cross_search.png" aria-label="串刺し検索画面を拡大"><img src="images/manual/14_cross_search.png" alt="作品資料と各エピソードの検索対象をチェックで選ぶ画面"></button><figcaption>図8　作品全体の串刺し検索</figcaption></figure>
+        <ul><li>あらすじ、全体プロット、世界観、登場人物、メモ、伏線を検索できます。</li><li>タイトル、本文、前書き、後書き、プロット、フリーメモ、活動報告も対象にできます。</li><li>結果を押すと、該当する入力欄を開きます。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="files">
+        <h2>ファイル保存</h2>
+        <p>ファイルメニューの保存は、選んだ内容を一つの <code>.ayabackup</code> ファイルへまとめて、任意の場所へ保存する操作です。持ち出し用や長期保管用に使えます。</p>
+        <h3>バックアップパックを作る</h3>
+        <figure><button type="button" data-zoom="images/manual/08_backup_pack_create.png" aria-label="バックアップパック画面を拡大"><img src="images/manual/08_backup_pack_create.png" alt="環境設定と作品、エピソードを選ぶバックアップパック作成画面"></button><figcaption>図9　保存する内容を選ぶバックアップパック作成画面</figcaption></figure>
+        <ul><li><b>環境設定を含める</b>では、表示設定、ひな型、リンク、アカウント、TXTインポート条件などを含めます。アクセストークンは含めません。</li><li>全作品、作品全体、選んだエピソードから範囲を選びます。</li><li>エピソードには、両投稿サイトの全稿、本文、前書き、後書き、プロット、フリーメモ、活動報告が含まれます。</li><li>読み込み前に内容を確認して、作品または環境を選んで復元できます。</li></ul>
+        <h3>プレーンテキスト</h3>
+        <table><thead><tr><th>操作</th><th>用途</th></tr></thead><tbody><tr><td>インポート エピソードエリアへ</td><td>UTF-8またはShift JISのテキストを現在のエピソードへ取り込む</td></tr><tr><td>エクスポート エピソードから</td><td>現在表示している側の原稿を書き出す</td></tr><tr><td>エクスポート 全エピソード</td><td>作品の全エピソードを書き出す</td></tr></tbody></table>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="import">
+        <h2>TXT一括インポート</h2>
+        <p>設定のインポート なろう アルファから、投稿サイトで出力したTXTを章とエピソードに分けて登録できます。TXTを含むZIPも選べます。</p>
+        <figure><button type="button" data-zoom="images/manual/09_settings_import.png" aria-label="TXTインポート画面を拡大"><img src="images/manual/09_settings_import.png" alt="TXT一括インポートを開く設定画面"></button><figcaption>図10　TXT一括インポートを開く</figcaption></figure>
+        <h3>書式あり なろう系</h3>
+        <ol><li>ダウンロードしたTXTまたはZIPを指定します。</li><li>ZIPの場合は、中の一覧からTXTを一つ選びます。</li><li>章とエピソードの区切り、削除する見出し、文字コードを確認します。</li><li>プレビューでタイトルと取り込み先を確認し、取り込みます。</li></ol>
+        <h3>書式なし アルファ系</h3>
+        <ol><li>物語本文のTXTを選びます。</li><li>次へ進み、タイトル一覧ファイルを選ぶか一覧を貼り付けます。</li><li>タイトル一覧の読み方を簡易書式設定で作成します。</li><li>プレビューで章、話、対応先を確認して取り込みます。</li></ol>
+        <p class="tip"><b>取り込み先</b>　新しい作品のほか、既存作品のなろう用またはアルファ用へ対応付けられます。対応する話がない場合は、確認画面で「対応なし」に絞り込み、取り込み先を手動指定できます。</p>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="backup">
+        <h2>バックアップ</h2>
+        <p>最新状態はブラウザー内に自動保存されますが、ブラウザーのデータを消すと失われます。端末外への自動バックアップを設定してください。</p>
+        <figure><button type="button" data-zoom="images/manual/07_settings_backup.png" aria-label="バックアップ設定を拡大"><img src="images/manual/07_settings_backup.png" alt="復元ポイントとサーバへの自動バックアップを設定する画面"></button><figcaption>図11　変更履歴とサーバへの自動バックアップ</figcaption></figure>
+        <table><thead><tr><th>種類</th><th>役割</th></tr></thead><tbody><tr><td>端末内保存</td><td>入力中の最新状態をブラウザー内へ自動保存</td></tr><tr><td>変更履歴と復元ポイント</td><td>端末内に残る履歴から以前の状態へ戻す</td></tr><tr><td>自動バックアップ</td><td>クラウドまたは端末フォルダーへ保存し、端末間共有にも使う</td></tr><tr><td>ファイルへ保存</td><td>選んだ内容を一つの .ayabackup として任意の場所へ保管</td></tr></tbody></table>
+        <h3>自動バックアップを設定する</h3>
+        <ol><li>設定のクラウドで、なし、Google Drive、OneDriveのいずれかを選びます。</li><li>クラウドを使う場合は、クライアントIDを入力してログインします。</li><li>設定のバックアップで保存先を選びます。PCのChromeとEdgeでは端末フォルダーも選べます。</li><li>保存間隔、残す件数、ファイル名のプレフィックスを設定します。</li><li>複数端末で共有するときは、すべての端末で同じクラウドと同じフォルダーを選びます。</li></ol>
+        <h3>他の端末の更新を読み込む</h3>
+        <ul><li>別端末の新しいバックアップが見つかると確認画面が表示されます。</li><li>作品は上書き、または新しい作品として追加できます。</li><li>環境は、この端末の設定へまとめるか、バックアップで置き換えるかを選びます。</li><li>意図的に過去の履歴を選んだ後は、それ以前の履歴を新しい更新として自動確認しません。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="cloud">
+        <h2>クラウド設定</h2>
+        <p>使うクラウドと接続IDはクラウドタブで設定し、ファイルとバックアップの保存先はそれぞれのタブで選びます。</p>
+        <figure><button type="button" data-zoom="images/manual/06_settings_cloud.png" aria-label="クラウド設定を拡大"><img src="images/manual/06_settings_cloud.png" alt="Google Driveを選びクライアントIDを設定する画面"></button><figcaption>図12　利用できるクラウドと接続ID</figcaption></figure>
+        <h3>Google Drive</h3>
+        <ul><li>Google CloudでDrive APIを有効にし、ウェブアプリケーションのクライアントIDを作成します。</li><li>生成元とリダイレクトURIに、利用するあや綴りの公開URLを登録します。</li><li>スコープは <code>drive.file</code> を使用します。</li></ul>
+        <h3>OneDrive</h3>
+        <ul><li>Microsoft Entraでシングルページアプリケーションを登録します。</li><li>委任されたアクセス許可に <code>Files.ReadWrite.AppFolder</code> と <code>offline_access</code> を設定します。</li><li>アプリケーション クライアントIDをあや綴りへ入力します。</li></ul>
+        <p class="notice">クライアントシークレットは入力しません。クラウド事業者の画面は変わることがあるため、READMEの最新手順も確認してください。</p>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="display">
+        <h2>表示を自分仕様にする</h2>
+        <p>表示設定は端末ごとに保存されます。パソコンでは詳細表示、スマートフォンでは簡易表示というように、使うボタンと入力欄を調整できます。</p>
+        <figure><button type="button" data-zoom="images/manual/05_settings_display.png" aria-label="表示設定を拡大"><img src="images/manual/05_settings_display.png" alt="簡易表示と詳細表示で表示項目を個別に選ぶ画面"></button><figcaption>図13　簡易表示と詳細表示の項目を選ぶ</figcaption></figure>
+        <ul><li>使う表示で簡易または詳細を選び、表示項目を個別にオン オフします。</li><li>作品情報、エピソード欄、コピー、全て選択、貼り付けなどを細かく選べます。</li><li>本文を最大化したときに表示するルビ、傍点、検索なども選べます。</li><li>説明ラベルをまとめて非表示にすると、入力欄を広く使えます。</li></ul>
+        <h3>設定画面のタブ</h3>
+        <figure><button type="button" data-zoom="images/manual/04_settings_overview.png" aria-label="設定画面を拡大"><img src="images/manual/04_settings_overview.png" alt="投稿サイト、表示、リンク、クラウド、ファイル、バックアップなどのタブを持つ設定画面"></button><figcaption>図14　上部のタブで設定する機能を切り替える</figcaption></figure>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="mobile">
+        <h2>スマートフォン</h2>
+        <p>スマートフォンでは、本文を最大化し、必要なボタンだけを表示すると書く領域を広くできます。画面キーボードが出ている間も、表示中の高さに合わせて入力欄が調整されます。</p>
+        <figure class="mobile"><button type="button" data-zoom="images/manual/15_mobile_editor.png" aria-label="スマートフォン画面を拡大"><img src="images/manual/15_mobile_editor.png" alt="スマートフォン幅で本文入力欄を表示した画面"></button><figcaption>図15　スマートフォン幅の執筆画面</figcaption></figure>
+        <h3>ホーム画面へ追加する</h3>
+        <table><thead><tr><th>端末</th><th>操作</th></tr></thead><tbody><tr><td>iPhone iPad</td><td>ChromeまたはSafariの共有からホーム画面に追加</td></tr><tr><td>Android</td><td>Chromeのメニューからアプリをインストール</td></tr><tr><td>Windows Mac</td><td>Chromeのアドレスバーにあるインストールから追加</td></tr></tbody></table>
+        <ul><li>Safari、Chrome、ホーム画面のアプリは、同じ端末でも保存領域が別になる場合があります。普段使う開き方を一つに決めます。</li><li>iPhoneとiPadの自動バックアップは、Google DriveまたはOneDriveを使います。</li><li>ファイルへ保存するときは、共有メニューの「ファイルに保存」を使えます。</li><li>Androidは機種やChromeの版によって表示やフォルダー選択の挙動が異なる場合があります。</li></ul>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+
+      <section id="trouble">
+        <h2>困ったとき</h2>
+        <table><thead><tr><th>症状</th><th>確認すること</th></tr></thead><tbody>
+          <tr><td>別端末に作品が出ない</td><td>同じクラウド、同じアカウント、同じ保存先フォルダーか確認</td></tr>
+          <tr><td>保存中のまま進まない</td><td>通信とログインを確認し、バックアップ管理でファイルができているか確認</td></tr>
+          <tr><td>Googleへ接続できない</td><td>Drive API、クライアントID、生成元、リダイレクトURI、テストユーザーを確認</td></tr>
+          <tr><td>OneDriveへ接続できない</td><td>SPA登録、クライアントID、アクセス許可を確認</td></tr>
+          <tr><td>以前の内容へ戻したい</td><td>設定のバックアップから変更履歴と復元ポイントを開く</td></tr>
+          <tr><td>TXTの章や話がずれる</td><td>プレビューで区切りを確認し、ルール説明または簡易書式設定を使う</td></tr>
+          <tr><td>画面が狭い</td><td>表示設定で不要な項目を外すか、入力欄を最大化</td></tr>
+          <tr><td>更新後も古い画面</td><td>再読み込み。PWAは完全に閉じてから開き直す</td></tr>
+        </tbody></table>
+        <h3>主なショートカット</h3>
+        <table><thead><tr><th>操作</th><th>Windows</th><th>Mac</th></tr></thead><tbody><tr><td>元に戻す</td><td><kbd>Ctrl</kbd> <kbd>Z</kbd></td><td><kbd>Command</kbd> <kbd>Z</kbd></td></tr><tr><td>やり直す</td><td><kbd>Ctrl</kbd> <kbd>Y</kbd></td><td><kbd>Command</kbd> <kbd>Shift</kbd> <kbd>Z</kbd></td></tr><tr><td>編集エピソード保存</td><td><kbd>Ctrl</kbd> <kbd>S</kbd></td><td><kbd>Command</kbd> <kbd>S</kbd></td></tr></tbody></table>
+        <h3>安全な運用</h3>
+        <ul><li>執筆前に自動バックアップの保存先を確認します。</li><li>大きな変更やTXTインポートの前に、バックアップパックを作ります。</li><li>バックアップ管理で、日時、端末、内容を定期的に確認します。</li><li>重要な節目では、クラウドとは別の場所にも .ayabackup を保存します。</li></ul>
+        <p>より詳しいクラウド登録手順や機能の補足は、<a href="../README.md">README</a>とdocs内の既存マニュアルを参照してください。</p>
+        <p class="back-top"><a href="#top">ページの先頭へ</a></p>
+      </section>
+    </main>
+  </div>
+
+  <footer>あや綴り 画像付き操作マニュアル　バージョン0.81</footer>
+  <dialog id="lightbox" aria-label="画面画像の拡大表示"><form method="dialog"><button type="submit">閉じる</button></form><img src="" alt=""></dialog>
+  <script>
+    const lightbox = document.querySelector('#lightbox');
+    const largeImage = lightbox.querySelector('img');
+    document.querySelectorAll('[data-zoom]').forEach((button) => {
+      button.addEventListener('click', () => {
+        const preview = button.querySelector('img');
+        largeImage.src = button.dataset.zoom;
+        largeImage.alt = preview.alt;
+        lightbox.showModal();
+      });
+    });
+    lightbox.addEventListener('click', (event) => {
+      if (event.target === lightbox) lightbox.close();
+    });
+  </script>
+</body>
+</html>

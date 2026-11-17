@@ -38,7 +38,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.80';
+const APP_VERSION = '2026.11.17-0.82';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1215,7 +1215,7 @@ function openNewItem(kind) {
   const form = $('new-item-form');
   const isCh = kind === 'chapter';
   $('new-item-heading').textContent = isCh ? '新しい章' : '新しいエピソード';
-  $('new-item-name-label').textContent = isCh ? '章の名前' : 'エピソードのタイトル（あとで変えられます）';
+  $('new-item-name-label').textContent = isCh ? '章の名前' : 'エピソードのタイトル';
   form.title.value = isCh ? `第${project.chapters.length + 1}章` : '';
   $('new-item-chapter-row').hidden = isCh;
   if (!isCh) {
@@ -1414,7 +1414,7 @@ function driveProvider() {
   return p?.isConfigured() && p.save ? p : null;
 }
 const cloudName = () => activeProvider()?.label || 'クラウド';
-const cloudDestinationLabel = () => `${cloudName()}（クラウドで設定したドライブ）`;
+const cloudDestinationLabel = () => cloudName(); // 0.81：ボタン・選択肢は名前だけ（説明は付けない）
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 // force：設定にかかわらず選ぶ画面を出す（設定のほうを目立つボタンにする）
@@ -1433,7 +1433,7 @@ async function chooseDestination(kind, { force = false, only = '' } = {}) {
   const last = pref !== 'ask' ? pref : oldCloud(prefs.get('file.lastDestination', 'local'));
   const drive = { value: 'cloud', label: cloudDestinationLabel(), primary: last === 'cloud' };
   // 「この端末・その他」は、端末のファイル選択（保存）画面で、場所もファイルも自由に選べる
-  const local = { value: 'local', label: kind === 'open' ? 'この端末・その他（ファイルを自由に選ぶ。iCloud など）' : 'この端末・その他（好きな場所に保存。iCloud など）', primary: last !== 'cloud' };
+  const local = { value: 'local', label: 'この端末・その他', primary: last !== 'cloud' };
   // 前回使ったほうを右端（目立つボタン）に置く
   const r = await choose(kind === 'open' ? 'どこから開きますか？' : 'どこに保存しますか？', last === 'cloud' ? [local, drive] : [drive, local]);
   if (r) prefs.set('file.lastDestination', r);
@@ -2329,8 +2329,8 @@ async function openSiteCopy() {
   // コピーするのは開いているエピソードだけ（題に話数を出して分かるようにする）
   $('site-copy-title').textContent = `第${project.episodes.indexOf(ep) + 1}話：${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
   $('site-copy-desc').textContent = '';
-  $('site-copy-mode-new').textContent = `新しい稿（${SITES[to].short}用の${next}）として追加（おすすめ。今の${dest.cur.name}はそのまま残ります）`;
-  $('site-copy-mode-over').textContent = `${SITES[to].short}用の今の稿（${dest.cur.name}）に上書き`;
+  $('site-copy-mode-new').textContent = `新しい稿（${next}）として追加`;
+  $('site-copy-mode-over').textContent = `今の稿（${dest.cur.name}）に上書き`;
   $('site-copy-form').dataset.overName = dest.cur.name;
   const box = $('site-copy-fields');
   box.querySelectorAll('label').forEach((n) => n.remove());
@@ -3330,7 +3330,7 @@ function renderSyncState() {
 
   const sel = $('sync-mode');
   const cloudOpt = sel.querySelector('option[value="cloud"]');
-  cloudOpt.textContent = `${cloudLabel}（クラウドで設定したドライブ）`;
+  cloudOpt.textContent = cloudLabel;
   sel.value = m;
   sel.querySelector('option[value="folder"]').disabled = !sync.folderSupported && m !== 'folder';
   cloudOpt.disabled = !cloud?.isConfigured() && m !== 'cloud';
@@ -3444,7 +3444,7 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
   const cur = project.title || '無題';
   // 一覧の最後に「環境」（設定・ひな型・リンクなど）も入れる。選ぶと、環境だけを読み込む
   const options = novels.map((p) => ({ value: p.id, label: label(p) }));
-  if (env.length) options.push({ value: ENV_CHOICE, label: '⚙ 環境（設定・ひな型・リンク・アカウントなど）' });
+  if (env.length) options.push({ value: ENV_CHOICE, label: '⚙ 環境設定' });
   const r = await choose(`「${name}」から読み込みます。\n\n`
     + `・上書き：いま開いている小説「${cur}」を、選んだ小説の内容（タイトルから全部）で置き換えます。置き換える前の内容は「作品のバックアップ版」に残します。\n`
     + '・新小説：選んだ小説を、新しい小説として追加して開きます（いま開いている小説はそのまま残ります）。'

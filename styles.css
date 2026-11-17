@@ -1358,3 +1358,8 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 .list[hidden] { display: none; }
 #template-groups fieldset > .list { margin-bottom: 8px; }
 .about-link a { color: var(--accent); word-break: break-all; }
+
+/* 0.82：インポートの「詳しい設定」（書式の選択・編集） */
+.imp-advanced { border: 1px solid var(--border); border-radius: 8px; padding: 6px 10px; }
+.imp-advanced > summary { cursor: pointer; font-weight: 600; }
+.imp-advanced[open] > summary { margin-bottom: 8px; }
