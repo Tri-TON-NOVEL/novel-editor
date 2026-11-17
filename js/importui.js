@@ -1166,7 +1166,6 @@ export function initImport(ctx) {
     $('imp-encoding').replaceChildren(...I.ENCODINGS.map((e) => new Option(e.label, e.value)));
     $('imp-file').value = '';
     $('imp-file-name').textContent = '';
-    showPickButtons();
     resetZipSelection();
     $('imp-title-list-file').value = '';
     $('imp-title-list-text').value = '';
@@ -1246,49 +1245,13 @@ export function initImport(ctx) {
       ctx.toast(error?.message || 'ファイルを読み込めませんでした。', true);
     }
   }
+  // 0.84：TXT／ZIP とタイトル一覧は、いつも端末のファイル選択で選ぶ（クラウドからは読み取らない。「設定」→「ファイル」とは関係なし）
   $('imp-file').addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file) return;
     $('imp-file-name').textContent = `選んだファイル：${file.name}`;
     e.target.value = ''; // 同じファイルを選び直しても読み込めるように
     await useImportFile(file);
-  });
-  // 「クラウド」タブで選んだクラウド（OneDrive など）から選ぶ。
-  // 「この端末・その他から選ぶ」は端末のファイル選択画面で、どこが開くかは端末が決める（前に使った場所など）
-  // 0.83：TXT／ZIP とタイトル一覧のファイルを選ぶ場所は、「設定」→「ファイル」に従う（「ファイル」→「開く」と同じ）
-  //   この端末だけ … ラベルの中の入力欄（端末の画面を直接開く。iPhone でも確実に開く）
-  //   クラウドだけ … すぐにクラウドのフォルダの画面（一覧から選ぶ）
-  //   両方       … 先に「クラウド／この端末・その他」を選んでから、それぞれの画面へ
-  function showPickButtons() {
-    const local = (ctx.fileOpenMode?.() || 'local') === 'local';
-    $('imp-file-label').hidden = !local;
-    $('imp-cloud-file').hidden = local;
-    $('imp-title-list-label').hidden = !local;
-    $('imp-title-list-pick').hidden = local;
-  }
-  // 戻り値：クラウドで選んだ { name, bytes }／null（やめた）。この端末を選んだときは input を開いて null
-  async function pickByDestination(input, title) {
-    const where = await ctx.chooseOpenDestination();
-    if (where === 'local') { input.click(); return null; }
-    if (where !== 'cloud') return null;
-    const f = await ctx.pickCloudImportFile(title);
-    if (f === 'local') { input.click(); return null; }
-    return f?.bytes ? f : null;
-  }
-  $('imp-cloud-file').addEventListener('click', async () => {
-    try {
-      const f = await pickByDestination($('imp-file'), 'TXT／ZIP を選ぶ');
-      if (!f) return;
-      $('imp-file').value = '';
-      $('imp-file-name').textContent = `選んだファイル：${f.name}`;
-      await useImportFile(new File([f.bytes], f.name));
-    } catch (e) { ctx.fail(e); }
-  });
-  $('imp-title-list-pick').addEventListener('click', async () => {
-    try {
-      const f = await pickByDestination($('imp-title-list-file'), 'タイトル一覧を選ぶ');
-      if (f) await loadTitleListFile(new File([f.bytes], f.name));
-    } catch (e) { ctx.fail(e); }
   });
   $('imp-zip-entry-list').addEventListener('change', async (e) => {
     if (!e.target.matches('input[name="imp-zip-entry"]')) return;

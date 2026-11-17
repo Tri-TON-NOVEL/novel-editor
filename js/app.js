@@ -38,7 +38,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.83';
+const APP_VERSION = '2026.11.17-0.84';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3875,15 +3875,7 @@ const importScreen = initImport({
   closeSettings: () => $('settings-dialog').close(),
   withBusy,
   returnToEditor,
-  // 「クラウド」タブで選んだクラウドの名前（使えないときは ''）と、そこから TXT／ZIP を選ぶ画面
-  cloudLabel: () => driveProvider()?.label || '',
-  pickCloudImportFile: (what = 'TXT／ZIP を選ぶ') => {
-    const p = driveProvider();
-    return p ? pickDriveFile(p, `${p.label}から${what}`, 'import') : Promise.resolve(null);
-  },
-  // 0.83：インポートのファイルも「設定」→「ファイル」に従う（'local'／'cloud'／'ask'。クラウドが使えなければ 'local'）
-  fileOpenMode: () => (driveProvider() ? oldCloud(prefs.get(DEST_KEY, 'ask')) : 'local'),
-  chooseOpenDestination: () => chooseDestination('open'),
+  // 0.84：インポートのファイルは端末から選ぶだけ（クラウドから読み取る画面は渡さない）
 });
 
 // 伏線（エピソードの「伏線」タブと、作品の「伏線一覧」）

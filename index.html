@@ -750,11 +750,11 @@
         <span class="imp-file-head">TXT／ZIP ファイル</span>
         <div class="imp-file-buttons">
           <!-- ラベルを押すと端末のファイル選択が開く（iPhone でも確実に開くよう、入力欄はラベルの中に置く） -->
-          <!-- 0.83：選ぶ場所は「設定」→「ファイル」に従う。この端末だけ＝ラベル（端末の画面を直接開く）／クラウド・両方＝ボタン -->
+          <!-- 0.84：いつも端末のファイル選択（ラベルの中の入力欄。iPhone でも確実に開く）。クラウドからは読み取らない -->
           <label class="imp-file-button" id="imp-file-label">ファイルを選ぶ…
             <input type="file" id="imp-file" class="visually-hidden" accept=".txt,.zip,text/plain,application/zip">
           </label>
-          <button type="button" id="imp-cloud-file" hidden>ファイルを選ぶ…</button>
+
         </div>
         <span class="hint" id="imp-file-name"></span>
       </div>
@@ -781,7 +781,7 @@
             <label class="imp-file-button" id="imp-title-list-label">ファイルを選ぶ…
               <input type="file" id="imp-title-list-file" class="visually-hidden" accept=".txt,text/plain">
             </label>
-            <button type="button" id="imp-title-list-pick" hidden>ファイルを選ぶ…</button>
+
           </div>
         </div>
         <div class="imp-paste-field">
