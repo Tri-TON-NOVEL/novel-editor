@@ -1353,3 +1353,8 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 .cs-count { margin-left: auto; font-size: 12px; color: var(--muted); }
 .cs-snippet { font-size: 13px; line-height: 1.6; color: var(--text); overflow-wrap: anywhere; margin-top: 2px; }
 .cs-snippet mark { background: var(--img-hl); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+/* 0.78：ひな型タブ（種類ごとのグループ） */
+.list[hidden] { display: none; }
+#template-groups fieldset > .list { margin-bottom: 8px; }
+.about-link a { color: var(--accent); word-break: break-all; }

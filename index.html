@@ -1318,7 +1318,7 @@
     <!-- ファイル -->
     <div class="settings-panel" data-spanel="file" role="tabpanel" hidden>
     <fieldset>
-      <legend>書き出しの保存先</legend>
+      <legend>ファイルの保存先</legend>
       <label>保存先
         <select name="fileDestination" id="file-destination">
           <option value="ask">両方を使う（毎回選ぶ）</option>
@@ -1379,11 +1379,7 @@
 
     <!-- ひな型 -->
     <div class="settings-panel" data-spanel="templates" role="tabpanel" hidden>
-    <fieldset>
-      <legend>ひな型の管理</legend>
-      <p class="hint">使える差し込み文字：<span id="template-vars"></span></p>
-      <ul class="list" id="template-list"></ul>
-    </fieldset>
+    <div id="template-groups"></div>
     </div>
 
     <!-- バックアップ -->
@@ -1455,6 +1451,7 @@
       <legend>あや綴り</legend>
        <p class="about-catch">文（あや）と文（あや）で綾（あや）を綴る。</p>
       <p id="app-version"></p>
+      <p class="about-link"><a href="https://github.com/Tri-TON-NOVEL/novel-editor" target="_blank" rel="noopener noreferrer">https://github.com/Tri-TON-NOVEL/novel-editor</a></p>
     </fieldset>
     <fieldset class="disclaimer">
       <legend>免責事項</legend>

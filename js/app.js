@@ -26,7 +26,7 @@ import { decodeText } from './importer.js';
 import { ask, askText, choose, inform } from './dialogs.js';
 import {
   SITES, RUBY_LIMIT, SYMBOLS, ruby, dots, autoIndent, rubyCaretOffset, convert, convertText, countImages,
-  miteminToTag, hasMiteminUrl, xLength, fillTemplate, TEMPLATE_VARS, DEFAULT_TEMPLATES, findImages,
+  miteminToTag, hasMiteminUrl, xLength, fillTemplate, DEFAULT_TEMPLATES, findImages,
   countAlphaNotation, countAlphaImages,
 } from './notation.js';
 import { localFile, WORK_TYPES, TEXT_TYPES, BACKUP_TYPES } from './localfile.js';
@@ -37,7 +37,7 @@ const $ = (id) => document.getElementById(id);
 const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存するまで
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.17-0.77';
+const APP_VERSION = '2026.11.17-0.78';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -1414,7 +1414,7 @@ const cloudDestinationLabel = () => `${cloudName()}（クラウドで設定し�
 
 // 「ファイル」タブの設定が「だけを使う」なら選ぶ画面を出さず、そのまま返す（すぐにそれぞれの画面へ）
 // force：設定にかかわらず選ぶ画面を出す（設定のほうを目立つボタンにする）
-// only：選ぶ画面を出さず、その保存先だけを使う（「ファイル」→「開く」「保存」とプレーンテキストのインポート・エクスポートは、この端末用なので 'local'。クラウドには最初から接続しない。クラウドはバックアップの画面で使う）
+// only：選ぶ画面を出さず、その保存先だけを使う。0.78 から「ファイル」の開く・保存・インポート・エクスポートは only を付けず、この設定に従う
 async function chooseDestination(kind, { force = false, only = '' } = {}) {
   if (only) return only;
   const p = driveProvider();
@@ -2000,7 +2000,7 @@ async function createBackupPack(btn = $('backup-pack-save')) {
       let name = form.elements.fileName.value.trim() || packFileName(made.pack, { device: sync.prefix() }).replace(/\.json$/i, ARCHIVE_EXT);
       if (!name.toLowerCase().endsWith(ARCHIVE_EXT)) name += ARCHIVE_EXT;
       // 「ファイル」→「保存」：この端末・その他の好きな場所へ（クラウドはバックアップの画面で）
-      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…', only: 'local' });
+      r = await saveTextTo(made.blob, name, { title: `${cloudName()}に保存（あや綴りバックアップ）`, kind: 'backup', busyText: '保存中…' });
       if (!r) return false; // 保存先を選ぶ画面を閉じた（やめた）
     }
     recordSaved(made.pack, await allProjects());
@@ -2238,7 +2238,7 @@ async function epOpen({ force = false, only = '' } = {}) {
 
 // プレーンテキスト → 今のエピソードの本文（開いている側の原稿）
 async function importText() {
-  const src = await openFrom('プレーンテキストを開く', { kind: 'txt', only: 'local' });
+  const src = await openFrom('プレーンテキストを開く', { kind: 'txt' });
   if (!src) return;
   const text = src.file
     ? await withBusy('ファイルを読み込み中…', async () => decodeText(await src.file.arrayBuffer()).text)
@@ -2264,7 +2264,7 @@ async function exportEpisode() {
   const d = cur();
   if (!d.body) { toast('本文は空です'); return; }
   const name = fileName(`${project.title || '無題'}_${d.title || epIndex + 1}`, '.txt');
-  const r = await saveTextTo(convert(editSite, d.body), name, { title: `${cloudName()}に保存（このエピソードのテキスト）`, kind: 'txt', only: 'local' });
+  const r = await saveTextTo(convert(editSite, d.body), name, { title: `${cloudName()}に保存（このエピソードのテキスト）`, kind: 'txt' });
   if (r) toast(savedMessage(r, `「${d.title || '（無題）'}」のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -2274,7 +2274,7 @@ async function exportAll() {
     .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
     .join('\n\n――――――――――\n\n');
   const head = project.title ? project.title + '\n\n' : '';
-  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: `${cloudName()}に保存（全エピソードのテキスト）`, kind: 'txt', only: 'local' });
+  const r = await saveTextTo(head + text, fileName(`${project.title || '無題'}_${SITES[editSite].short}`, '.txt'), { title: `${cloudName()}に保存（全エピソードのテキスト）`, kind: 'txt' });
   if (r) toast(savedMessage(r, `全${project.episodes.length}話のテキスト（${SITES[editSite].short}用）`));
 }
 
@@ -3850,7 +3850,7 @@ const outline = chapterList($('chapters'), () => project.chapters, {
 const tableOpts = {
   ...sectionOpts,
   fileBase: () => project.title || '作品',
-  save: (text, name, what) => saveTextTo(text, name, { title: `${what}を保存`, kind: 'txt', only: 'local' })
+  save: (text, name, what) => saveTextTo(text, name, { title: `${what}を保存`, kind: 'txt' })
     .then((r) => { if (r) toast(savedMessage(r, what)); }).catch(fail),
 };
 const worldTable = categorizedTable($('world-tables'), () => project.world, {
@@ -4554,15 +4554,21 @@ function saveEditedTemplate() {
   toast(`ひな型「${t.name}」を保存しました`);
 }
 
+// 0.78：「ひな型」タブに、種類ごとのグループ（X・活動報告・前書き・後書き）を直接並べる
 function renderTemplateList() {
-  const list = $('template-list');
-  list.replaceChildren();
+  const box = $('template-groups');
+  box.replaceChildren();
   const all = templates();
   for (const kind of KINDS) {
-    const add = button(`＋ ${KIND_LABEL[kind]}のひな型を追加`, () => editTemplate({ id: null, kind, name: '', title: '', body: '' }));
-    const head = li('', '');
-    head.append(add);
-    list.append(head);
+    const group = document.createElement('fieldset');
+    const legend = document.createElement('legend');
+    legend.textContent = `${KIND_LABEL[kind]}のひな型`;
+    const list = document.createElement('ul');
+    list.className = 'list';
+    const add = button('＋ 追加', () => editTemplate({ id: null, kind, name: '', title: '', body: '' }));
+    add.classList.add('tool');
+    group.append(legend, list, add);
+    box.append(group);
     for (const t of all.filter((x) => x.kind === kind)) {
       const edit = button('編集', () => editTemplate(t));
       const del = button('削除', async () => {
@@ -4570,8 +4576,9 @@ function renderTemplateList() {
         saveTemplates(templates().filter((x) => x.id !== t.id));
         renderTemplateList();
       }, 'danger');
-      list.append(listItem(`${KIND_LABEL[kind]}：${t.name}`, (t.title ? t.title + ' / ' : '') + t.body.replace(/\n/g, ' ').slice(0, 60), [edit, del]));
+      list.append(listItem(t.name, (t.title ? t.title + ' / ' : '') + t.body.replace(/\n/g, ' ').slice(0, 60), [edit, del]));
     }
+    list.hidden = !list.children.length;
   }
 }
 
@@ -5417,7 +5424,7 @@ const actions = {
   'backup-pack-open': () => openBackupPackFile().catch(fail),
   'sync-save': () => saveNow(),
   'copy-episode-notes': openEpisodeNotesCopy,
-  'ep-open': () => epOpen({ only: 'local' }), // 「ファイル」→「開く」：この端末・その他から（クラウドはバックアップの画面で）
+  'ep-open': () => epOpen(), // 「ファイル」→「開く」：設定の「ファイル」タブの保存先に従う（0.78）
   'ep-save-as': () => fileSaveAs().catch(fail),
   'new-chapter-at': () => openNewItem('chapter'),
   'new-episode-at': () => openNewItem('episode'),
@@ -5981,7 +5988,6 @@ async function init() {
   applyPrefs();
   bindEvents();
   selectTab('body');
-  $('template-vars').textContent = TEMPLATE_VARS.join(' ');
   renderTemplateSelects();
   activeProvider()?.preload();
   await migrate();
