@@ -25,13 +25,13 @@ import { meta, prefs } from './db.js';
 import { makeArchive, openArchive } from './archive.js';
 import { parseBackupHead } from './backup.js';
 
-export const DEFAULT_INTERVAL_MIN = 10;
+// 0.91：自動バックアップは「画面を離れるとき（別のアプリに切り替える・閉じる）」と「入力がこの分だけ止まったとき」だけ。
+//       どちらも、中身が本当に変わったとき（アプリの hasChanges が true）だけ保存する
+export const DEFAULT_INTERVAL_MIN = 30;
+export const MIN_INTERVAL_MIN = 10;
 export const DEFAULT_KEEP = 200;
 const CHECK_MS = 30_000;       // 保存が必要かを確かめる間隔
 const LEAVE_MIN_MS = 30_000;   // 画面を離れるときの保存の最短間隔（タブを切り替えるたびに増えないように）
-const IDLE_SAVE_MS = 5 * 60_000; // 入力がこれだけ止まったら、自動バックアップする（書き終えた区切りで保存）
-const IDLE_MS = 20_000;        // 書き続けているときの保存（保存間隔ごと）は、入力がこれだけ止まってから
-const IDLE_MAX_MS = 30 * 60_000; // 打ち続けていても、保存間隔からこれ以上は待たない
 const DIR_KEY = 'autoBackupDir';
 // 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.ayabackup。端末の時刻）の両方を読む。
 // 0.50 までの .json（…_20261030-073000.json）も、一覧に出して読めるようにする
@@ -57,7 +57,8 @@ export function mode() {
   const m = prefs.get('sync.mode', 'off');
   return m === 'gdrive' ? 'cloud' : m; // 以前の版の「Google ドライブ」方式
 }
-export function intervalMin() { return Math.max(1, Number(prefs.get('autoBackupInterval', DEFAULT_INTERVAL_MIN)) || DEFAULT_INTERVAL_MIN); }
+// 入力が止まってから自動バックアップするまでの分（0.90 までの「保存間隔」と同じ設定。5分は10分として扱う）
+export function intervalMin() { return Math.max(MIN_INTERVAL_MIN, Number(prefs.get('autoBackupInterval', DEFAULT_INTERVAL_MIN)) || DEFAULT_INTERVAL_MIN); }
 export function keepCount() { return Math.max(1, Number(prefs.get('autoBackupKeep', DEFAULT_KEEP)) || DEFAULT_KEEP); }
 export function lastBackup() { return prefs.get('sync.last', null); }
 export function folderName() { return mode() === 'cloud' ? drive?.backups.folderName || '' : dir?.name || ''; }
@@ -84,6 +85,7 @@ let lastEdit = 0;      // 最後に書き換えた時刻
 let dirtySince = 0;    // 保存していない変更が始まった時刻（前回から残っている変更は 0：すぐ保存してよい）
 let running = false;
 let autoBuilder = null;
+let changeCheck = null; // 前に保存したときから中身が本当に変わったか（アプリが決める）
 let listener = () => {};
 let newerHandler = () => {};
 
@@ -97,9 +99,10 @@ export function isChecked() { return checked; }
 export function isDirty() { return dirty; }
 export function isRunning() { return running; }
 
-export async function init({ provider, makeAutoBackup = null }) {
+export async function init({ provider, makeAutoBackup = null, hasChanges = null }) {
   drive = provider || null;
   autoBuilder = makeAutoBackup;
+  changeCheck = hasChanges;
   setInterval(tick, CHECK_MS);
   await refresh();
 }
@@ -370,7 +373,15 @@ async function backupOnce({ force = false, build = null, auto = false } = {}) {
   listener();
   let made = null;
   const startedAt = Date.now();
+  // 中身が変わっていなければ保存しない（空白を入れて消しただけなど）。変更の印も消す
+  const nothing = () => {
+    dirty = lastEdit > startedAt;
+    dirtySince = dirty ? lastEdit : 0;
+    prefs.set('sync.dirty', dirty);
+    return false;
+  };
   try {
+    if (auto && !build && changeCheck && !(await changeCheck())) return nothing();
     // 保存する前に、他の端末がもっと新しいバックアップを保存していないか確かめる（両方の端末を開いたまま書いているとき）。
     // あれば保存せず、アプリに知らせて確認してもらう（先に保存すると、他の端末の更新が隠れてしまうため）
     if (!force && await findNewer()) {
@@ -380,6 +391,7 @@ async function backupOnce({ force = false, build = null, auto = false } = {}) {
       return false;
     }
     made = build ? await build() : autoBuilder ? await autoBuilder() : await makeArchive({ environment: true, scope: 'all', reason: 'auto', device: { prefix: prefix(), id: deviceId() } });
+    if (!made) return nothing(); // 入れるものがなかった
     const text = made.blob || made.text; // パックは Blob（大きくても一つの文字列にしない）
     const name = made.name || `${prefix()}${stamp()}.ayabackup`;
     try {
@@ -474,20 +486,13 @@ export function savePack(name, text) {
 let resultHandler = () => {};
 export function onBackupResult(fn) { resultHandler = fn || (() => {}); }
 
-// 一定時間ごとに確認し、変更があれば次のどちらかで保存する。
-//   1. 入力が IDLE_SAVE_MS（5分）止まったとき
-//   2. 書き続けているとき：最初の変更から保存間隔の分だけ待ち、入力が IDLE_MS 止まった区切りで（止まらなくても IDLE_MAX_MS を超えたら保存する）
+// 一定時間ごとに確認し、変更の印があって、入力が「入力が止まってから」の分（既定30分）止まっていれば保存する。
+// 前回の起動から残っていた変更（閉じたときの保存が途中で切れたなど）は、起動時の確認が済んだらすぐ
 function tick() {
   if (state !== 'on' || !checked || !dirty) return;
   const now = Date.now();
   if (now - lastRun < LEAVE_MIN_MS) return;
-  // 1. 入力が5分止まった（前回の起動から残っていた変更は、起動時の確認が済んだらすぐ）
-  if (now - lastEdit >= IDLE_SAVE_MS) { backupNow({ auto: true }); return; }
-  // 2. 書き続けているとき：「保存間隔」ごと（入力が少し止まった区切りで。止まらなくても長くは待たない）
-  const interval = intervalMin() * 60_000;
-  if (now - lastRun < interval || now - dirtySince < interval) return;
-  if (now - lastEdit < IDLE_MS && now - dirtySince < interval + IDLE_MAX_MS) return;
-  backupNow({ auto: true });
+  if (now - lastEdit >= intervalMin() * 60_000) backupNow({ auto: true });
 }
 
 // 画面を閉じる・切り替えるときに呼ぶ。未保存の変更があれば保存する

@@ -109,7 +109,7 @@
     <div class="brand"><img src="images/manual/header-icon.png" alt=""><strong>あや綴り</strong></div>
     <h1>あや綴り マニュアル</h1>
     <p>作品・章・エピソードの管理から、投稿サイト別の原稿と稿、伏線、TXT インポート、バックアップ、設定までをまとめています。画面の画像は、説明用の架空の作品です。</p>
-    <div class="meta"><span>バージョン 0.90</span><span>2026年11月18日</span><a href="https://tri-ton-novel.github.io/novel-editor/">アプリを開く</a><a href="https://github.com/Tri-TON-NOVEL/novel-editor">GitHub</a></div>
+    <div class="meta"><span>バージョン 0.91</span><span>2026年11月18日</span><a href="https://tri-ton-novel.github.io/novel-editor/">アプリを開く</a><a href="https://github.com/Tri-TON-NOVEL/novel-editor">GitHub</a></div>
   </header>
 
   <div class="layout">
@@ -379,7 +379,7 @@
             <tr><td>自動保存</td><td>端末の中</td><td>書いた内容を、入力が止まると自動で保存します。上のバーに「端末に保存済み」と出ます。</td></tr>
             <tr><td>変更履歴と復元ポイント</td><td>端末の中</td><td>作品全体の過去の状態を残し、そこへ戻せます。</td></tr>
             <tr><td>編集エピソード保存</td><td>端末の外</td><td>今のエピソードを、自動バックアップの保存先へすぐに保存します（<kbd>Ctrl</kbd>+<kbd>S</kbd>／<kbd>⌘</kbd>+<kbd>S</kbd>）。</td></tr>
-            <tr><td>サーバへの自動バックアップ</td><td>端末の外</td><td>決めた間隔で、端末の外へ保存します。ほかの端末との受け渡しにも使います。</td></tr>
+            <tr><td>サーバへの自動バックアップ</td><td>端末の外</td><td>画面を離れるときと、入力がしばらく止まったときに、中身が変わったエピソードを端末の外へ保存します。ほかの端末との受け渡しにも使います。</td></tr>
             <tr><td>「ファイル」→「保存…」</td><td>好きな場所</td><td>選んだ内容を1つのファイルにして、好きな場所に保存します（<a href="#files">ファイル</a>）。</td></tr>
           </tbody>
         </table>
@@ -389,7 +389,7 @@
           <li>クラウドを使うときは、先に「設定」→「クラウド」でクラウドを選び、ログインします（<a href="#cloud">クラウドの準備</a>）。</li>
           <li>「設定」→「バックアップ」の「保存先（この端末）」で、「フォルダ」か「クラウド」を選びます。</li>
           <li>「フォルダを選ぶ…」で、保存するフォルダを選ぶか作ります。選んだフォルダに直接保存します。</li>
-          <li>「ファイル名の先頭（プレフィックス）」「保存間隔」「残す件数」を決めます。</li>
+          <li>「ファイル名の先頭（プレフィックス）」「入力が止まってから」「残す件数」を決めます。</li>
         </ol>
         <table>
           <thead><tr><th>保存先</th><th>使える端末</th></tr></thead>
@@ -399,7 +399,9 @@
           </tbody>
         </table>
         <ul>
-          <li>変更があるときだけ、入力が5分止まったとき・書き続けているときは保存間隔ごと・画面を閉じるときに保存します。</li>
+          <li>保存するのは、画面を離れるとき（別のアプリに切り替える・閉じる）と、入力が「入力が止まってから」の時間（はじめは30分）止まったときです。</li>
+          <li>中身が本当に変わったときだけ保存します。空白を入れて消しただけなど、前に保存したときと同じ中身なら保存しません。</li>
+          <li>入るのは、前に保存したときから中身が変わったエピソードです（開いているエピソードではありません）。作品資料も、変わっていれば一緒に入ります。</li>
           <li>残す件数を超えると、この端末が作った古いものから消えます。ほかの端末のものは消しません。</li>
           <li>ファイル名は「内容_日時」の形で、自動バックアップには端末名（例：<code>@Win_</code>）が付きます。</li>
         </ul>
@@ -719,7 +721,7 @@
     </main>
   </div>
 
-  <footer>あや綴り マニュアル　バージョン 0.90</footer>
+  <footer>あや綴り マニュアル　バージョン 0.91</footer>
   <dialog id="lightbox" aria-label="画像の拡大表示"><form method="dialog"><button type="submit">閉じる</button></form><img src="" alt=""></dialog>
   <script>
     const lightbox = document.querySelector('#lightbox');

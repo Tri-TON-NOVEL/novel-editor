@@ -8,7 +8,7 @@ import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from 
 import {
   requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
-  packFileName, describePack, packSummary, materialsSignature, environmentSignature,
+  packFileName, describePack, packSummary, materialsSignature, episodeSignature, environmentSignature,
   // 前の版の .json バックアップ（全体・バックアップパック）を読むためのもの
   fileFormat, isBackup, isPack, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName,
   parseAnyBackup, parseBackupHead, packFromHead, restorePack, PACK_FORMAT,
@@ -39,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.18-0.90';
+const APP_VERSION = '2026.11.18-0.91';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -3043,7 +3043,55 @@ function currentSyncTarget() {
   return [{ workId: project.workId, episodeIds: [episode().id] }];
 }
 
-async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
+// ---------- 自動バックアップに入れるエピソード（0.91） ----------
+// 前に自動バックアップへ送ったときの、エピソードごとの中身の印：prefs 'sync.cloudSent' = { [workId]: { [エピソードの id]: 印 } }
+// 印は中身だけから作る（更新日時などは含めない）ので、空白を入れて消しただけなら変わらない
+function cloudSent() {
+  const s = prefs.get('sync.cloudSent', null);
+  return s && typeof s === 'object' ? s : {};
+}
+
+// 前に送ったときから中身が変わったエピソードと作品資料：[{ p, episodeIds, materials, sigs }]
+function cloudChanges(projects) {
+  const sent = cloudSent();
+  const matSent = prefs.get('sync.materialsSent', {}) || {};
+  const lastAt = Date.parse(sync.lastBackup()?.at || '') || 0;
+  let seeded = false;
+  const out = [];
+  for (const p of projects) {
+    let rec = sent[p.workId];
+    if (!rec) {
+      // 0.90 までは記録がない：最後の自動バックアップより前に書き換えたエピソードは送り済みとみなす
+      rec = sent[p.workId] = {};
+      for (const ep of p.episodes) if ((Date.parse(ep.updatedAt || '') || 0) <= lastAt) rec[ep.id] = episodeSignature(ep);
+      seeded = true;
+    }
+    const sigs = {};
+    for (const ep of p.episodes) {
+      const sig = episodeSignature(ep);
+      if (rec[ep.id] !== sig) sigs[ep.id] = sig;
+    }
+    const materials = matSent[p.workId] !== materialsSignature(p);
+    if (materials || Object.keys(sigs).length) out.push({ p, episodeIds: Object.keys(sigs), materials, sigs });
+  }
+  if (seeded) prefs.set('sync.cloudSent', sent);
+  return out;
+}
+
+// 自動バックアップの前に呼ぶ：中身が本当に変わったか
+async function cloudHasChanges() {
+  await flush();
+  const projects = await allProjects();
+  const saved = savedSyncTargets();
+  const changes = cloudChanges(projects);
+  if (!saved.length) return changes.length > 0;
+  // 対象のエピソードを選んでいるとき：対象の中身か、その作品の資料が変わったか
+  return changes.some((c) => c.materials && saved.some((t) => t.workId === c.p.workId)
+    || c.episodeIds.some((id) => saved.some((t) => t.workId === c.p.workId && (t.episodeIds || []).includes(id))));
+}
+
+// onlyChanged：自動バックアップ。変わったエピソードだけを入れ、何も変わっていなければ null（保存しない）
+async function buildEpisodeBackup(reason = 'auto-episode', targets = null, { onlyChanged = false } = {}) {
   // 表示中の稿は編集中の内容を稿ストアへ確定してからパックする。
   await flush();
   for (const site of SITE_KEYS) {
@@ -3052,22 +3100,39 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null) {
   }
   await flush();
   const projects = await allProjects();
-  const chosen = targets?.length ? targets : savedSyncTargets().length ? savedSyncTargets() : currentSyncTarget();
+  // 入れるエピソード：指定があればそれ、「対象のエピソード」を選んでいればそれ、なければ前に送ったときから中身が変わったもの
+  // （0.90 までは開いているエピソードだった。変わったものがなく、自動でないとき（この端末の記録を最新にする）は開いているエピソード）
+  const changes = cloudChanges(projects);
+  let chosen = targets?.length ? targets : savedSyncTargets();
+  if (!chosen.length) {
+    chosen = changes.filter((c) => c.episodeIds.length || c.materials).map((c) => ({ workId: c.p.workId, episodeIds: c.episodeIds }));
+    if (!chosen.length) {
+      if (onlyChanged) return null;
+      chosen = currentSyncTarget();
+    }
+  }
   // 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）は、前に送ったときから変わっていれば一緒に入れる
   const sent = prefs.get('sync.materialsSent', {}) || {};
   const nowSigs = {};
+  const epSigs = {}; // 入れたエピソードの、今の中身の印（保存できたら「送った」と記録する）
   const planTargets = chosen.map((t) => {
     const p = projects.find((x) => x.workId === t.workId || x.id === t.projectId);
     if (!p) return null;
     const sig = materialsSignature(p);
     const materials = sent[p.workId] !== sig && !(p.workId in nowSigs);
     if (materials) nowSigs[p.workId] = sig;
-    return { projectId: p.id, episodeIds: t.episodeIds || [], materials };
-  }).filter(Boolean);
+    const ids = (t.episodeIds || []).filter((id) => p.episodes.some((e) => e.id === id));
+    for (const id of ids) (epSigs[p.workId] ||= {})[id] = episodeSignature(p.episodes.find((e) => e.id === id));
+    return { projectId: p.id, episodeIds: ids, materials };
+  }).filter((t) => t && (t.episodeIds.length || t.materials));
+  if (!planTargets.length) return onlyChanged ? null : buildEpisodeBackup(reason, currentSyncTarget());
   const made = await makeArchive({ scope: 'targets', targets: planTargets, reason, appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
   // 保存できたときだけ「送った」と記録する（失敗したら次の保存でもう一度入れる）
   made.afterSave = () => {
     prefs.set('sync.materialsSent', { ...(prefs.get('sync.materialsSent', {}) || {}), ...nowSigs });
+    const s = cloudSent();
+    for (const [workId, sigs] of Object.entries(epSigs)) s[workId] = { ...(s[workId] || {}), ...sigs };
+    prefs.set('sync.cloudSent', s);
     recordSaved(made.pack, projects); // バックアップパック・「ファイル」の保存の「変更あり」から外す
   };
   // 共有フォルダに置くので、どの端末のものか分かるよう端末名を付ける（例：小説話_作品名_第3話@Win_20261030-073000.json）
@@ -3455,7 +3520,7 @@ function renderSyncState() {
       : st === 'need-permission' ? `⚠ 「${sync.folderName()}」への書き込みの許可が切れています。上の「自動バックアップを再開」を押してください。`
         : st === 'need-login' ? `⚠ ${cloudLabel}へのログインが必要です。上のボタン（または下の「${cloudLabel}にログイン」）を押してください。`
           : syncPending ? '⚠ 他の端末で新しいバックアップが保存されています。上の「他の端末の更新を確認」を押してください（それまで自動バックアップは止まります）。'
-            : `「${sync.folderName()}」に、${sync.intervalMin()}分ごと（変更があるときだけ）・閉じるときに保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
+            : `「${sync.folderName()}」に、画面を離れるときと、入力が${sync.intervalMin()}分止まったときに（中身が変わったときだけ）保存しています。この端末の分は最新${sync.keepCount()}件まで残します。`;
   $('sync-status').textContent = text + lastText + err;
   // 保存先が使えないときは一覧を出せない（ほかの場所のファイルは「ファイル」→「開く…」で開ける）
   $('sync-manage').disabled = st !== 'on';
@@ -3701,7 +3766,7 @@ async function openSyncRestore(mode = 'restore', { notice = null } = {}) {
   };
   keep.onclick = async () => {
     const ok = await runTask('backup', async () => {
-      const ok = await sync.backupNow({ force: true });
+      const ok = await sync.backupNow({ force: true, build: () => buildEpisodeBackup('auto-episode') });
       if (!ok) throw new Error('保存できませんでした：' + (sync.getError() || '原因不明'));
       return true;
     }, { button: keep, dialog, closeOnSuccess: false, done: 'バックアップを作成しました\nこの端末の記録が最新になります' });
@@ -6166,7 +6231,11 @@ async function init() {
     if (r.ok) toast(`自動バックアップ完了：${r.label || 'バックアップ'}\n保存先：${where}`);
     else toast(`自動バックアップに失敗しました：${r.error || '原因不明'}\n保存先：${where}`, true);
   });
-  await sync.init({ provider: drive, makeAutoBackup: () => buildEpisodeBackup('auto-episode') }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
+  await sync.init({
+    provider: drive,
+    makeAutoBackup: () => buildEpisodeBackup('auto-episode', null, { onlyChanged: true }),
+    hasChanges: cloudHasChanges,
+  }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
   renderSyncState();
   let login = null;
   for (const cp of providers) {

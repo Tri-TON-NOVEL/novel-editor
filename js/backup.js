@@ -707,6 +707,13 @@ export function materialsSignature(p) {
   return signatureOf(JSON.stringify(rest));
 }
 
+// エピソードの中身が変わったかを見分ける印（自動バックアップに入れるかを決める。0.91）。
+// 日時と、開いただけで付く稿の番号（editionIds）は含めない。空白を入れて消しただけなら同じ印になる
+export function episodeSignature(ep) {
+  const { createdAt, updatedAt, siteUpdatedAt, editionIds, versionId, ...rest } = ep || {};
+  return signatureOf(JSON.stringify(rest));
+}
+
 // 環境設定が前に保存したときから変わったかを見るための印（バックアップパックの初期表示用）。
 // 開いていたエピソード・最後に開いたフォルダなど、使っているだけで変わる記録は除く
 const ENV_NOISE = /^(ep:|seeded:)|lastFolder$/;

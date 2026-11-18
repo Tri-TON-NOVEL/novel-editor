@@ -20,7 +20,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
-- **バージョン**：0.90（`2026.11.18-0.90`）
+- **バージョン**：0.91（`2026.11.18-0.91`）
 - **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
 - **マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/manual.html](https://tri-ton-novel.github.io/novel-editor/docs/manual.html)
 
@@ -95,7 +95,7 @@ TXTをZIPのまま選ぶこともできます。ZIPを選ぶと中のTXTが一�
 
 最新状態は常にブラウザー内へ保存されます。
 
-さらに、端末内の変更履歴と復元ポイント、Google Drive・OneDrive・端末フォルダーなどへの自動バックアップを利用できます。
+さらに、端末内の変更履歴と復元ポイント、Google Drive・OneDrive・端末フォルダーなどへの自動バックアップを利用できます。自動バックアップは、画面を離れるときと入力がしばらく止まったときに、中身が変わったエピソードだけを保存します。
 
 ### 10. エピソードごとの活動報告まで管理できる
 
