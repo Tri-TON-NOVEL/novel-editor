@@ -39,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.18-0.93';
+const APP_VERSION = '2026.11.19-0.94';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2426,9 +2426,14 @@ async function runSiteCopy() {
 // 確認の画面：コピー元とコピー先の画像を、前後の文といっしょに並べる。「対応を直す…」で組み合わせを選び直せる。
 // コピー先の画像タグはすべてそのまま残り、文章だけが入れ替わる。
 // 戻り値：Map（項目 → コピー元の画像ごとのコピー先の番号）。キャンセルなら null
-function imageMatchDialog(items, from, to) {
+// opts（0.94。TXT インポートでも使う）：title 画面の見出し、src・dst 左右の見出し、srcNote 組まなかったコピー元の画像の扱い
+function imageMatchDialog(items, from, to, opts = {}) {
   const dlg = $('image-match-dialog');
   const label = Object.fromEntries(COPY_FIELDS);
+  const srcName = opts.src || `${SITES[from].short}（コピー元）`;
+  const dstName = opts.dst || `${SITES[to].short}（コピー先）`;
+  const srcNote = opts.srcNote || 'コピー元の画像を変換して入れます';
+  dlg.querySelector('h2').textContent = opts.title || '画像の対応';
   const state = items.map((it) => {
     const sc = imageSlots(it.src).map((s) => contextOf(it.src, s));
     const dc = imageSlots(it.dest).map((d) => contextOf(it.dest, d));
@@ -2455,10 +2460,10 @@ function imageMatchDialog(items, from, to) {
       const sec = mk('section', 'imgm-field');
       if (state.length > 1 || st.f !== 'body') sec.append(mk('h3', '', label[st.f]));
       const differ = st.sc.length !== st.dc.length;
-      const head = `${SITES[from].short}（コピー元）${st.sc.length}枚　${SITES[to].short}（コピー先）${st.dc.length}枚`;
+      const head = `${srcName} ${st.sc.length}枚　${dstName} ${st.dc.length}枚`;
       sec.append(mk('p', 'imgm-count' + (differ ? ' warn' : ''), differ ? `⚠ ${head}` : head));
       const grid = mk('div', 'imgm-grid');
-      grid.append(mk('div', 'imgm-col', `${SITES[from].short}（コピー元）`), mk('div', 'imgm-col', `${SITES[to].short}（コピー先）`));
+      grid.append(mk('div', 'imgm-col', srcName), mk('div', 'imgm-col', dstName));
       st.sc.forEach((c, k) => {
         const j = st.map[k];
         const weak = j >= 0 && pairScore(c, st.dc[j]) < PAIR_WEAK;
@@ -2480,7 +2485,7 @@ function imageMatchDialog(items, from, to) {
         } else if (j >= 0) {
           right.append(mk('div', 'imgm-no', `${j + 1}枚目`), ctxView(st.dc[j]), mk('div', 'imgm-note', 'このタグのまま入れます'));
         } else {
-          right.append(mk('div', 'imgm-no', '対応なし'), mk('div', 'imgm-note', 'コピー元の画像を変換して入れます'));
+          right.append(mk('div', 'imgm-no', '対応なし'), mk('div', 'imgm-note', srcNote));
         }
         grid.append(left, right);
       });
@@ -4090,6 +4095,7 @@ const importScreen = initImport({
   flush: () => flush(),
   switchTo: (p) => switchTo(p),
   importAsNewEdition: (p, ep, site, draft) => importAsNewEdition(p, ep, site, draft),
+  imageMatchDialog: (items, site, opts) => imageMatchDialog(items, site, site, opts), // 0.94：取り込む話の画像の対応
   closeSettings: () => $('settings-dialog').close(),
   withBusy,
   returnToEditor,

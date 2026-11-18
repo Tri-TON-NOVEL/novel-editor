@@ -4,6 +4,7 @@
 import * as I from './importer.js';
 import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS } from './format.js';
 import { SITES, countImages } from './notation.js';
+import { imageSlots, contextOf, suggestPairs, pairScore, applyImageMap, PAIR_WEAK } from './imagematch.js';
 import { ask, askText } from './dialogs.js';
 import { listZipTextEntries, extractZipEntry, ZipError } from './zip.js';
 
@@ -1105,10 +1106,108 @@ export function initImport(ctx) {
 
   // ---------- 確定 ----------
 
+  // ---------- 画像の対応（0.94） ----------
+  // 置き換える・新しい稿として追加で、取り込み先の話の原稿（取り込むサイト）に画像があるとき、
+  // TXT の画像と前後の文で組み合わせ、今の画像タグを残したまま文章だけを入れ替える。
+  // 枚数が同じで、どの組も前後の文が似ている話は自動。それ以外の話だけを「画像の確認」に出す。
+  // 戻り値：Map（行 → Map（項目 → 組み合わせ））。キャンセルは null
+  const IMAGE_FIELDS = ['body', 'foreword', 'afterword'];
+  function imageFieldsOf(row) {
+    const dest = pairTarget(row);
+    if (!dest || state.replacing) return [];
+    const out = [];
+    for (const f of IMAGE_FIELDS) {
+      if (f !== 'body' && !row.it[f]) continue; // TXT に前書き・後書きがなければ、今のものがそのまま残る
+      const destText = draftOf(dest, state.site)[f] || '';
+      if (!imageSlots(destText).length) continue;
+      const src = row.it[f] || '';
+      const sc = imageSlots(src).map((s) => contextOf(src, s));
+      const dc = imageSlots(destText).map((s) => contextOf(destText, s));
+      const map = suggestPairs(sc, dc);
+      const sure = sc.length === dc.length && map.every((j, k) => j >= 0 && pairScore(sc[k], dc[j]) >= PAIR_WEAK);
+      out.push({ f, src, dest: destText, sc, dc, map, sure });
+    }
+    return out;
+  }
+
+  async function planImages() {
+    const plans = new Map();
+    const unsure = [];
+    let auto = 0;
+    for (const row of state.rows) {
+      if (!row.include) continue;
+      const fields = imageFieldsOf(row);
+      if (!fields.length) continue;
+      plans.set(row, new Map(fields.map((x) => [x.f, x.map])));
+      if (fields.every((x) => x.sure)) auto++;
+      else unsure.push({ row, fields, checked: false });
+    }
+    if (!unsure.length) return { plans, auto };
+    const ok = await imageCheckList(unsure, plans, auto);
+    return ok ? { plans, auto } : null;
+  }
+
+  // 「画像の確認」：自動で決められなかった話の一覧。「確かめる…」で話ごとに組み合わせを見る・直す
+  function imageCheckList(unsure, plans, auto) {
+    const dlg = $('imp-image-dialog');
+    const fieldName = { body: '本文', foreword: '前書き', afterword: '後書き' };
+    const epName = (row) => {
+      const e = pairTarget(row);
+      const no = state.targetProject.episodes.indexOf(e) + 1;
+      return `第${no}話「${row.it.title || draftOf(e, state.site).title || '（無題）'}」`;
+    };
+    $('imp-image-info').textContent = `確かめる話 ${unsure.length}話${auto ? `（前後の文が同じ ${auto}話は、今の画像タグのまま自動で入れます）` : ''}`;
+    const render = () => {
+      const list = $('imp-image-list');
+      list.replaceChildren();
+      for (const u of unsure) {
+        const item = Object.assign(document.createElement('div'), { className: 'imp-image-item' });
+        const text = document.createElement('div');
+        text.append(Object.assign(document.createElement('b'), { textContent: epName(u.row) }));
+        const notes = u.fields.map((x) => {
+          const map = plans.get(u.row).get(x.f);
+          const weak = map.some((j, k) => j >= 0 && pairScore(x.sc[k], x.dc[j]) < PAIR_WEAK);
+          const why = x.sc.length !== x.dc.length ? '⚠ 枚数が違います' : weak || map.includes(-1) ? '⚠ 前後の文が違います' : '';
+          return `${fieldName[x.f]}：TXT ${x.sc.length}枚・今 ${x.dc.length}枚${why && !u.checked ? `　${why}` : ''}`;
+        });
+        for (const n of notes) text.append(Object.assign(document.createElement('small'), { textContent: n }));
+        const side = Object.assign(document.createElement('div'), { className: 'imp-image-side' });
+        if (u.checked) side.append(Object.assign(document.createElement('span'), { className: 'imp-image-done', textContent: '確認済み' }));
+        const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: '確かめる…' });
+        btn.addEventListener('click', async () => {
+          const maps = await ctx.imageMatchDialog(
+            u.fields.map((x) => ({ f: x.f, src: x.src, dest: x.dest })), state.site,
+            { title: `画像の対応：${epName(u.row)}`, src: 'TXT', dst: '今の原稿', srcNote: 'TXT の画像をそのまま入れます' },
+          );
+          if (!maps) return;
+          for (const [f, map] of maps) plans.get(u.row).set(f, map);
+          u.checked = true;
+          render();
+        });
+        side.append(btn);
+        item.append(text, side);
+        list.append(item);
+      }
+    };
+    return new Promise((resolve) => {
+      let result = false;
+      const ac = new AbortController();
+      const opt = { signal: ac.signal };
+      $('imp-image-ok').addEventListener('click', () => { result = true; dlg.close(); }, opt);
+      $('imp-image-cancel').addEventListener('click', () => dlg.close(), opt);
+      dlg.addEventListener('close', () => { ac.abort(); resolve(result); }, opt);
+      render();
+      dlg.showModal();
+    });
+  }
+
   async function commit() {
     const c = counts();
     if (!(c.add + c.pair + c.overwrite + c.edition)) return;
     const target = state.targetProject;
+    // 取り込み先の画像との対応（自動で決められない話だけ、先に確かめてもらう）
+    const images = target ? await planImages() : { plans: new Map(), auto: 0 };
+    if (!images) return;
     const title = (state.workTitle || '').trim();
     const rename = target && title && title !== (target.title || '');
     const name = (rename ? `${target.title || '（無題）'}（作品名を「${title}」に変更）` : target ? target.title : title) || '（無題）';
@@ -1174,6 +1273,10 @@ export function initImport(ctx) {
           if (it.title) draft.title = it.title;
           if (it.foreword) draft.foreword = it.foreword;
           if (it.afterword) draft.afterword = it.afterword;
+          // 今の原稿にある画像タグは残し、文章だけを入れ替える（0.94）
+          for (const [f, map] of images.plans.get(row) || []) {
+            draft[f] = applyImageMap(state.site, state.site, it[f] || '', draftOf(dest, state.site)[f] || '', map).text;
+          }
           if (asEdition(row)) {
             // 新しい稿として追加：今の稿は今の内容のまま残し、取り込んだ内容を次の番号の稿にする
             await ctx.importAsNewEdition(p, dest, state.site, draft);
