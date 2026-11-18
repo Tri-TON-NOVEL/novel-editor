@@ -893,6 +893,19 @@
   </div>
 </dialog>
 
+<dialog id="imp-pair-dialog" class="wide-dialog" aria-labelledby="imp-pair-title">
+  <form method="dialog" class="dialog imp-pair">
+    <h2 id="imp-pair-title">取り込み先を指定</h2>
+    <div id="imp-pair-src" class="imp-pair-src"></div>
+    <input type="search" id="imp-pair-search" placeholder="タイトルで絞り込み" autocomplete="off">
+    <div id="imp-pair-list" class="imp-pair-list" role="radiogroup" aria-label="取り込み先のエピソード"></div>
+    <div class="dialog-foot">
+      <button type="button" id="imp-pair-cancel">キャンセル</button>
+      <button type="button" id="imp-pair-ok" class="primary">指定する</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="import-narou-help-dialog" class="wide-dialog" aria-labelledby="import-narou-help-title">
   <form method="dialog" class="dialog import-rules-help">
     <h2 id="import-narou-help-title">書式あり（なろう系）：区切りルールの説明</h2>

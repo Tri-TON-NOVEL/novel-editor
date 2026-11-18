@@ -39,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.18-0.91';
+const APP_VERSION = '2026.11.18-0.93';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -2165,12 +2165,14 @@ async function restoreInspected(asNew = false, btn = null) {
   // 復元が済んでから画面を閉じる。失敗したら画面は開いたまま、理由を出す
   const result = await runTask('restore', async () => {
     await flush();
+    const keep = await unsentSnapshot();
     if (!asNew) await protectBeforeRestore(inspectedBackup.pack, selected, inspectedBackup.name);
     // 環境（表示・投稿サイト・リンク・ひな型など）を選んだときは、バックアップの設定にする。
     // 「まとめる」では、この端末ですでに決まっている設定（表示など）が変わらなかった。クライアントIDとログインは変えない
     const restored = inspectedBackup.archive
       ? await restoreArchive(inspectedBackup.archive, { selected, asNew, environmentMode: 'replace' })
       : await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'replace' });
+    await markRestoredAsSent(keep);
     if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
     // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
     // これ以降に作成されたバックアップだけを、次回から「他の端末の更新」として通知する。
@@ -2989,10 +2991,13 @@ async function runRestore(mode) {
   const backup = pendingBackup;
   const loadedName = pendingBackupName;
   const acknowledge = pendingBackupAcknowledge;
+  let keep = null;
   const before = await withBusy('復元中…', async () => {
     await flush();
+    keep = await unsentSnapshot();
     const current = new Set((await db.all()).map((p) => p.id));
     await restoreBackup(backup, mode);
+    await markRestoredAsSent(keep);
     return current;
   });
   pendingBackup = null;
@@ -3000,7 +3005,7 @@ async function runRestore(mode) {
   pendingBackupAcknowledge = null;
   if (loadedName && sync.parseName(loadedName)) sync.markLoaded(loadedName);
   if (acknowledge) sync.markChecked(acknowledge);
-  sync.markDirty(); // 戻した内容を、次の自動バックアップに入れる
+  // 戻した内容は送り済みとして記録した（markRestoredAsSent）。このあと書き換えたときだけ自動バックアップする
   const items = (backup.projects || []).filter((p) => p?.id).map((p) => ({ id: p.id, title: p.title || '無題' }));
   if (mode === 'replace') {
     // 入れ替え：この端末の作品はすべてバックアップの内容になった
@@ -3076,6 +3081,32 @@ function cloudChanges(projects) {
   }
   if (seeded) prefs.set('sync.cloudSent', sent);
   return out;
+}
+
+// 読み込み・復元の前に呼ぶ：まだ自動バックアップへ送っていない、この端末の変更を覚えておく（0.92）
+async function unsentSnapshot() {
+  const keep = new Map(); // workId → { eps: Map(エピソードの id → 印), mat: 作品資料の印 | null }
+  for (const c of cloudChanges(await allProjects())) keep.set(c.p.workId, { eps: new Map(Object.entries(c.sigs)), mat: c.materials ? materialsSignature(c.p) : null });
+  return keep;
+}
+
+// 読み込み・復元のあと：読み込んだ内容はバックアップにあるものなので、送り済みとして記録する（すぐに自動バックアップしない）。
+// 読み込みで変わらなかった、この端末のまだ送っていない変更は、そのまま次の自動バックアップに入れる
+async function markRestoredAsSent(keep) {
+  const sent = cloudSent();
+  const mat = { ...(prefs.get('sync.materialsSent', {}) || {}) };
+  for (const p of await allProjects()) {
+    const k = keep?.get(p.workId);
+    const rec = sent[p.workId] || (sent[p.workId] = {});
+    for (const ep of p.episodes) {
+      const sig = episodeSignature(ep);
+      if (k?.eps.get(ep.id) !== sig) rec[ep.id] = sig;
+    }
+    const ms = materialsSignature(p);
+    if (!(k?.mat && k.mat === ms)) mat[p.workId] = ms;
+  }
+  prefs.set('sync.cloudSent', sent);
+  prefs.set('sync.materialsSent', mat);
 }
 
 // 自動バックアップの前に呼ぶ：中身が本当に変わったか
@@ -3624,6 +3655,7 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
   if (!src) { toast('読み込む小説を選んでください', true); return false; }
   await withBusy('復元中…', async () => {
     await flush();
+    const keep = await unsentSnapshot();
     // ひな型・リンク・アカウントなどの設定も、この端末の設定を消さずにまとめる
     mergeSharedPrefs(backup.prefs);
     renderTemplateSelects();
@@ -3652,6 +3684,7 @@ async function loadBackupAs(text, name, { newest = null } = {}) {
       await switchTo(p);
     }
     syncPending = null;
+    await markRestoredAsSent(keep);
     sync.markLoaded(name);
     if (newest && newest.name !== name) sync.markChecked(newest);
   });

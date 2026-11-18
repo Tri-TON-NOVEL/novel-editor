@@ -14,6 +14,9 @@ const KINDS = [
 ];
 const MARK_LABEL = { episode: '話', chapter: '章' };
 const clone = (x) => structuredClone(x);
+// 中身のない話（どの投稿先の原稿も、プロット・フリーメモ・活動報告も空）
+const isBlankEpisode = (e) => !e.plot && !e.freeMemo && !Object.values(e.report || {}).some(Boolean)
+  && SITE_KEYS.every((s) => ['title', 'foreword', 'body', 'afterword'].every((f) => !draftOf(e, s)[f]));
 
 /**
  * @param ctx {
@@ -823,6 +826,7 @@ export function initImport(ctx) {
       filter.value = state.actionFilter || 'all';
       filter.addEventListener('change', () => {
         state.actionFilter = filter.value;
+        clearKeep();
         applyActionFilter();
       });
       filterLabel.append(filter);
@@ -830,7 +834,7 @@ export function initImport(ctx) {
       // 対にならなかった話（と、似たタイトルで対にした話）だけを出す（0.70。どれが対応していないかを一目で見る）
       const onlyLabel = Object.assign(document.createElement('label'), { className: 'check imp-unpaired-only' });
       const only = Object.assign(document.createElement('input'), { type: 'checkbox', id: 'imp-unpaired-only', checked: !!state.unpairedOnly });
-      only.addEventListener('change', () => { state.unpairedOnly = only.checked; applyActionFilter(); });
+      only.addEventListener('change', () => { state.unpairedOnly = only.checked; clearKeep(); applyActionFilter(); });
       const nUnpaired = state.rows.filter((r) => r.dup.kind !== 'title' && r.dup.kind !== 'same').length;
       onlyLabel.append(only, ` 対になっていない話だけ表示（${nUnpaired}話。似たタイトルで対にした話も含む）`);
       sum.append(onlyLabel);
@@ -923,22 +927,40 @@ export function initImport(ctx) {
         if (dup.target) opts.unshift(['overwrite', pairLabel(dup.target)]);
         for (const [v, t] of opts) act.append(new Option(t, v));
         act.value = row.action;
-        const pick = document.createElement('select');
-        pick.setAttribute('aria-label', '取り込み先のエピソード');
-        for (const e of target.episodes) pick.append(new Option(targetEpName(e.id), e.id));
-        pick.value = row.target || target.episodes[0]?.id || '';
-        pick.hidden = row.action !== 'manual';
-        act.addEventListener('change', () => {
-          row.action = act.value;
-          r.dataset.action = row.action;
-          relCell.className = relClass(row.action);
-          pick.hidden = row.action !== 'manual';
-          if (row.action === 'manual') row.target = pick.value;
-          if (row.action === 'overwrite') row.target = dup.target;
+        // 取り込み先を指定：別の画面でエピソードを選ぶ（0.93）。選んだ先は扱いの下に出し、「変える…」で選び直せる
+        const picked = Object.assign(document.createElement('div'), { className: 'imp-picked' });
+        const pickedName = document.createElement('span');
+        const change = Object.assign(document.createElement('button'), { type: 'button', className: 'tool', textContent: '変える…' });
+        picked.append(pickedName, change);
+        const showPicked = () => {
+          picked.hidden = row.action !== 'manual';
+          pickedName.textContent = row.action === 'manual' ? `→ ${targetEpName(row.target)}` : '';
+        };
+        const setAction = (v) => {
+          row.action = v;
+          act.value = v;
+          r.dataset.action = v;
+          r.dataset.keep = '1'; // 扱いを変えた行は、絞り込みを選び直すまで出したままにする
+          relCell.className = relClass(v);
+          if (v === 'overwrite') row.target = dup.target;
+          showPicked();
           updateCommitSummary();
+        };
+        const choosePair = async () => {
+          const id = await pickTargetEpisode(row, targetEpName);
+          if (!id) return false;
+          row.target = id;
+          setAction('manual');
+          return true;
+        };
+        act.addEventListener('change', async () => {
+          if (act.value !== 'manual') { setAction(act.value); return; }
+          act.value = row.action; // 選ぶまでは元の扱いのまま
+          await choosePair();
         });
-        pick.addEventListener('change', () => { row.target = pick.value; updateCommitSummary(); });
-        cell.append(act, pick);
+        change.addEventListener('click', () => { choosePair(); });
+        showPicked();
+        cell.append(act, picked);
       }
       tbody.append(r);
     });
@@ -946,14 +968,82 @@ export function initImport(ctx) {
     updateCommitSummary();
   }
 
+  // 「取り込み先を指定…」の画面。TXT の話と、取り込み先の作品のエピソードの一覧を出して一つ選ぶ。戻り値：エピソードの id（キャンセルは null）
+  function pickTargetEpisode(row, targetEpName) {
+    const target = state.targetProject;
+    const dlg = $('imp-pair-dialog');
+    const other = SITE_KEYS.find((s) => s !== state.site);
+    const { it } = row;
+    const head = (s) => [...(s || '').replace(/\s+/g, ' ').trim()].slice(0, 60).join('');
+    // ほかの行ですでに取り込み先にしているエピソード
+    const usedBy = new Map();
+    state.rows.forEach((x, n) => {
+      if (x !== row && x.include && (x.action === 'overwrite' || x.action === 'manual') && x.target) usedBy.set(x.target, n + 1);
+    });
+    const src = $('imp-pair-src');
+    src.replaceChildren(
+      Object.assign(document.createElement('div'), { className: 'imp-pair-src-title', textContent: `${SITES[state.site].short}用：${it.title || '（タイトルなし）'}（${[...it.body].length.toLocaleString()}字）` }),
+      Object.assign(document.createElement('div'), { className: 'imp-pair-src-body', textContent: head(it.body) || '（本文なし）' }),
+    );
+    let chosen = row.action === 'manual' ? row.target : (row.dup.target || '');
+    const list = $('imp-pair-list');
+    const search = $('imp-pair-search');
+    search.value = '';
+    const render = () => {
+      const q = search.value.trim().toLowerCase();
+      list.replaceChildren();
+      target.episodes.forEach((e, n) => {
+        const mine = draftOf(e, state.site);
+        const theirs = draftOf(e, other);
+        const titles = [mine.title && `${SITES[state.site].short}：${mine.title}`, theirs.title && `${SITES[other].short}：${theirs.title}`].filter(Boolean).join('　') || '（無題）';
+        if (q && !titles.toLowerCase().includes(q)) return;
+        const label = Object.assign(document.createElement('label'), { className: 'imp-pair-item' + (e.id === chosen ? ' selected' : '') });
+        const radio = Object.assign(document.createElement('input'), { type: 'radio', name: 'imp-pair', value: e.id, checked: e.id === chosen });
+        radio.addEventListener('change', () => { chosen = e.id; render(); });
+        const text = document.createElement('span');
+        text.append(Object.assign(document.createElement('b'), { textContent: `第${n + 1}話　` }), titles);
+        const meta = [
+          `${SITES[other].short}用 ${[...(theirs.body || '')].length.toLocaleString()}字`,
+          `${SITES[state.site].short}用 ${mine.body ? `${[...mine.body].length.toLocaleString()}字（置き換え）` : 'なし'}`,
+          usedBy.has(e.id) ? `⚠ TXT の${usedBy.get(e.id)}話目の取り込み先` : '',
+        ].filter(Boolean).join('・');
+        text.append(Object.assign(document.createElement('small'), { textContent: meta }));
+        const peek = head(theirs.body || mine.body);
+        if (peek) text.append(Object.assign(document.createElement('small'), { className: 'imp-pair-peek', textContent: peek }));
+        label.append(radio, text);
+        list.append(label);
+      });
+      if (!list.children.length) list.append(Object.assign(document.createElement('p'), { className: 'hint', textContent: '見つかりません' }));
+      $('imp-pair-ok').disabled = !chosen;
+    };
+    return new Promise((resolve) => {
+      let result = null;
+      const ac = new AbortController();
+      const opt = { signal: ac.signal };
+      search.addEventListener('input', render, opt);
+      $('imp-pair-ok').addEventListener('click', () => { result = chosen || null; dlg.close(); }, opt);
+      $('imp-pair-cancel').addEventListener('click', () => dlg.close(), opt);
+      dlg.addEventListener('close', () => { ac.abort(); resolve(result); }, opt);
+      render();
+      dlg.showModal();
+      list.querySelector('.selected')?.scrollIntoView({ block: 'center' });
+    });
+  }
+
   // 既存との関係の文字色は「扱い」で決める（0.71）：上書き・取り込み先指定＝黒、スキップ＝灰色、新しい話として追加＝青、対応なし＝赤
   function relClass(action) {
     return { skip: 'rel-skip', add: 'rel-add', unmatched: 'rel-unmatched' }[action] || 'rel-overwrite';
   }
 
+  // 絞り込みを選び直したときは、扱いを変えた行も絞り込みに従わせる
+  function clearKeep() {
+    document.querySelectorAll('#imp-preview tbody tr[data-keep]').forEach((row) => { delete row.dataset.keep; });
+  }
+
   function applyActionFilter() {
     const wanted = state.actionFilter || 'all';
     document.querySelectorAll('#imp-preview tbody tr').forEach((row) => {
+      if (row.dataset.keep) return; // 扱いを変えたばかりの行は消さない
       row.hidden = (wanted !== 'all' && row.dataset.action !== wanted) || (!!state.unpairedOnly && row.dataset.paired === 'yes');
     });
   }
@@ -1036,6 +1126,9 @@ export function initImport(ctx) {
       await ctx.flush();
       const now = new Date().toISOString();
       let p;
+      // 取り込み先が中身のない話だけの作品（無題の新しい作品など）なら、その空の話は取り込んだあと消す（0.92）。
+      // 置き換えなので、空の「無題」の話が紛れ込まないようにする
+      const blankIds = target && !state.replacing && target.episodes.every(isBlankEpisode) ? new Set(target.episodes.map((e) => e.id)) : null;
       if (target) {
         p = target; // 読み込み直した複製。保存するまで本物は変わらない
         // 取り込む前の状態を作品全体のバックアップ版に残す（取り消し用）
@@ -1096,6 +1189,7 @@ export function initImport(ctx) {
           p.episodes.push(ep);
         }
       }
+      if (blankIds && p.episodes.some((e) => !blankIds.has(e.id))) p.episodes = p.episodes.filter((e) => !blankIds.has(e.id) || !isBlankEpisode(e));
       if (!p.episodes.length) p.episodes.push(newEpisode());
       // 並びを「章の順 → 章の中の順 → 未分類」に揃える
       const pos = new Map(p.chapters.map((ch, i) => [ch.id, i]));

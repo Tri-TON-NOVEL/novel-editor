@@ -561,7 +561,7 @@ export function markLoaded(name) {
   const parsed = parseName(name || '');
   if (parsed) prefs.set('sync.last', { name, at: new Date(parsed.at).toISOString(), syncedAt: Date.now() });
   checked = true;
-  markDirty();
+  // 0.92：読み込んだだけでは変更の印を付けない（読み込んだ内容はバックアップにある。このあと書き換えたら保存する）
   listener();
 }
 

@@ -1389,3 +1389,19 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
   .imgm-col { display: none; }
   .imgm-grid > .imgm-cell:nth-child(even) { margin-bottom: 8px; }
 }
+
+/* 0.93：インポートの「取り込み先を指定」 */
+.imp-picked { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; }
+.imp-picked[hidden] { display: none; }
+.imp-pair { width: min(720px, calc(100vw - 24px)); }
+.imp-pair-src { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--hover); }
+.imp-pair-src-title { font-weight: 700; }
+.imp-pair-src-body { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
+#imp-pair-search { width: 100%; box-sizing: border-box; padding: 6px 10px; font-size: 16px; margin-bottom: 6px; }
+.imp-pair-list { max-height: min(50vh, 420px); overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
+.imp-pair-item { display: flex; gap: 8px; align-items: flex-start; padding: 6px 10px; border-bottom: 1px solid var(--border); cursor: pointer; }
+.imp-pair-item:last-child { border-bottom: 0; }
+.imp-pair-item.selected { background: var(--hover); }
+.imp-pair-item span { display: flex; flex-direction: column; min-width: 0; overflow-wrap: anywhere; }
+.imp-pair-item small { color: var(--muted); font-size: 12px; }
+.imp-pair-peek { opacity: .85; }
