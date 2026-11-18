@@ -1393,7 +1393,7 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 /* 0.93：インポートの「取り込み先を指定」 */
 .imp-picked { display: flex; gap: 6px; align-items: center; margin-top: 4px; font-size: 12px; }
 .imp-picked[hidden] { display: none; }
-.imp-pair { width: min(720px, calc(100vw - 24px)); }
+#imp-pair-dialog { width: min(720px, calc(100vw - 24px)); }
 .imp-pair-src { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--hover); }
 .imp-pair-src-title { font-weight: 700; }
 .imp-pair-src-body { font-size: 12px; color: var(--muted); overflow-wrap: anywhere; }
@@ -1407,7 +1407,7 @@ textarea.text-hl-on { background: transparent !important; position: relative; z-
 .imp-pair-peek { opacity: .85; }
 
 /* 0.94：インポートの「画像の確認」 */
-.imp-image { width: min(720px, calc(100vw - 24px)); }
+#imp-image-dialog { width: min(720px, calc(100vw - 24px)); }
 .imp-image-list { max-height: min(55vh, 460px); overflow: auto; border: 1px solid var(--border); border-radius: 8px; }
 .imp-image-item { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; border-bottom: 1px solid var(--border); }
 .imp-image-item:last-child { border-bottom: 0; }

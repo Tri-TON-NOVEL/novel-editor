@@ -39,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.19-0.94';
+const APP_VERSION = '2026.11.19-0.95';
 
 const el = {
   novelTitle: $('novel-title'),
