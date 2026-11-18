@@ -39,7 +39,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.18-0.89';
+const APP_VERSION = '2026.11.18-0.90';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -627,9 +627,9 @@ function episodeRow(i, sort, flat = false) {
   if (view === 'episode' && i === epIndex) b.classList.add('active');
   const item = Object.assign(document.createElement('li'), { className: 'ep-row' + (flat ? ' flat' : '') });
   item.append(b);
-  // 「⋯」（並べ替え・章の移動・削除）は、並び順が「ファイル順」で、検索していないときだけ出す
-  // （他の並びでは、見た目の上下とファイルの順が合わないため）
-  if (epSort.key === 'file' && !epSearch) item.append(episodeMenu(i));
+  // 「⋯」（並べ替え・章の移動・削除）はいつも出す（0.90）。
+  // 上へ・下へだけは、並び順が「ファイル順」で検索していないときに使える（他の並びでは見た目の上下とファイルの順が合わないため）
+  item.append(episodeMenu(i));
   return item;
 }
 
@@ -640,13 +640,15 @@ function episodeMenu(i) {
   const summary = Object.assign(document.createElement('summary'), { className: 'tool', textContent: '⋯' });
   summary.setAttribute('aria-label', `「${episodeName(ep)}」の操作`);
   const list = Object.assign(document.createElement('div'), { className: 'menu-list' });
-  const item = (text, act, className = '') => {
-    const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className });
+  const item = (text, act, className = '', disabled = false) => {
+    const btn = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className, disabled });
     Object.assign(btn.dataset, { epAct: act, epIndex: i });
     list.append(btn);
   };
-  item('↑ 上へ', 'up');
-  item('↓ 下へ', 'down');
+  const canMove = epSort.key === 'file' && !epSearch;
+  item('↑ 上へ', 'up', '', !canMove);
+  item('↓ 下へ', 'down', '', !canMove);
+  if (!canMove) for (const b of list.querySelectorAll('button')) b.title = epSearch ? '検索中は使えません' : '並び順が「ファイル順」のときに使えます';
   // 章の移動：章の数が多くても場所を取らないよう、プルダウンで選ぶ（選んだらすぐ移す）
   const sel = Object.assign(document.createElement('select'), { className: 'menu-select-input' });
   sel.setAttribute('aria-label', `「${episodeName(ep)}」を移す章`);
@@ -666,7 +668,6 @@ function episodeMenu(i) {
 
 function episodeAction(act, index, to) {
   closeMenus();
-  if (epSort.key !== 'file') { toast('並べ替え・章の移動・削除は、目次の並び順が「ファイル順」のときに使えます'); return; }
   if (act === 'up') moveEpisode(-1, index);
   else if (act === 'down') moveEpisode(1, index);
   else if (act === 'chapter') moveEpisodeToChapter(to, index);
