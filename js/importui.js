@@ -944,13 +944,12 @@ export function initImport(ctx) {
       .filter(([, n]) => n).map(([s, n]) => `${SITES[s].short}用の原稿（${n}話分）`).join('・');
   }
 
-  // カクヨムのバックアップの作品情報（キャッチコピー・タグ・目次の注意）。v4
+  // カクヨムのバックアップの作品情報（キャッチコピー・目次の注意）。v4。タグは管理しないので出さない（0.97）
   function renderKakuyomuInfo(sum, target) {
     const k = state.kakuyomu;
     const box = Object.assign(document.createElement('div'), { className: 'imp-info imp-kakuyomu' });
     const lines = [
       `キャッチコピー：${k.catchphrase || '（なし）'}`,
-      `タグ：${k.tags.length ? k.tags.join('・') : '（なし）'}`,
       ...k.info.map(([label, v]) => `${label}：${v}`),
     ];
     box.textContent = lines.join('\n');
@@ -965,10 +964,10 @@ export function initImport(ctx) {
       l.append(cb, ` ${text}`);
       sum.append(l);
     };
-    const hasInfo = !!(target && (target.kakuyomu?.catchphrase || target.kakuyomu?.tags?.length));
-    if (k.catchphrase || k.tags.length) {
+    const hasInfo = !!(target && target.kakuyomu?.catchphrase);
+    if (k.catchphrase) {
       state.kakuyomuInfo = state.kakuyomuInfo && (!hasInfo || state.replacing);
-      check(hasInfo ? 'キャッチコピー・タグを作品情報に入れる（今の内容は上書き）' : 'キャッチコピー・タグを作品情報に入れる', state.kakuyomuInfo, (v) => { state.kakuyomuInfo = v; });
+      check(hasInfo ? 'キャッチコピーを作品情報に入れる（今の内容は上書き）' : 'キャッチコピーを作品情報に入れる', state.kakuyomuInfo, (v) => { state.kakuyomuInfo = v; });
     }
     // 短編：新しい作品・作り直すときだけ（1話のとき）
     if ((!target || state.replacing) && k.episodes.length === 1) {
@@ -1486,7 +1485,7 @@ export function initImport(ctx) {
       // カクヨムの作品情報・短編（v4）
       if (isKakuyomu()) {
         const k = state.kakuyomu;
-        if (state.kakuyomuInfo && (k.catchphrase || k.tags.length)) p.kakuyomu = { ...(p.kakuyomu || {}), catchphrase: k.catchphrase, tags: [...k.tags] };
+        if (state.kakuyomuInfo && k.catchphrase) p.kakuyomu = { ...(p.kakuyomu || {}), catchphrase: k.catchphrase };
         if ((!target || state.replacing) && p.episodes.length === 1) p.shortStory = !!state.shortStory;
       }
       // 作品の Nコードが空なら、TXT の Nコードを入れる（なろう用として取り込むとき）

@@ -1072,7 +1072,6 @@ function showProject(p, handle = null) {
   $('kakuyomu-url').value = project.kakuyomuUrl || '';
   $('work-kakuyomu-id').value = project.kakuyomuWorkId || '';
   $('kakuyomu-catchphrase').value = project.kakuyomu.catchphrase || '';
-  $('kakuyomu-tags').value = project.kakuyomu.tags.join(' ');
   renderSiteSettings();
   renderWorkCodes();
   // 前回開いていたエピソード（ID で覚える。旧版は位置で覚えていた）
@@ -3071,6 +3070,61 @@ async function episodeVersionUp() {
   const { from, to } = await raiseEdition(ep, site);
   await renderEpisodeVersions();
   toast(`${SITES[site].short}用を ${to.name}にしました（${from.name}は今の内容のまま残っています）`);
+}
+
+// 「最新稿だけ残す」（0.97）：作品の全話で、選んだサイトの稿のうち番号のいちばん大きい稿だけを残し、ほかの稿を削除する。
+// 残した稿は「第1稿」にする。古い稿を表示していた話は、残した稿の内容に切り替える。ほかのサイトの稿・以前の版は変えない
+async function keepLatestEditions() {
+  await flush();
+  const sites = siteList();
+  const all = (await versions.editions(project.id)).filter((v) => v.kind === 'episode');
+  const listOf = (ep, site) => all.filter((v) => v.episodeId === ep.id && v.site === site);
+  const plan = (site) => {
+    let remove = 0; let older = 0; let eps = 0;
+    for (const ep of project.episodes) {
+      const list = listOf(ep, site);
+      if (!list.length) continue;
+      const keep = sortEditions(list)[0];
+      if (list.length > 1 || keep.name !== '第1稿') eps++;
+      remove += list.length - 1;
+      if (ep.editionIds?.[site] && ep.editionIds[site] !== keep.id) older++;
+    }
+    return { remove, older, eps };
+  };
+  const plans = Object.fromEntries(sites.map((s) => [s, plan(s)]));
+  const res = await choose('どのサイトの稿を整理しますか？\n全話で、番号のいちばん大きい稿だけを残し、ほかの稿を削除します。残した稿は「第1稿」になります。',
+    [{ value: 'next', label: '次へ', primary: true }],
+    { select: { label: '投稿サイト', options: sites.map((s) => ({ value: s, label: `${SITES[s].short}用（削除する稿 ${plans[s].remove}件）` })), value: sites.includes(editSite) ? editSite : project.site } });
+  if (!res) return;
+  const site = res.value;
+  const p = plans[site];
+  if (!p.eps) { toast(`${SITES[site].short}用は、もう最新稿だけです`); return; }
+  const msg = `${SITES[site].short}用の稿を整理します。\n`
+    + `${p.remove ? `全話で、最新稿のほかの稿（${p.remove}件）を削除します。` : ''}残した稿は「第1稿」になります。\n`
+    + `${p.older ? `古い稿を表示している話（${p.older}話）は、最新稿の内容に変わります。\n` : ''}`
+    + `${otherSitesText(site)}\n⚠ 削除した稿は元に戻せません。心配なときは、先に「ファイル」→「保存…」で保存してください。`;
+  if (!(await ask(msg, { ok: p.remove ? '削除する' : '第1稿にする', danger: !!p.remove }))) return;
+  const now = new Date().toISOString();
+  let removed = 0;
+  for (const ep of project.episodes) {
+    if (!listOf(ep, site).length) continue;
+    const { list, cur } = await ensureEdition(ep, site);
+    const stored = await storeEdition(ep, site, cur); // 今の内容を今の稿にしまってから比べる
+    const fresh = list.map((v) => (v.id === stored.id ? stored : v));
+    const keep = sortEditions(fresh)[0];
+    for (const v of fresh) if (v.id !== keep.id) { await versions.remove(v.id); removed++; }
+    if (keep.name !== '第1稿') await versions.put({ ...keep, name: '第1稿' });
+    if (keep.id !== stored.id) {
+      applyEdition(ep, site, keep.data);
+      ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [site]: versionTime(keep) };
+      ep.updatedAt = now;
+    }
+    ep.editionIds = { ...(ep.editionIds || {}), [site]: keep.id };
+  }
+  changed();
+  showEpisode();
+  renderEpisodeList();
+  toast(`${SITES[site].short}用の稿を整理しました（削除 ${removed}件・残した稿は第1稿）`);
 }
 
 async function removeEpisodeVersions(episodeId) {
@@ -5952,6 +6006,7 @@ const actions = {
   'ep-version-up': episodeVersionUp,
   'ep-version-delete': deleteEpisodeVersion,
   'ep-version-final': finalizeEpisodeVersion,
+  'keep-latest-editions': () => keepLatestEditions().catch(fail),
   'open-report': () => setReportMode(true),
   'max-restore': () => restoreMaximized(),
   'copy-main-to-sub': openSiteCopy,
@@ -6333,10 +6388,7 @@ function bindEvents() {
   document.querySelectorAll('[data-use-site]').forEach((c) => c.addEventListener('change', () => setSiteUsed(c.dataset.useSite, c.checked).catch(fail)));
   $('short-story').addEventListener('change', (e) => setShortStory(e.target.checked).catch(fail));
   $('kakuyomu-catchphrase').addEventListener('input', (e) => { project.kakuyomu = { ...project.kakuyomu, catchphrase: e.target.value }; changed(); });
-  $('kakuyomu-tags').addEventListener('input', (e) => {
-    project.kakuyomu = { ...project.kakuyomu, tags: e.target.value.split(/[\s　]+/).filter(Boolean) };
-    changed();
-  });
+  // カクヨムのタグは入力欄を出さない（管理しない。0.97）。前に入れたタグはデータに残す
   // 表示・ボタンの設定はチェックした時点で反映・保存する
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
   document.querySelectorAll('[data-uiv]').forEach((s) => s.addEventListener('change', () => setUiPref(s.dataset.uiv, s.value)));
