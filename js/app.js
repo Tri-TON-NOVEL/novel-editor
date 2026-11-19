@@ -1467,6 +1467,8 @@ async function copyAllEpisodes(from, to, eps) {
     // 短編のなろう版は話のタイトルがないので、作品タイトルを入れる
     if (project.shortStory && !ep.drafts[to].title && siteSupports(to, 'title')) ep.drafts[to].title = project.title || '';
     ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [to]: now };
+    // 話の更新日時も進める（バックアップの「変更あり」・更新日時の並べ替えに出るように。0.97）
+    if (DRAFT_FIELDS.some((f) => draftOf(ep, to)[f])) ep.updatedAt = now;
   }
   toast(`${SITES[from].short}用の原稿を、${SITES[to].short}用に${eps.length}話コピーしました`
     + warnings.map((w) => `\n⚠ ${w.message}（${w.count}か所）`).join(''));
