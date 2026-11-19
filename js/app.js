@@ -2375,6 +2375,16 @@ async function protectBeforeRestore(pack, selected, name = '') {
   await savePreRestoreArchive(name, { environment: true, scope: 'all', reason: 'pre-restore', appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
 }
 
+// 復元で作品が入ったときに、何も書いていない無題の作品を消す
+async function removeEmptyProjects(restored) {
+  const keepIds = new Set([...restored.addedList, ...restored.updatedList].map((x) => x.id));
+  if (!keepIds.size) return;
+  for (const p of await allProjects()) {
+    if (keepIds.has(p.id) || !isEmptyProject(normalize(p)) || Object.keys(p.links || {}).length) continue;
+    await db.remove(p.id); // 開いていた作品なら、このあと復元した作品を開く
+  }
+}
+
 async function restoreInspected(asNew = false, btn = null) {
   if (!inspectedBackup) return;
   const selected = [...$('backup-inspect-tree').querySelectorAll('input:checked')].map((x) => x.value);
@@ -2402,6 +2412,9 @@ async function restoreInspected(asNew = false, btn = null) {
     const restored = inspectedBackup.archive
       ? await restoreArchive(inspectedBackup.archive, { selected, asNew, environmentMode: 'replace' })
       : await restorePack(inspectedBackup.pack, { selected, asNew, environmentMode: 'replace' });
+    // 「読み込む」（新しい作品としてではない）とき：何も書いていない無題の作品（初めて開いたときにできるもの）は、
+    // 復元した作品に置き換えて消す（何か書いてある作品は消さない）
+    if (!asNew) await removeEmptyProjects(restored);
     await markRestoredAsSent(keep);
     if (inspectedBackup.name && sync.parseName(inspectedBackup.name)) sync.markLoaded(inspectedBackup.name);
     // 過去版を意図して選んだ場合、その時点ですでに一覧にあった新しい版は確認済みとする。
