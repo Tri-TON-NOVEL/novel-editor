@@ -329,8 +329,17 @@ function setXCount() {
   c.classList.toggle('over', n > 280);
 }
 
+// 小説タイトルの欄の高さを、折り返した中身に合わせる（0.97）
+function fitNovelTitle() {
+  const t = el.novelTitle;
+  if (!t.offsetParent) return; // 隠れているとき（スマートフォンの目次を閉じているとき）は、見えたときに合わせる
+  t.style.height = 'auto';
+  t.style.height = `${t.scrollHeight + t.offsetHeight - t.clientHeight}px`;
+}
+
 function updateCounts() {
   setCount('novel-title', el.novelTitle.value);
+  fitNovelTitle();
   setCount('synopsis', el.synopsis.value);
   setCount('project-memo', el.projectMemo.value);
   setCount('ep-title', el.epTitle.value);
@@ -6040,6 +6049,19 @@ function bindSidebarSplitter() {
 function bindEvents() {
   $('busy-dialog').addEventListener('cancel', (e) => e.preventDefault());
   bindProjectNavOrder();
+  // 小説タイトルは折り返して見せるが、1行の題名なので改行は入れない（貼り付けた改行も除く）。0.97
+  el.novelTitle.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.isComposing && e.keyCode !== 229) e.preventDefault();
+  });
+  el.novelTitle.addEventListener('input', () => {
+    const t = el.novelTitle;
+    if (!/[\r\n]/.test(t.value)) return;
+    const pos = t.selectionStart - (t.value.slice(0, t.selectionStart).match(/[\r\n]/g) || []).length;
+    t.value = t.value.replace(/[\r\n]+/g, '');
+    t.setSelectionRange(pos, pos);
+  });
+  // 欄の幅が変わったら（画面の幅・目次の幅・スマートフォンの目次を開いたとき）、高さを合わせ直す
+  if (window.ResizeObserver) new ResizeObserver(() => fitNovelTitle()).observe(el.novelTitle);
   for (const [input, apply] of bindings) {
     input.addEventListener('input', () => {
       apply(input.value);
