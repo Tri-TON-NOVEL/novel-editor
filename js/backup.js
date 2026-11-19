@@ -796,7 +796,7 @@ export async function restorePack(pack, { selected = null, asNew = false, enviro
       // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
       if (!Array.isArray(item.data?.memos)) delete target.memos;
       // 0.65 までのバックアップには伏線がない：この端末の伏線は消さずに残す（Object.assign で上書きされない）
-      // 0.95 までのバックアップの章には部・章の区別（level）がない：この端末の区別を残す（0.97）
+      // 0.95 までのバックアップの章には大見出し・章の区別（level）がない：この端末の区別を残す（0.97）
       const data = clone(item.data);
       if (Array.isArray(data?.chapters)) data.chapters = keepChapterLevels(data.chapters, target.chapters);
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });

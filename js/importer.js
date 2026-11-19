@@ -426,9 +426,11 @@ export function findDuplicates(items, existing) {
   const byHash = new Map();
   const byTitle = new Map();
   const byCore = new Map();
+  // 本文が同じ話が複数あることもあるので、候補はすべて持つ（0.97）
+  const push = (map, k, e) => { if (!map.has(k)) map.set(k, []); map.get(k).push(e); };
   for (const e of existing) {
-    if (e.importKey) byKey.set(e.importKey, e);
-    if (e.body) byHash.set(textHash(e.body), e);
+    if (e.importKey) push(byKey, e.importKey, e);
+    if (e.body) push(byHash, textHash(e.body), e);
     const t = normalizeTitle(e.title);
     if (t) {
       const k = t + '|' + normalizeTitle(e.chapterTitle);
@@ -441,9 +443,16 @@ export function findDuplicates(items, existing) {
   const used = new Set();
   return items.map((it) => {
     const hash = textHash(it.body);
-    const hit = byKey.get(hash) || (it.body ? byHash.get(hash) : null);
-    if (hit) { used.add(hit.id); return { kind: 'same', target: hit.id, action: 'skip', hash }; }
     const t = normalizeTitle(it.title);
+    // 本文が同じ候補が複数あるときは、まだ組にしていない話を、タイトルが同じものから選ぶ
+    const pick = (list) => {
+      if (!list?.length) return null;
+      const free = list.filter((e) => !used.has(e.id));
+      const pool = free.length ? free : list;
+      return pool.find((e) => t && normalizeTitle(e.title) === t) || pool[0];
+    };
+    const hit = pick(byKey.get(hash)) || (it.body ? pick(byHash.get(hash)) : null);
+    if (hit) { used.add(hit.id); return { kind: 'same', target: hit.id, action: 'skip', hash }; }
     const th = t && (byTitle.get(t + '|' + normalizeTitle(it.chapterTitle)) || byTitle.get(t));
     if (th && !used.has(th.id)) { used.add(th.id); return { kind: 'title', target: th.id, action: th.body ? 'skip' : 'overwrite', hash }; }
     const core = coreTitle(it.title);

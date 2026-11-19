@@ -3,7 +3,7 @@
 // 巨大なJSON全体を file.text() / JSON.parse() せず、必要なブロックだけ順番に読む。
 import { db, meta, prefs, versions } from './db.js';
 import {
-  normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES,
+  normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES, normalizeSiteOrder,
   missingSites, keepLocalDrafts, keepLocalProjectInfo, keepChapterLevels,
 } from './format.js';
 import { applyEnvironment, environmentSummary } from './backup.js';
@@ -410,6 +410,8 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
   const locals = (await db.all()).map(normalize);
   const byWork = new Map(locals.map((p) => [p.workId, p]));
   const created = new Map();
+  // 作品資料のサイトごとの目次順（0.97）。話より先に読むと、まだない話が外れてしまうので、最後に整え直す
+  const pendingOrders = new Map();
   const result = { addedList: [], updatedList: [], keptList: [], environmentResult };
   const addResult = (list, p) => { if (!list.some((x) => x.id === p.id)) list.push({ id: p.id, title: p.title || '無題' }); };
 
@@ -435,6 +437,8 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       let src = normalize(rawBase);
       src.episodes = [];
       for (const block of itemBlocks.filter((b) => blockKind(b) === 'episode').sort((a, b) => a.order - b.order)) src.episodes.push(await readArchiveBlock(archive, block));
+      // 話のない作品データを normalize すると、サイトごとの目次順が空になるので、話を入れてから整え直す（0.97）
+      src.siteOrder = normalizeSiteOrder({ ...src, siteOrder: rawBase.siteOrder });
       const existing = !asNew ? byWork.get(src.workId) : null;
       // 以前の版（v3）のバックアップ：カクヨムの原稿・作品情報・部は、この端末のものを残す（0.97）
       let keepSites = [];
@@ -465,7 +469,7 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       const data = await readArchiveBlock(archive, block);
       // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
       if (!Array.isArray(data.memos)) delete target.memos;
-      // 0.95 までのバックアップの章には部・章の区別（level）がない：この端末の区別を残す（0.97）
+      // 0.95 までのバックアップの章には大見出し・章の区別（level）がない：この端末の区別を残す（0.97）
       if (Array.isArray(data.chapters)) data.chapters = keepChapterLevels(data.chapters, target.chapters);
       // 0.65 までのバックアップには伏線がない：この端末の伏線は消さずに残す（Object.assign で上書きされない）
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
@@ -486,10 +490,15 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       await restoreVersions(archive, item, target.id, { remap: idMap, existing, episodeId: ep.id, keepSites });
     }
     target.updatedAt = new Date().toISOString();
+    if (item.type === 'materials' && target.siteOrder && typeof target.siteOrder === 'object') pendingOrders.set(target.workId, target.siteOrder);
     const saved = normalize(target);
     await db.put(saved);
     byWork.set(saved.workId, saved);
     if (existing) addResult(result.updatedList, saved);
+  }
+  for (const [workId, order] of pendingOrders) {
+    const p = byWork.get(workId);
+    if (p) await db.put(normalize({ ...p, siteOrder: order }));
   }
   return result;
 }

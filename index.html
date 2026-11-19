@@ -114,14 +114,14 @@
           <option value="flat">章なし</option>
         </select>
         <select id="ep-sort" aria-label="エピソードの並び順">
-          <option value="title">タイトル</option>
           <option value="file">目次順</option>
+          <option value="title">タイトル</option>
           <option value="updated">更新日時</option>
           <option value="created">作成日時</option>
           <option value="chars">本文の文字数</option>
           <option value="plot">プロットの有無</option>
         </select>
-        <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir">↑ 昇順</button>
+        <button type="button" class="tool" id="ep-sort-dir" data-action="toggle-sort-dir" title="昇順（クリックで降順に）">↑</button>
       </div>
       <div class="ep-search">
         <form role="search" class="search-form" action="#" autocomplete="off"><input type="search" id="ep-search" name="q" placeholder="検索（タイトル・本文・プロット・メモ）" aria-label="エピソードを検索" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" enterkeyhint="search"></form>

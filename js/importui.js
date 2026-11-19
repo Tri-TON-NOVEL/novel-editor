@@ -2,7 +2,7 @@
 // 解析は importer.js。この画面は、確定するまで作品データを一切変更しない。
 // 途中の作業は IndexedDB の meta.importSession に自動で残し、あとから再開できる。
 import * as I from './importer.js';
-import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS, normalizeSites } from './format.js';
+import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS, normalizeSites, siteOrderFromFile, setSiteOrder } from './format.js';
 import { SITES, countImages } from './notation.js';
 import { looksLikeBackup, parseBackup } from './sites/kakuyomu.js';
 import { imageSlots, contextOf, suggestPairs, pairScore, applyImageMap, PAIR_WEAK } from './imagematch.js';
@@ -71,6 +71,8 @@ export function initImport(ctx) {
   // 宣言の前（state = fresh()）でも使うので function
   function siteOfType(type) { return type === 'title-list' ? 'alpha' : type === 'kakuyomu-zip' ? 'kakuyomu' : 'narou'; }
   const isKakuyomu = () => state.type === 'kakuyomu-zip';
+  // 画面の言葉：カクヨムは ZIP、なろう・アルファは TXT（0.97）
+  const srcWord = () => (isKakuyomu() ? 'ZIP' : 'TXT');
   // 取り込むサイト以外の投稿サイト（対にするとき、そのタイトルでも探す）
   const otherSites = () => SITE_KEYS.filter((s) => s !== state.site);
   const hasDraftOf = (e, s) => { const d = draftOf(e, s); return !!((d.title || '').trim() || (d.body || '').trim()); };
@@ -798,7 +800,7 @@ export function initImport(ctx) {
     const sum = $('imp-summary');
     sum.replaceChildren();
     // 作品名（この欄の名前で登録する）
-    const l = Object.assign(document.createElement('label'), { className: 'imp-work-title', textContent: '作品名（TXT から読み込み。この欄の名前で登録します。書き換えられます）' });
+    const l = Object.assign(document.createElement('label'), { className: 'imp-work-title', textContent: `作品名（${srcWord()} から読み込み。この欄の名前で登録します。書き換えられます）` });
     const input = Object.assign(document.createElement('input'), { type: 'text', value: state.workTitle, placeholder: '（無題）' });
     input.addEventListener('input', () => { state.workTitle = input.value; state.workTitleEdited = true; });
     l.append(input);
@@ -809,7 +811,7 @@ export function initImport(ctx) {
         const lost = otherLostText(target);
         sum.append(Object.assign(document.createElement('div'), {
           className: 'imp-info warn imp-replace-note',
-          textContent: `⚠ 作り直す：取り込み先の今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この TXT の内容に入れ替えます。`
+          textContent: `⚠ 作り直す：取り込み先の今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この ${srcWord()} の内容に入れ替えます。`
             + (lost ? `\n${lost}も一緒に消えます。対にして取り込む投稿先の原稿だけを変えるときは、最初の画面で「置き換える」を選んでください。` : '')
             + ((target.site || 'narou') !== state.site ? `\n作品のメインの投稿先も「${SITES[target.site || 'narou'].short}用」から「${SITES[state.site].short}用」に変わります。` : '')
             + '\n（取り込む前の状態は「バックアップ版」に残すので、あとから戻せます。設定資料・メモはそのままです）',
@@ -823,7 +825,7 @@ export function initImport(ctx) {
           return b;
         };
         sum.append(pickName(`取り込み先の今の作品名「${target.title}」にする`, target.title), ' ',
-          pickName(`TXT の作品名「${state.txtTitle}」にする`, state.txtTitle));
+          pickName(`${srcWord()} の作品名「${state.txtTitle}」にする`, state.txtTitle));
       }
     }
     if (state.mismatches.length) {
@@ -1114,7 +1116,7 @@ export function initImport(ctx) {
         const meta = [
           `${SITES[other].short}用 ${[...(theirs.body || '')].length.toLocaleString()}字`,
           `${SITES[state.site].short}用 ${mine.body ? `${[...mine.body].length.toLocaleString()}字（置き換え）` : 'なし'}`,
-          usedBy.has(e.id) ? `⚠ TXT の${usedBy.get(e.id)}話目の取り込み先` : '',
+          usedBy.has(e.id) ? `⚠ ${srcWord()} の${usedBy.get(e.id)}話目の取り込み先` : '',
         ].filter(Boolean).join('・');
         text.append(Object.assign(document.createElement('small'), { textContent: meta }));
         const peek = head(theirs.body || mine.body);
@@ -1200,14 +1202,35 @@ export function initImport(ctx) {
     return { add, pair, overwrite, edition, skip, errors };
   }
 
+  // ファイルの順に並べる話（既存の作品へ取り込むとき。0.97）：対にした話（スキップも含む）を、ファイルの順に。
+  // newIds（行 → 新しく足した話の ID）を渡すと、新しい話も入れる
+  function fileOrderIds(newIds = null) {
+    const out = [];
+    for (const row of state.rows) {
+      const paired = row.action === 'skip' || (row.include && (row.action === 'overwrite' || row.action === 'manual'));
+      const id = paired ? row.target : newIds?.get(row);
+      if (id && !out.includes(id)) out.push(id);
+    }
+    return out;
+  }
+
+  // 取り込むと並びが変わる話の数（プレビュー用。新しく足す話は数えない）
+  function orderChanges() {
+    const t = state.targetProject;
+    if (!t || state.replacing) return 0;
+    return siteOrderFromFile(normalize(t), state.site, fileOrderIds()).changed;
+  }
+
   function updateCommitSummary() {
     const c = counts();
+    const moved = orderChanges();
     const siteWaiting = state.siteMismatch && !state.siteAck;
     const waiting = siteWaiting || (state.ncodeOwner && !state.ncodeAck);
     $('imp-commit-summary').textContent = (state.replacing ? `作り直す（今の ${state.targetProject.episodes.length}話を削除）・` : '') + countText(c) + (c.errors ? `・未対応 ${c.errors}話` : '')
+      + (moved ? `・${SITES[state.site].short}の並びが ${moved}話変わります` : '')
       + (siteWaiting ? '（「取り込む原稿」を確かめてください。上のボタンで選ぶと取り込めます）'
         : waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
-    $('imp-commit').disabled = !(c.add + c.pair + c.overwrite + c.edition) || waiting;
+    $('imp-commit').disabled = !(c.add + c.pair + c.overwrite + c.edition + moved) || waiting;
     updateCorrespondenceErrors();
     applyActionFilter();
   }
@@ -1276,7 +1299,7 @@ export function initImport(ctx) {
           const map = plans.get(u.row).get(x.f);
           const weak = map.some((j, k) => j >= 0 && pairScore(x.sc[k], x.dc[j]) < PAIR_WEAK);
           const why = x.sc.length !== x.dc.length ? '⚠ 枚数が違います' : weak || map.includes(-1) ? '⚠ 前後の文が違います' : '';
-          return `${fieldName[x.f]}：TXT ${x.sc.length}枚・今 ${x.dc.length}枚${why && !u.checked ? `　${why}` : ''}`;
+          return `${fieldName[x.f]}：${srcWord()} ${x.sc.length}枚・今 ${x.dc.length}枚${why && !u.checked ? `　${why}` : ''}`;
         });
         for (const n of notes) text.append(Object.assign(document.createElement('small'), { textContent: n }));
         const side = Object.assign(document.createElement('div'), { className: 'imp-image-side' });
@@ -1285,7 +1308,7 @@ export function initImport(ctx) {
         btn.addEventListener('click', async () => {
           const maps = await ctx.imageMatchDialog(
             u.fields.map((x) => ({ f: x.f, src: x.src, dest: x.dest })), state.site,
-            { title: `画像の対応：${epName(u.row)}`, src: 'TXT', dst: '今の原稿', srcNote: 'TXT の画像をそのまま入れます' },
+            { title: `画像の対応：${epName(u.row)}`, src: srcWord(), dst: '今の原稿', srcNote: `${srcWord()} の画像をそのまま入れます` },
           );
           if (!maps) return;
           for (const [f, map] of maps) plans.get(u.row).set(f, map);
@@ -1311,7 +1334,8 @@ export function initImport(ctx) {
 
   async function commit() {
     const c = counts();
-    if (!(c.add + c.pair + c.overwrite + c.edition)) return;
+    const moved = orderChanges(); // 並びだけが変わるときも取り込める（0.97）
+    if (!(c.add + c.pair + c.overwrite + c.edition) && !moved) return;
     const target = state.targetProject;
     // 取り込み先の画像との対応（自動で決められない話だけ、先に確かめてもらう）
     const images = target ? await planImages() : { plans: new Map(), auto: 0 };
@@ -1323,15 +1347,16 @@ export function initImport(ctx) {
     if (state.mismatches.length && !(await ask(`⚠ TXT の情報が、設定に登録した内容と違います。\n${mismatchText()}\n\n別のアカウント・別の作品の TXT かもしれません。このまま取り込みますか？`, { danger: true, ok: '取り込む' }))) return;
     // 作り直すと消える、ほかの投稿先の原稿（なろうがメインの作品をアルファの TXT で作り直すと、なろう用の原稿が消える）
     const otherLost = state.replacing ? otherLostText(target) : '';
-    if (state.replacing && !(await ask(`「${name}」を作り直します。\n今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この TXT の ${c.add}話に入れ替えます。${otherLost ? `\n⚠ ${otherLost}もすべて消えます。ほかのサイトの話と対にしたいときは、キャンセルして「置き換える」を選んでください。` : ''}${(target.site || 'narou') !== state.site ? `\nメインの投稿先も「${SITES[state.site].short}用」に変わります。` : ''}\n（取り込む前の状態は「バックアップ版」に残します）\nよろしいですか？`, { danger: true, ok: '作り直す' }))) return;
-    if (!state.replacing && !(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n${countText(c, '（今の稿は残ります）')}${c.errors ? `（うち未対応 ${c.errors}話）` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
+    if (state.replacing && !(await ask(`「${name}」を作り直します。\n今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この ${srcWord()} の ${c.add}話に入れ替えます。${otherLost ? `\n⚠ ${otherLost}もすべて消えます。ほかのサイトの話と対にしたいときは、キャンセルして「置き換える」を選んでください。` : ''}${(target.site || 'narou') !== state.site ? `\nメインの投稿先も「${SITES[state.site].short}用」に変わります。` : ''}\n（取り込む前の状態は「バックアップ版」に残します）\nよろしいですか？`, { danger: true, ok: '作り直す' }))) return;
+    if (!state.replacing && !(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n${countText(c, '（今の稿は残ります）')}${c.errors ? `（うち未対応 ${c.errors}話）` : ''}${moved ? `\n${SITES[state.site].short}の並びが ${moved}話変わります` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
     const btn = $('imp-commit');
     btn.disabled = true;
     try {
-      await ctx.withBusy('TXTを取り込んでいます…', async () => {
+      await ctx.withBusy(`${srcWord()}を取り込んでいます…`, async () => {
       await ctx.flush();
       const now = new Date().toISOString();
       let p;
+      const newIds = new Map(); // 行 → 新しく足した話の ID（ファイルの順に並べるため）
       // 取り込み先が中身のない話だけの作品（無題の新しい作品など）なら、その空の話は取り込んだあと消す（0.92）。
       // 置き換えなので、空の「無題」の話が紛れ込まないようにする
       const blankIds = target && !state.replacing && target.episodes.every(isBlankEpisode) ? new Set(target.episodes.map((e) => e.id)) : null;
@@ -1371,16 +1396,22 @@ export function initImport(ctx) {
         if (chapterIds.has(index)) return chapterIds.get(index);
         const src = state.result.chapters[index];
         const title = src?.title || '';
-        // カクヨムの小見出しは、先にその大見出しを作る。大見出し・小見出しは level も合うものを使う（0.97）
-        const level = src?.level === 1 || src?.level === 2 ? src.level : null;
+        // カクヨムの小見出しは、先にその大見出しを作る。大見出し・小見出しは level も合うものを使う（0.97）。
+        // ただし大見出し・小見出しを使わない作品（ほかのサイトも使う作品）では章は1段なので、名前だけで今の章を探す
+        // （なろうの「旅の空」とカクヨムの大見出し「旅の空」を別の章にしない）。話のない大見出しも足さない
+        const headings = p.sites.length === 1 && p.sites[0] === 'kakuyomu';
+        const level = (src?.level === 1 || src?.level === 2) && headings ? src.level : null;
         if (level === 2) {
           for (let j = index - 1; j >= 0; j--) {
             if (state.result.chapters[j]?.level === 1) { findOrCreateChapter(j); break; }
           }
         }
-        let ch = p.chapters.find((x) => I.normalizeTitle(x.title) === I.normalizeTitle(title)
+        // カクヨムの新しい作品・作り直しでは、目次の見出しを1つずつ作る（同じ名前の見出しが2つあっても別々に。なろう・アルファは今までどおり）
+        let ch = (!isKakuyomu() || (target && !state.replacing)) && p.chapters.find((x) => I.normalizeTitle(x.title) === I.normalizeTitle(title)
           && (level === null || (x.level === 1 ? 1 : 2) === level));
-        if (!ch) { ch = newChapter(level ? { title, level } : { title }); p.chapters.push(ch); }
+        // 新しく作る章は、カクヨムの段（level）を残す（カクヨムだけの作品にしたとき、大見出し・小見出しで並ぶ）
+        const keep = src?.level === 1 || src?.level === 2 ? src.level : null;
+        if (!ch) { ch = newChapter(keep ? { title, level: keep } : { title }); p.chapters.push(ch); }
         chapterIds.set(index, ch.id);
         return ch.id;
       };
@@ -1413,6 +1444,7 @@ export function initImport(ctx) {
           const ep = newEpisode({ chapterId: findOrCreateChapter(it.chapter), importKeys: { [state.site]: dup.hash } });
           ep.drafts[state.site] = { title: it.title, foreword: it.foreword, body: it.body, afterword: it.afterword };
           p.episodes.push(ep);
+          newIds.set(row, ep.id);
         }
       }
       if (blankIds && p.episodes.some((e) => !blankIds.has(e.id))) p.episodes = p.episodes.filter((e) => !blankIds.has(e.id) || !isBlankEpisode(e));
@@ -1421,6 +1453,11 @@ export function initImport(ctx) {
       const pos = new Map(p.chapters.map((ch, i) => [ch.id, i]));
       p.episodes = p.episodes.map((e, i) => ({ e, i, k: pos.has(e.chapterId) ? pos.get(e.chapterId) : Infinity }))
         .sort((a, b) => a.k - b.k || a.i - b.i).map((x) => x.e);
+      // 既存の作品へ取り込むとき：取り込んだサイトの目次順を、ファイルの順にする（章の中だけ。ファイルにない話は今の位置のまま：0.97）
+      if (target && !state.replacing) {
+        p.siteOrder = normalize(p).siteOrder;
+        setSiteOrder(p, state.site, siteOrderFromFile(p, state.site, fileOrderIds(newIds)).ids);
+      }
       // プレビューで書き換えた作品名（既存の作品は、書き換えたときだけ変える）
       if (rename) p.title = title;
       // 先頭の未解析の行（タイトル行以外）をあらすじへ

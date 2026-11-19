@@ -89,6 +89,7 @@ export function newProject(content = {}) {
     kakuyomuWorkId: '', // カクヨムの作品ID
     kakuyomu: { catchphrase: '', tags: [] },
     shortStory: false,
+    siteOrder: {}, // サイトごとの話の並び（0.97）。メイン以外で並びが違うサイトだけ { サイト: [話の ID…] }
     synopsis: '',
     projectMemo: '',
     episodes: [newEpisode({ chapterId: first.id })],
@@ -125,13 +126,102 @@ export function normalizeSites(sites, main) {
   return SITE_KEYS.filter((s) => list.includes(s));
 }
 
+// ---------- サイトごとの目次順（0.97） ----------
+// project.episodes の並び＝メイン投稿先の目次順。project.siteOrder[サイト]＝ほかのサイトの目次順（話の ID）。
+// キーのないサイトはメインと同じ並び。章の構成は3サイト共通なので、違うのは章の中の順番だけ。
+
+// そのサイトの並び（話の ID）。なくなった話は外し、足りない話は「メインですぐ前にある話のあと」へ入れ、章の順にそろえる。
+// reinsert の話は、記録の位置を使わずに入れ直す（ほかの章へ移した話など）
+export function siteEpisodeIds(p, site, reinsert = []) {
+  const main = (p.episodes || []).map((e) => e.id);
+  const saved = site !== p.site && Array.isArray(p.siteOrder?.[site]) ? p.siteOrder[site] : null;
+  if (!saved) return main;
+  const exists = new Set(main);
+  const skip = new Set(reinsert);
+  const list = [];
+  const seen = new Set();
+  for (const id of saved) if (exists.has(id) && !skip.has(id) && !seen.has(id)) { list.push(id); seen.add(id); }
+  main.forEach((id, i) => {
+    if (seen.has(id)) return;
+    let at = 0;
+    for (let j = i - 1; j >= 0; j--) {
+      const k = list.indexOf(main[j]);
+      if (k >= 0) { at = k + 1; break; }
+    }
+    list.splice(at, 0, id);
+    seen.add(id);
+  });
+  const chapter = new Map((p.chapters || []).map((c, i) => [c.id, i]));
+  const key = new Map(p.episodes.map((e) => [e.id, chapter.has(e.chapterId) ? chapter.get(e.chapterId) : Infinity]));
+  return list.map((id, i) => ({ id, i, k: key.get(id) })).sort((a, b) => a.k - b.k || a.i - b.i).map((x) => x.id);
+}
+
+// siteOrder を整えたもの（メインと同じ並びになったサイトは持たない）
+export function normalizeSiteOrder(p, reinsert = []) {
+  const out = {};
+  const src = p.siteOrder && typeof p.siteOrder === 'object' ? p.siteOrder : {};
+  const main = (p.episodes || []).map((e) => e.id).join('\n');
+  for (const s of SITE_KEYS) {
+    if (s === p.site || !Array.isArray(src[s])) continue;
+    const ids = siteEpisodeIds({ ...p, siteOrder: src }, s, reinsert);
+    if (ids.join('\n') !== main) out[s] = ids;
+  }
+  return out;
+}
+
+// そのサイトの並びを ids にする（p を変える）。メインの並びを変えるときは、ほかの使うサイトの並びは今のまま残す
+export function setSiteOrder(p, site, ids) {
+  const order = { ...(p.siteOrder || {}) };
+  if (site === p.site) {
+    const byId = new Map(p.episodes.map((e) => [e.id, e]));
+    const main = p.episodes.map((e) => e.id);
+    for (const s of p.sites || SITE_KEYS) if (s !== site && !Array.isArray(order[s])) order[s] = main;
+    const next = ids.filter((id) => byId.has(id)).map((id) => byId.get(id));
+    p.episodes = [...next, ...p.episodes.filter((e) => !next.includes(e))];
+  } else order[site] = ids;
+  p.siteOrder = normalizeSiteOrder({ ...p, siteOrder: order });
+}
+
+// メイン投稿先を変える（p を変える）。前のメインの並びは siteOrder へ、新しいメインの並びを project.episodes に
+export function changeMainSite(p, site) {
+  if (site === p.site) return;
+  const ids = siteEpisodeIds(p, site);
+  const byId = new Map(p.episodes.map((e) => [e.id, e]));
+  const main = p.episodes.map((e) => e.id);
+  const order = { ...(p.siteOrder || {}), [p.site]: main };
+  // 記録のない（前のメインと同じ並びの）サイトは、前のメインの並びのまま残す
+  for (const s of p.sites || SITE_KEYS) if (s !== site && !Array.isArray(order[s])) order[s] = main;
+  delete order[site];
+  p.episodes = ids.map((id) => byId.get(id));
+  p.site = site;
+  p.siteOrder = normalizeSiteOrder({ ...p, siteOrder: order });
+}
+
+// 取り込んだファイルの順（fileIds）を、そのサイトの並びに入れたもの。ファイルにない話は今の位置のまま、
+// ファイルにある話が占めている場所を、章ごとにファイルの順で埋め直す。{ ids, changed（並びが変わる話の数） }
+export function siteOrderFromFile(p, site, fileIds) {
+  const before = siteEpisodeIds(p, site);
+  const chapterOf = new Map(p.episodes.map((e) => [e.id, e.chapterId || null]));
+  const inFile = new Set();
+  const queues = new Map();
+  for (const id of fileIds) {
+    if (!chapterOf.has(id) || inFile.has(id)) continue;
+    inFile.add(id);
+    const c = chapterOf.get(id);
+    if (!queues.has(c)) queues.set(c, []);
+    queues.get(c).push(id);
+  }
+  const ids = before.map((id) => (inFile.has(id) ? queues.get(chapterOf.get(id)).shift() : id));
+  return { ids, changed: ids.filter((id, i) => id !== before[i]).length };
+}
+
 // 作品資料（バックアップの「作品資料」）に入れる、作品全体の情報の項目
-export const PROJECT_INFO_KEYS = ['title', 'site', 'sites', 'sitesV2', 'narouUrl', 'alphaUrl', 'kakuyomuUrl', 'narouNcode', 'alphaWorkId', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'synopsis'];
+export const PROJECT_INFO_KEYS = ['title', 'site', 'sites', 'sitesV2', 'narouUrl', 'alphaUrl', 'kakuyomuUrl', 'narouNcode', 'alphaWorkId', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'siteOrder', 'synopsis'];
 
 // ---------- 以前の版（v3）のバックアップを読み込むとき（0.97） ----------
 // v3 のバックアップには、カクヨムの原稿・作品情報、部（章の level）がない。
 // そのまま入れ替えると、この端末で書いたカクヨムの原稿などが消えるので、バックアップにないものは この端末のものを残す。
-export const V4_PROJECT_KEYS = ['sites', 'sitesV2', 'kakuyomuUrl', 'kakuyomuWorkId', 'kakuyomu', 'shortStory'];
+export const V4_PROJECT_KEYS = ['sites', 'sitesV2', 'kakuyomuUrl', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'siteOrder'];
 
 // 以前の版の作品 raw を、この端末の同じ作品 local に入れるときの中身（カクヨムの原稿・作品情報・部は local のまま）
 export function mergeLegacyProject(raw, local) {
@@ -165,7 +255,7 @@ export function keepLocalProjectInfo(raw, local) {
   return out;
 }
 
-// level のない章（v3）は、この端末の同じ章の level（部・章）にする
+// level のない章（v3）は、この端末の同じ章の level（大見出し・章）にする
 export function keepChapterLevels(chapters, localChapters) {
   const levels = new Map((localChapters || []).map((c) => [c.id, c.level]));
   return chapters.map((c) => (c && !('level' in c) && levels.has(c.id) ? { ...c, level: levels.get(c.id) } : c));
@@ -266,6 +356,8 @@ export function normalize(p) {
     ? [...p.episodes].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     : [{}];
   project.episodes = episodeSrc.map((e) => migrateEpisode(e, project.site, project, chapterIds));
+  // サイトごとの話の並び（0.97）。なくなった話を外し、足りない話を補い、章の順にそろえる
+  project.siteOrder = normalizeSiteOrder(project);
 
   project.world = normalizeTable(p.world, base.world);
   project.characters = normalizeTable(p.characters, base.characters);

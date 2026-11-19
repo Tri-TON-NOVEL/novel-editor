@@ -501,7 +501,7 @@ function editEpisode(field, value) {
   refreshCurrentVersionLabel();
   if (wasEmpty !== (!cur().body && !cur().title)) renderSiteTabs(); // 「（空）」の表示を更新
   // 目次の表示（タイトル・並び順・文字数）を少し待ってから更新する
-  if (field === 'title' || epSort.key !== 'file') {
+  if (field === 'title' || !isOrderSort()) {
     clearTimeout(listTimer);
     listTimer = setTimeout(renderEpisodeList, field === 'title' ? 0 : 800);
   }
@@ -540,14 +540,30 @@ const EP_SORTS = {
   plot: { label: 'プロットの有無', value: (e) => (e.plot.trim() ? 1 : 0), meta: (e) => (e.plot.trim() ? 'プロットあり' : 'プロットなし') },
 };
 let epSort = { key: 'file', dir: 'asc', grouped: true, ...prefs.get('epSort', {}) };
-if (!EP_SORTS[epSort.key]) epSort.key = 'file';
+if (!EP_SORTS[epSort.key] && !/^file-(narou|kakuyomu|alpha)$/.test(epSort.key)) epSort.key = 'file';
 if (typeof epSort.grouped !== 'boolean') epSort.grouped = true;
 // 「第2話」と「第10話」を数字の大きさで並べる
 const collator = new Intl.Collator('ja', { numeric: true, sensitivity: 'base' });
 
+// サイトごとの目次順（0.97）：'file'＝メイン投稿先の目次順、'file-<サイト>'＝そのサイトの目次順。
+// 使っていないサイト・メインになったサイトの 'file-<サイト>' は 'file' として扱う（今までの保存値 'file' はメインの目次順）
+function sortKey() {
+  const m = /^file-(\w+)$/.exec(epSort.key);
+  if (m) return m[1] !== project.site && project.sites.includes(m[1]) ? epSort.key : 'file';
+  return epSort.key;
+}
+const isOrderSort = () => sortKey().startsWith('file');
+// 目次順で並べているサイト（目次順でないときはメイン）
+const orderSite = () => (sortKey().startsWith('file-') ? sortKey().slice(5) : project.site);
+function currentSort() {
+  if (!sortKey().startsWith('file-')) return EP_SORTS[sortKey()];
+  const pos = new Map(format.siteEpisodeIds(project, orderSite()).map((id, i) => [id, i]));
+  return { label: '目次順', value: (e, i) => pos.get(e.id) ?? i };
+}
+
 // 並べ替えは章の中で行う（indexes を省略すると全エピソード）
 function sortedEpisodeIndexes(indexes = project.episodes.map((_, i) => i)) {
-  const sort = EP_SORTS[epSort.key];
+  const sort = currentSort();
   const dir = epSort.dir === 'desc' ? -1 : 1;
   const idx = [...indexes];
   // 同じ値どうしは目次順のまま
@@ -562,10 +578,23 @@ function sortedEpisodeIndexes(indexes = project.episodes.map((_, i) => i)) {
 
 function renderSortControls() {
   $('ep-grouping').value = epSort.grouped ? 'chapters' : 'flat';
-  $('ep-sort').value = epSort.key;
+  // 目次順は、使うサイトごとに（メインを先に）。1サイトだけの作品は「目次順」
+  const sel = $('ep-sort');
+  if (project) {
+    const sites = [project.site, ...project.sites.filter((s) => s !== project.site)];
+    // 作品を切り替えたとき・使うサイトやメインを変えたときだけ作り直す（開いている選択肢を閉じないように）
+    if (sel.dataset.sites !== sites.join()) {
+      sel.dataset.sites = sites.join();
+      const orders = sites.map((s) => new Option(sites.length > 1 ? `目次順（${SITES[s].short}）` : '目次順', s === project.site ? 'file' : `file-${s}`));
+      sel.replaceChildren(...orders, ...['title', 'updated', 'created', 'chars', 'plot'].map((k) => new Option(EP_SORTS[k].label, k)));
+    }
+    sel.value = sortKey();
+  }
   const dir = $('ep-sort-dir');
-  dir.textContent = epSort.dir === 'asc' ? '↑ 昇順' : '↓ 降順';
+  // 並び順の欄（「目次順（カクヨム）」など）の幅を取るため、矢印だけにする（0.97）
+  dir.textContent = epSort.dir === 'asc' ? '↑' : '↓';
   dir.title = epSort.dir === 'asc' ? '昇順（クリックで降順に）' : '降順（クリックで昇順に）';
+  dir.setAttribute('aria-label', epSort.dir === 'asc' ? '昇順' : '降順');
 }
 
 function setEpisodeSort(next) {
@@ -589,7 +618,7 @@ const chapterName = (ch) => ch?.title || `（無題の${chapterKind(ch)}）`;
 const chapterLabel = (ch) => (levelOf(ch) === 1 ? `【大見出し】${chapterName(ch)}` : chapterName(ch));
 
 // エピソードの並びを章の順に揃える（章の中の順番は保つ）。存在しない章を指していたら未分類にする
-function normalizeOrder() {
+function normalizeOrder(reinsert = []) {
   const curId = project.episodes[epIndex]?.id;
   const pos = new Map(project.chapters.map((c, i) => [c.id, i]));
   const keyed = project.episodes.map((e, i) => {
@@ -599,6 +628,8 @@ function normalizeOrder() {
   keyed.sort((a, b) => a.k - b.k || a.i - b.i);
   project.episodes = keyed.map((x) => x.e);
   if (curId) epIndex = Math.max(0, project.episodes.findIndex((e) => e.id === curId));
+  // ほかのサイトの目次順も、なくなった話・増えた話・章の順に合わせる（0.97）
+  project.siteOrder = format.normalizeSiteOrder(project, reinsert);
 }
 
 // [{ chapter（未分類は null）, indexes: [エピソードの位置] }]
@@ -679,7 +710,7 @@ function episodeMenu(i) {
     Object.assign(btn.dataset, { epAct: act, epIndex: i });
     list.append(btn);
   };
-  const canMove = epSort.key === 'file' && !epSearch;
+  const canMove = isOrderSort() && !epSearch;
   item('↑ 上へ', 'up', '', !canMove);
   item('↓ 下へ', 'down', '', !canMove);
   if (!canMove) for (const b of list.querySelectorAll('button')) b.title = epSearch ? '検索中は使えません' : '並び順が「目次順」のときに使えます';
@@ -768,10 +799,11 @@ function jumpToSearchHit(i) {
 }
 
 function renderEpisodeList() {
+  renderSortControls();
   const list = $('episode-list');
   list.replaceChildren();
   if (epSearch) { renderSearchResults(list); return; }
-  const sort = EP_SORTS[epSort.key];
+  const sort = currentSort();
   // 「章なし」は章を抜きにして、全エピソードを選択した条件で並べる
   if (!epSort.grouped) {
     for (const i of sortedEpisodeIndexes()) list.append(episodeRow(i, sort, true));
@@ -907,7 +939,7 @@ function moveEpisodeToChapter(chapterId, index = epIndex) {
   project.episodes.splice(index, 1);
   project.episodes.push(ep);
   epIndex = project.episodes.indexOf(current);
-  normalizeOrder();
+  normalizeOrder([ep.id]); // ほかのサイトの目次順でも、移した先の章の、メインですぐ前にある話のあとへ
   changed();
   // 移した先の章が折りたたまれていたら開く
   const set = collapsedSet();
@@ -1339,22 +1371,28 @@ function runNewItem() {
 }
 
 // 上へ・下へ：同じ章の中で前後と入れ替える。開いているエピソードはそのまま
+// 変わるのは、目次順で表示しているサイトの並びだけ（0.97。ほかのサイトの並びはそのまま）
 function moveEpisode(delta, index = epIndex) {
-  if (epSort.key !== 'file') {
+  if (!isOrderSort()) {
     toast('並べ替えは、並び順が「目次順」のときに使えます');
     return;
   }
   if (epSort.dir === 'desc') delta = -delta; // 降順表示では見た目の上下に合わせる
-  const group = episodeGroups().find((g) => g.indexes.includes(index)).indexes;
-  const to = group[group.indexOf(index) + delta];
-  if (to === undefined) {
+  const site = orderSite();
+  const ids = format.siteEpisodeIds(project, site);
+  const chapters = new Set(project.chapters.map((c) => c.id));
+  const chapterOf = (id) => { const c = project.episodes.find((e) => e.id === id)?.chapterId; return chapters.has(c) ? c : null; };
+  const id = project.episodes[index]?.id;
+  const from = ids.indexOf(id);
+  const to = from + delta;
+  if (from < 0 || to < 0 || to >= ids.length || chapterOf(ids[to]) !== chapterOf(id)) {
     toast(delta < 0 ? 'この章の最初のエピソードです（別の章へは「⋯」→「章を移動」で移せます）' : 'この章の最後のエピソードです（別の章へは「⋯」→「章を移動」で移せます）');
     return;
   }
+  [ids[from], ids[to]] = [ids[to], ids[from]];
   const current = episode();
-  const eps = project.episodes;
-  [eps[index], eps[to]] = [eps[to], eps[index]];
-  epIndex = eps.indexOf(current);
+  format.setSiteOrder(project, site, ids);
+  epIndex = project.episodes.indexOf(current);
   changed();
   renderEpisodeList();
 }
@@ -1373,6 +1411,7 @@ async function deleteEpisode(index = epIndex) {
   const last = project.episodes.length === 1;
   if (last) project.episodes[0] = newEpisode();
   else project.episodes.splice(index, 1);
+  project.siteOrder = format.normalizeSiteOrder(project); // ほかのサイトの目次順からも外す（0.97）
   removeEpisodeVersions(ep.id).catch(() => {});
   changed();
   const next = index < epIndex ? epIndex - 1 : Math.min(epIndex, project.episodes.length - 1);
@@ -1384,7 +1423,10 @@ async function deleteEpisode(index = epIndex) {
 // メイン投稿サイトを変える。原稿はサイトごとに別々に持っているので、書き換えや変換はしない
 function changeSite(site) {
   if (site === project.site || !project.sites.includes(site)) return;
-  project.site = site;
+  // 目次順も入れ替える：新しいメインの並びを project.episodes に、前のメインの並びは siteOrder へ（0.97）
+  const current = episode();
+  format.changeMainSite(project, site);
+  epIndex = Math.max(0, project.episodes.indexOf(current));
   changed();
   editSite = site;
   renderSiteSettings();
@@ -2474,7 +2516,9 @@ async function exportEpisode() {
 }
 
 async function exportAll() {
-  const text = project.episodes
+  // 書き出すサイトの目次順で（0.97）
+  const byId = new Map(project.episodes.map((e) => [e.id, e]));
+  const text = format.siteEpisodeIds(project, editSite).map((id) => byId.get(id))
     .map((e) => draftOf(e, editSite))
     .map((d) => `${d.title}\n\n${convert(editSite, d.body)}`)
     .join('\n\n――――――――――\n\n');
