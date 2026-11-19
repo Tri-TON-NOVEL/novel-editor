@@ -2,7 +2,7 @@
 // 利用者からは一つの .ayabackup ファイルだが、内部は索引＋項目ごとの gzip ブロック。
 // 巨大なJSON全体を file.text() / JSON.parse() せず、必要なブロックだけ順番に読む。
 import { db, meta, prefs, versions } from './db.js';
-import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION } from './format.js';
+import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES } from './format.js';
 import { applyEnvironment, environmentSummary } from './backup.js';
 
 export const ARCHIVE_FORMAT = 'ayatuzuri-block-backup';
@@ -41,22 +41,19 @@ function environmentPayload() {
 }
 
 function identity(p) { return { id: p.id, workId: p.workId, title: p.title || '無題', createdAt: p.createdAt, updatedAt: p.updatedAt }; }
-function epTitle(ep) { return draftOf(ep, 'narou').title || draftOf(ep, 'alpha').title || ''; }
+function epTitle(ep) { return SITE_KEYS.map((s) => draftOf(ep, s).title).find(Boolean) || ''; }
 function episodeBrief(ep) {
   return {
     id: ep.id,
     chapterId: ep.chapterId || null,
-    drafts: {
-      narou: { title: draftOf(ep, 'narou').title || '' },
-      alpha: { title: draftOf(ep, 'alpha').title || '' },
-    },
+    drafts: Object.fromEntries(SITE_KEYS.filter((s) => LEGACY_SITES.includes(s) || draftOf(ep, s).title)
+      .map((s) => [s, { title: draftOf(ep, s).title || '' }])),
   };
 }
 function projectMaterials(p) {
   const n = normalize(p);
   return {
-    title: n.title, site: n.site, narouUrl: n.narouUrl, alphaUrl: n.alphaUrl,
-    narouNcode: n.narouNcode, alphaWorkId: n.alphaWorkId, synopsis: n.synopsis,
+    ...Object.fromEntries(PROJECT_INFO_KEYS.map((k) => [k, n[k]])),
     projectMemo: n.projectMemo || '', memos: n.memos, foreshadows: n.foreshadows, chapters: n.chapters, world: n.world,
     characters: n.characters, createdAt: n.createdAt, updatedAt: n.updatedAt,
   };

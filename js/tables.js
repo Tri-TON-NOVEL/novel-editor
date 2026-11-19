@@ -720,7 +720,9 @@ export function categorizedTable(container, getData, opts) {
 export function chapterList(container, getChapters, ops) {
   const { onChange, toast, copy } = ops;
   let current = 0;
-  const chapterName = (ch) => ch.title || '（無題の章）';
+  const chapterName = (ch) => ch.title || (ch.level === 1 ? '（無題の部）' : '（無題の章）');
+  // 部（v4）には印を付ける
+  const chapterLabel = (ch) => (ch.level === 1 ? `【部】${chapterName(ch)}` : chapterName(ch));
 
   function render(focusTitle = false) {
     const chapters = getChapters();
@@ -735,7 +737,7 @@ export function chapterList(container, getChapters, ops) {
 
     const select = h('select');
     select.setAttribute('aria-label', '章を選ぶ');
-    chapters.forEach((c, i) => select.append(new Option(chapterName(c), String(i))));
+    chapters.forEach((c, i) => select.append(new Option(chapterLabel(c), String(i))));
     select.value = String(current);
     select.addEventListener('change', () => { current = Number(select.value); render(); });
 
@@ -758,7 +760,7 @@ export function chapterList(container, getChapters, ops) {
     title.setAttribute('aria-label', '章タイトル');
     title.addEventListener('input', () => {
       ch.title = title.value;
-      select.options[current].textContent = chapterName(ch);
+      select.options[current].textContent = chapterLabel(ch);
       onChange({ chapterTitle: true });
     });
     const count = h('span', { className: 'count' });

@@ -1,29 +1,23 @@
-// 投稿サイトごとの記法
+// 投稿サイトごとの記法（サイト固有の設定は js/sites/ の各モジュール。ここはサイトを選んで呼び分ける窓口）
 //   なろう       ルビ |漢字《かんじ》   傍点 |傍点《・・》    挿絵 <iコード|ユーザID>（みてみんの画像）
+//   カクヨム     ルビ |漢字《かんじ》   傍点 《《傍点》》     挿絵 なし
 //   アルファポリス ルビ #漢字__かんじ__#  傍点 #傍点__・・__#  挿絵 サイト上で画像をアップロード
 // なろうのルビは対象・ルビとも10文字まで。
-export const SITES = {
-  narou: { label: '小説家になろう', short: 'なろう' },
-  alpha: { label: 'アルファポリス', short: 'アルファ' },
-};
+import { SITES } from './sites/index.js';
+import * as kakuyomu from './sites/kakuyomu.js';
+import { addWarning, sampleOf, imageMark, miteminUrl, dotsByRuby } from './sites/common.js';
+export { SITES, imageMark, miteminUrl };
 
 export const RUBY_LIMIT = 10;
 
 export function ruby(site, base, reading) {
-  return site === 'alpha' ? `#${base}__${reading}__#` : `|${base}《${reading}》`;
+  return (SITES[site] || SITES.narou).ruby(base, reading);
 }
 
 // 傍点は、文字数分の「・」をルビとして振る。空白で区切り、10文字ずつに分ける
 export function dots(site, text) {
-  return text.replace(/[^\s]+/g, (word) => {
-    const chars = [...word];
-    let out = '';
-    for (let i = 0; i < chars.length; i += RUBY_LIMIT) {
-      const part = chars.slice(i, i + RUBY_LIMIT);
-      out += ruby(site, part.join(''), '・'.repeat(part.length));
-    }
-    return out;
-  });
+  const s = SITES[site] || SITES.narou;
+  return s.dots ? s.dots(text) : dotsByRuby(s.ruby, text, RUBY_LIMIT);
 }
 
 // 自動字下げ：段落の先頭に全角スペースを1つ入れる
@@ -39,7 +33,7 @@ export const SYMBOLS = ['……', '――', '！？', '！！', '？？', '「�
 
 // ルビ入力後にカーソルを置く位置（読みを入力する場所）。挿入文字列の先頭からの文字数
 export function rubyCaretOffset(site, base) {
-  return site === 'alpha' ? 1 + base.length + 2 : 1 + base.length + 1;
+  return (SITES[site] || SITES.narou).rubyCaretOffset(base);
 }
 
 // ---------- なろう ⇔ アルファポリスの変換（純粋関数。tests/tests.js でテスト） ----------
@@ -64,18 +58,6 @@ const NAROU_PAREN_RUBY = /[一-龠々〆ヵヶ]+[（(][ぁ-んァ-ヶー・]{1,2
 const NAROU_ESCAPE = /[|｜](?=《)/g;
 const ALPHA_RUBY = /#([^#_\n][^#\n]{0,29}?)__([^_#\n]{1,30}?)__#/g;
 const ALPHA_DOTS = /《《([^《》\n]+?)》》/g;
-
-export const imageMark = (id) => `【ここに画像を挿入：${id}】`;
-
-function sampleOf(text, index, len = 24) {
-  return text.slice(Math.max(0, index - 4), index + len).replace(/\n/g, '⏎');
-}
-
-function addWarning(warnings, type, message, sample) {
-  const w = warnings.find((x) => x.type === type);
-  if (w) { w.count++; if (w.samples.length < 3 && sample) w.samples.push(sample); return; }
-  warnings.push({ type, message, count: 1, samples: sample ? [sample] : [] });
-}
 
 function narouToAlpha(text, warnings) {
   let t = text.replace(NAROU_IMAGE, (m, code, user) => {
@@ -132,7 +114,10 @@ function alphaToNarou(text, warnings, opts = {}) {
 export function convertText(from, to, text, opts = {}) {
   const warnings = [];
   if (!text || from === to) return { text: text || '', warnings };
-  const out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings, opts);
+  let out;
+  if (from === 'kakuyomu') out = to === 'alpha' ? kakuyomu.toAlpha(text, warnings) : kakuyomu.toNarou(text, warnings);
+  else if (to === 'kakuyomu') out = from === 'alpha' ? kakuyomu.fromAlpha(text, warnings) : kakuyomu.fromNarou(text, warnings);
+  else out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings, opts);
   return { text: out, warnings };
 }
 
@@ -154,10 +139,6 @@ export function countImages(text) {
 // みてみんの画像ページURL → なろうの挿絵タグ
 //   https://12345.mitemin.net/i1234569/  →  <i1234569|12345>
 const MITEMIN_URL = /https?:\/\/(\d+)\.mitemin\.net\/i(\d+)\/?/g;
-
-export function miteminUrl(user, code) {
-  return `https://${user}.mitemin.net/i${code}/`;
-}
 
 /**
  * 文章の中の画像を探す（なろうの挿絵タグ・みてみんの URL・アルファポリスの画像タグ）。
@@ -201,13 +182,10 @@ export function xLength(text) {
 }
 
 // ひな型の差し込み
-export const TEMPLATE_VARS = ['{作品名}', '{話数}', '{エピソード名}', '{URL}', '{なろうURL}', '{アルファURL}', '{日付}'];
+export const TEMPLATE_VARS = ['{作品名}', '{話数}', '{エピソード名}', '{URL}', '{なろうURL}', '{アルファURL}', '{カクヨムURL}', '{日付}'];
 
 export function episodeUrl(project, index, site) {
-  if (site === 'alpha') return project.alphaUrl || '';
-  const base = (project.narouUrl || '').trim();
-  if (!base) return '';
-  return base.replace(/\/?$/, '/') + (index + 1) + '/';
+  return (SITES[site] || SITES.narou).episodeUrl(project, index);
 }
 
 export function fillTemplate(text, project, index) {
@@ -216,13 +194,16 @@ export function fillTemplate(text, project, index) {
   const ep = { title: e?.drafts?.[project.site]?.title ?? e?.title ?? '' };
   const narou = episodeUrl(project, index, 'narou');
   const alpha = episodeUrl(project, index, 'alpha');
+  const kakuyomu = episodeUrl(project, index, 'kakuyomu');
+  const main = episodeUrl(project, index, project.site);
   const values = {
     '{作品名}': project.title || '',
     '{話数}': `第${index + 1}話`,
     '{エピソード名}': ep.title || '',
-    '{URL}': (project.site === 'alpha' ? alpha : narou) || narou || alpha,
+    '{URL}': main || narou || kakuyomu || alpha,
     '{なろうURL}': narou,
     '{アルファURL}': alpha,
+    '{カクヨムURL}': kakuyomu,
     '{日付}': new Date().toLocaleDateString('ja-JP'),
   };
   return text.replace(/\{[^{}\n]+\}/g, (m) => (m in values ? values[m] : m));

@@ -1,20 +1,24 @@
 // 作品（プロジェクト）のデータ形式とファイル形式
 //
-// ファイル: { format: 'novel-editor', version: 3, schemaVersion: 3, project }
+// ファイル: { format: 'novel-editor', version: 4, schemaVersion: 4, project }
 //
 // project = {
 //   id（端末ローカル）, workId（作品の識別子。端末をまたいでも同じ）,
-//   title, site: 'narou' | 'alpha'（メイン投稿サイト）, narouUrl, alphaUrl, synopsis（あらすじ）,
+//   title, site: 'narou' | 'kakuyomu' | 'alpha'（メイン投稿サイト。sites の中の1つ）,
+//   sites: ['narou', …]（v4。この作品で使う投稿サイト。外したサイトの原稿は消さずに残す）,
+//   narouUrl, alphaUrl, kakuyomuUrl, synopsis（あらすじ）,
+//   kakuyomu: { catchphrase, tags: [] }（v4。カクヨムのキャッチコピー・タグ）, shortStory（v4。短編）,
 //   memos: [{ id, title, body }]（作品全体のメモ。タブで切り替える。1つ以上）,
 //   projectMemo（1つ目のメモの本文の写し。前の版で読んでも1つ目のメモが残るように）,
-//   chapters: [{ id, title, plot, order }],                       章（全体プロットの章と同じもの）
+//   chapters: [{ id, title, plot, order, level }],                章（全体プロットの章と同じもの）。
+//               level（v4）：1＝部（カクヨムの大見出し）、2＝章（小見出し）。並びは1列のまま（部のあとに章・話が続く）
 //   episodes: [{
-//     id, chapterId（null＝未分類）, order,
-//     drafts: { narou: { title, foreword, body, afterword }, alpha: { ... } },  サイト別原稿
+//     id, chapterId（null＝未分類。部の id も可）, order,
+//     drafts: { narou: { title, foreword, body, afterword }, kakuyomu: { ... }, alpha: { ... } },  サイト別原稿（エディション）
 //     plot, freeMemo,                                              サイト共通
 //     createdAt, updatedAt,
 //   }],
-//   narouNcode, alphaWorkId（投稿サイトの作品との対応。任意）,
+//   narouNcode, alphaWorkId, kakuyomuWorkId（投稿サイトの作品との対応。任意）,
 //   world:      { categories: [{ id, name }], items: [{ id, categoryId, ...列 }] },  設定
 //   characters: { categories: [{ id, name }], items: [{ id, categoryId, ...列,
 //                 orgs: [{ id: 設定の項目ID, note: 立場 }]（所属）, identityId（同じ値の行どうしが同一人物） }] },  登場人物
@@ -24,10 +28,13 @@
 // }
 // 旧形式は、このファイル内の補完処理で現在の形式へ移行する。
 import { normalizeForeshadows } from './foreshadow.js';
+import { SITE_KEYS, SITES } from './sites/index.js';
+export { SITE_KEYS };
 
 export const FORMAT = 'novel-editor';
-export const SCHEMA_VERSION = 3;
-export const SITE_KEYS = ['narou', 'alpha'];
+export const SCHEMA_VERSION = 4;
+// v3 までの作品は、なろう・アルファの2サイトを使っていた
+export const LEGACY_SITES = ['narou', 'alpha'];
 export const DRAFT_FIELDS = ['title', 'foreword', 'body', 'afterword'];
 
 export function makeId() {
@@ -57,7 +64,7 @@ export function newEpisode(content = {}) {
 }
 
 export function newChapter(content = {}) {
-  return { id: makeId(), title: '', plot: '', ...content };
+  return { id: makeId(), title: '', plot: '', level: 2, ...content };
 }
 
 function categories(...names) {
@@ -72,10 +79,15 @@ export function newProject(content = {}) {
     workId: makeId(),
     title: '',
     site: 'narou',
+    sites: [...LEGACY_SITES],
     narouUrl: '',
     alphaUrl: '',
+    kakuyomuUrl: '',
     narouNcode: '',   // なろうの Nコード（例 n1234ab）
     alphaWorkId: '',  // アルファポリスの作品ID
+    kakuyomuWorkId: '', // カクヨムの作品ID
+    kakuyomu: { catchphrase: '', tags: [] },
+    shortStory: false,
     synopsis: '',
     projectMemo: '',
     episodes: [newEpisode({ chapterId: first.id })],
@@ -95,10 +107,30 @@ export function draftOf(ep, site) {
   return ep.drafts?.[site] || emptyDraft();
 }
 
-// 一覧などに出すエピソード名：メインのタイトル、なければもう一方のタイトル
+// 一覧などに出すエピソード名：メインのタイトル、なければほかのサイトのタイトル
 export function episodeName(ep, mainSite = 'narou') {
-  const other = SITE_KEYS.find((s) => s !== mainSite);
-  return draftOf(ep, mainSite).title || draftOf(ep, other).title || '（無題）';
+  for (const s of [mainSite, ...SITE_KEYS.filter((k) => k !== mainSite)]) {
+    const t = draftOf(ep, s).title;
+    if (t) return t;
+  }
+  return '（無題）';
+}
+
+// 作品で使う投稿サイト（重なり・知らないサイトを除く。記録がなければ v3 までと同じ2サイト）。メインは必ず入れる
+export function normalizeSites(sites, main) {
+  const list = Array.isArray(sites) ? SITE_KEYS.filter((s) => sites.includes(s)) : [...LEGACY_SITES];
+  if (!list.length) list.push(...(SITES[main] ? [main] : LEGACY_SITES));
+  if (SITES[main] && !list.includes(main)) list.push(main);
+  return SITE_KEYS.filter((s) => list.includes(s));
+}
+
+// 作品資料（バックアップの「作品資料」）に入れる、作品全体の情報の項目
+export const PROJECT_INFO_KEYS = ['title', 'site', 'sites', 'narouUrl', 'alphaUrl', 'kakuyomuUrl', 'narouNcode', 'alphaWorkId', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'synopsis'];
+
+// カクヨムの作品情報（キャッチコピー・タグ）
+export function normalizeKakuyomuInfo(k) {
+  const o = k && typeof k === 'object' ? k : {};
+  return { ...o, catchphrase: String(o.catchphrase ?? ''), tags: Array.isArray(o.tags) ? o.tags.map((t) => String(t)).filter(Boolean) : [] };
 }
 
 function normalizeTable(t, fallback) {
@@ -162,6 +194,11 @@ export function normalize(p) {
   const base = newProject();
   const project = { ...base, ...p, reports: { ...base.reports, ...(p.reports || {}) }, links: { ...(p.links || {}) } };
   if (!SITE_KEYS.includes(project.site)) project.site = 'narou';
+  // v4：使う投稿サイト。v3 までのデータ（記録なし）は、なろう・アルファの2サイト
+  project.sites = normalizeSites(p.sites, project.site);
+  project.kakuyomu = normalizeKakuyomuInfo(p.kakuyomu);
+  project.shortStory = !!p.shortStory;
+  for (const k of ['kakuyomuUrl', 'kakuyomuWorkId']) project[k] = String(p[k] ?? '');
   if (!project.workId) project.workId = makeId();
   // 作品のメモ（複数）。前の版のデータ（projectMemo だけ）は、1つ目のメモにする
   project.memos = normalizeMemos(p.memos, p.projectMemo);
@@ -171,7 +208,8 @@ export function normalize(p) {
   const chapterSrc = Array.isArray(p.chapters) && p.chapters.length
     ? [...p.chapters].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     : base.chapters;
-  project.chapters = chapterSrc.map(({ order, ...c }) => newChapter({ ...c, id: c.id || makeId() }));
+  // level（v4）：1＝部、2＝章。記録のない章（v3 まで）は章
+  project.chapters = chapterSrc.map(({ order, ...c }) => newChapter({ ...c, id: c.id || makeId(), level: c.level === 1 ? 1 : 2 }));
   // 旧「作品メモ」は章として引き継ぐ
   if (p.memo) project.chapters.push(newChapter({ title: '作品メモ', plot: p.memo }));
   delete project.memo;

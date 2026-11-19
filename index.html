@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>あや綴り</title>
-<meta name="description" content="文（あや）と文（あや）で綾（あや）を綴る。小説家になろう・アルファポリス向けの小説エディター">
+<meta name="description" content="文（あや）と文（あや）で綾（あや）を綴る。小説家になろう・カクヨム・アルファポリス向けの小説エディター">
 <meta name="application-name" content="あや綴り">
 <meta name="theme-color" content="#2f5d50">
 <link rel="manifest" href="manifest.webmanifest?v=101">
@@ -57,6 +57,7 @@
     <label class="site-select">メイン投稿先
       <select id="site">
         <option value="narou">小説家になろう</option>
+        <option value="kakuyomu">カクヨム</option>
         <option value="alpha">アルファポリス</option>
       </select>
     </label>
@@ -83,10 +84,21 @@
       <details class="work-codes" id="work-codes">
         <summary>小説投稿サイト情報 <span class="work-codes-state" id="work-codes-state"></span></summary>
         <div class="work-codes-body">
-          <label>なろうの Nコード <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
-          <label>なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
-          <label>アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
-          <label>アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
+          <fieldset class="use-sites">
+            <legend>使う投稿サイト</legend>
+            <label><input type="checkbox" data-use-site="narou"> なろう</label>
+            <label><input type="checkbox" data-use-site="kakuyomu"> カクヨム</label>
+            <label><input type="checkbox" data-use-site="alpha"> アルファ</label>
+          </fieldset>
+          <label class="inline-check"><input type="checkbox" id="short-story"> 短編</label>
+          <label data-site-field="narou">なろうの Nコード <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
+          <label data-site-field="narou">なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
+          <label data-site-field="kakuyomu">カクヨムの作品ID <input id="work-kakuyomu-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：1177354054880000000"></label>
+          <label data-site-field="kakuyomu">カクヨムの作品URL <input id="kakuyomu-url" type="url" autocomplete="off" placeholder="https://kakuyomu.jp/works/…"></label>
+          <label data-site-field="kakuyomu">カクヨムのキャッチコピー <input id="kakuyomu-catchphrase" type="text" autocomplete="off" maxlength="35" placeholder="35字まで"></label>
+          <label data-site-field="kakuyomu">カクヨムのタグ <input id="kakuyomu-tags" type="text" autocomplete="off" placeholder="空白で区切る（8個まで）"></label>
+          <label data-site-field="alpha">アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
+          <label data-site-field="alpha">アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
         </div>
       </details>
       <div class="nav-head">
@@ -128,6 +140,7 @@
         <button type="button" class="sync-save" id="sync-save-btn" data-action="sync-save" title="表示中のエピソードをサーバへバックアップ（Ctrl+S／⌘S）">編集エピソード保存</button>
         <div class="site-tabs" role="tablist" aria-label="編集する原稿">
           <button type="button" role="tab" data-edit-site="narou">なろう用</button>
+          <button type="button" role="tab" data-edit-site="kakuyomu">カクヨム用</button>
           <button type="button" role="tab" data-edit-site="alpha">アルファ用</button>
           <button type="button" role="tab" id="report-tab" data-action="open-report" aria-selected="false" title="このエピソードの活動報告（X・なろう活動報告）">活動報告</button>
         </div>
@@ -728,6 +741,7 @@
         <label>インポート元
           <select id="imp-source">
             <option value="narou">小説家になろう</option>
+            <option value="kakuyomu">カクヨム（バックアップZIP）</option>
             <option value="alpha">アルファポリス</option>
           </select>
         </label>
@@ -1004,7 +1018,12 @@
 
 <dialog id="site-copy-dialog">
   <form method="dialog" class="dialog" id="site-copy-form">
-    <h2 id="site-copy-title">メイン → サブにコピー</h2>
+    <h2 id="site-copy-title">コピー</h2>
+    <div class="site-copy-pair">
+      <select id="site-copy-from" aria-label="コピー元"></select>
+      <span aria-hidden="true">→</span>
+      <select id="site-copy-to" aria-label="コピー先"></select>
+    </div>
     <p class="hint" id="site-copy-desc"></p>
     <fieldset class="checks site-copy-mode">
       <legend>コピー先</legend>
@@ -1171,7 +1190,7 @@
       <button type="button" role="tab" data-stab="cloud">クラウド</button>
       <button type="button" role="tab" data-stab="file">ファイル</button>
       <button type="button" role="tab" data-stab="backup">バックアップ</button>
-      <button type="button" role="tab" data-stab="import">インポート（なろう・アルファ）</button>
+      <button type="button" role="tab" data-stab="import">インポート</button>
       <button type="button" role="tab" data-stab="about">このアプリについて</button>
     </div>
 
@@ -1288,7 +1307,7 @@
       <label><input type="checkbox" data-ui="copy.x-text"> X の投稿文</label>
       <label><input type="checkbox" data-ui="copy.narou-report-title"> 活動報告のタイトル</label>
       <label><input type="checkbox" data-ui="copy.narou-report-body"> 活動報告の本文</label>
-      <label><input type="checkbox" data-ui="copy.main-to-sub"> メイン → サブにコピー</label>
+      <label><input type="checkbox" data-ui="copy.main-to-sub"> サイト間のコピー</label>
     </fieldset>
     <fieldset class="checks">
       <legend>貼り付けボタン</legend>
@@ -1348,7 +1367,7 @@
     <fieldset class="checks">
       <legend>その他</legend>
       <label><input type="checkbox" data-ui="other.status"> 保存状態ラベル</label>
-      <label><input type="checkbox" data-ui="other.sub-site"> サブ側の原稿タブ</label>
+      <label><input type="checkbox" data-ui="other.sub-site"> メイン以外の原稿タブ</label>
       <label><input type="checkbox" data-ui="other.sync-save"> 編集エピソード保存</label>
     </fieldset>
     </div>

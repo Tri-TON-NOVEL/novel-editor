@@ -5,7 +5,8 @@
 //   あらすじ／章1つ（タイトル＋プロット）／世界観・登場人物の1行／メモ1つ（名前＋本文）／伏線1件（名前・内容・回収の記録）／
 //   エピソードの欄1つ（例：第3話のなろう用の本文、第3話のプロット）
 // 大文字・小文字と、全角・半角の英数字は区別しない（文字の位置は変えないので、当たった位置で入力欄の文字を選べる）。
-import { draftOf, episodeName } from './format.js';
+import { draftOf, episodeName, SITE_KEYS } from './format.js';
+import { SITES } from './sites/index.js';
 import { CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 
 export const SEARCH_TARGETS = [
@@ -25,7 +26,7 @@ export const SEARCH_TARGETS = [
 ];
 export const SEARCH_TARGET_KEYS = SEARCH_TARGETS.map((t) => t.key);
 const TARGET_LABEL = Object.fromEntries(SEARCH_TARGETS.map((t) => [t.key, t.label]));
-const SITE_LABEL = { narou: 'なろう用', alpha: 'アルファ用' };
+const SITE_LABEL = Object.fromEntries(SITE_KEYS.map((s) => [s, `${SITES[s].short}用`]));
 const DRAFT_KEY = { 'ep-title': 'title', body: 'body', foreword: 'foreword', afterword: 'afterword' };
 
 // 1文字ずつ置き換える（長さを変えない）：全角英数・記号 → 半角、全角スペース → 半角、A〜Z → a〜z
@@ -57,7 +58,7 @@ export function parseQuery(q) {
 }
 
 // 検索する単位を並べる
-export function searchUnits(project, { targets = SEARCH_TARGET_KEYS, sites = ['narou', 'alpha'] } = {}) {
+export function searchUnits(project, { targets = SEARCH_TARGET_KEYS, sites = SITE_KEYS } = {}) {
   const on = new Set(targets);
   const units = [];
   const add = (target, title, text, ref, sub = '') => { if (text) units.push({ target, title, sub, text, ref }); };
@@ -156,7 +157,7 @@ function snippets(text, ranges, { context = 30, max = 3 } = {}) {
 
 // 検索する。mode：'and'（すべての語を含む）| 'or'（どれかを含む）
 // 戻り値：{ words, results: [{ target, title, sub, ref, count, first:{index,length}, snippets }], total, truncated }
-export function crossSearch(project, { query = '', mode = 'and', targets = SEARCH_TARGET_KEYS, sites = ['narou', 'alpha'], limit = 300 } = {}) {
+export function crossSearch(project, { query = '', mode = 'and', targets = SEARCH_TARGET_KEYS, sites = SITE_KEYS, limit = 300 } = {}) {
   const words = parseQuery(query);
   if (!words.length) return { words, results: [], total: 0, truncated: false };
   const folded = words.map(foldText);

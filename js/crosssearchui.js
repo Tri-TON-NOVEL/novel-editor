@@ -1,5 +1,6 @@
 // 串刺し検索の画面（0.74）。検索そのものは crosssearch.js
 import { SEARCH_TARGETS, SEARCH_TARGET_KEYS, crossSearch } from './crosssearch.js';
+import { SITE_KEYS, SITES as SITE_INFO } from './sites/index.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,7 +19,7 @@ function h(tag, props = {}, ...children) {
   return e;
 }
 
-const SITES = [['narou', 'なろう用'], ['alpha', 'アルファ用']];
+const SITES = SITE_KEYS.map((s) => [s, `${SITE_INFO[s].short}用`]);
 const TARGET_LABEL = Object.fromEntries(SEARCH_TARGETS.map((t) => [t.key, t.label]));
 
 /**
@@ -35,6 +36,8 @@ export function initCrossSearch(opts) {
   // ---- 対象のチェック（端末ごとに覚える） ----
   const savedTargets = prefs.get('cs.targets', SEARCH_TARGET_KEYS);
   const savedSites = prefs.get('cs.sites', SITES.map(([s]) => s));
+  // v4 より前に覚えたチェックには、カクヨムがない（はじめはチェックを入れておく）
+  if (!prefs.get('cs.sitesV4', false)) { if (!savedSites.includes('kakuyomu')) savedSites.push('kakuyomu'); prefs.set('cs.sitesV4', true); }
   const box = (group) => SEARCH_TARGETS.filter((t) => t.group === group).map((t) =>
     h('label', {}, Object.assign(h('input', { type: 'checkbox', dataset: { csTarget: t.key } }), { checked: savedTargets.includes(t.key) }), ` ${t.label}`));
   $('cs-targets-work').append(...box('work'));
@@ -45,7 +48,10 @@ export function initCrossSearch(opts) {
   form.querySelectorAll('[name="cs-mode"]').forEach((r) => { r.checked = r.value === mode; });
 
   const targets = () => [...form.querySelectorAll('[data-cs-target]:checked')].map((c) => c.dataset.csTarget);
-  const sites = () => [...form.querySelectorAll('[data-cs-site]:checked')].map((c) => c.dataset.csSite);
+  // 作品で使っていない投稿サイトは、チェックを出さず、検索もしない
+  const usedSites = () => opts.getProject()?.sites || SITE_KEYS;
+  const showSites = () => form.querySelectorAll('[data-cs-site]').forEach((c) => { c.closest('label').hidden = !usedSites().includes(c.dataset.csSite); });
+  const sites = () => [...form.querySelectorAll('[data-cs-site]:checked')].map((c) => c.dataset.csSite).filter((s) => usedSites().includes(s));
   const currentMode = () => form.querySelector('[name="cs-mode"]:checked')?.value || 'and';
   const save = () => {
     prefs.set('cs.targets', targets());
@@ -79,7 +85,7 @@ export function initCrossSearch(opts) {
     if (!q.trim()) { summary.textContent = '検索する言葉を入れてください。'; out.replaceChildren(); return; }
     if (!t.length) { summary.textContent = '検索する対象にチェックを入れてください。'; out.replaceChildren(); return; }
     if (needSite && !sites().length && t.every((k) => SEARCH_TARGETS.find((x) => x.key === k)?.site)) {
-      summary.textContent = '「なろう用」「アルファ用」のどちらかにチェックを入れてください。'; out.replaceChildren(); return;
+      summary.textContent = `${usedSites().map((s) => `「${SITE_INFO[s].short}用」`).join('')}のどれかにチェックを入れてください。`; out.replaceChildren(); return;
     }
     const r = crossSearch(project, { query: q, mode: currentMode(), targets: t, sites: sites() });
     const places = r.results.reduce((n, x) => n + x.count, 0);
@@ -108,6 +114,7 @@ export function initCrossSearch(opts) {
   return {
     // 画面を開いたとき：前に検索していれば、今の内容で検索し直す（ほかの画面で書き換えた分を反映）
     show() {
+      showSites();
       if (lastQuery) run();
       else if (!matchMedia('(pointer: coarse)').matches) setTimeout(() => input.focus({ preventScroll: true }), 0); // スマホではキーボードを勝手に出さない
     },

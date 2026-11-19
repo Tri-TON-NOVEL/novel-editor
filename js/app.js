@@ -1,8 +1,10 @@
 import { db, prefs, versions, meta, saveEnvironment, restoreEnvironmentIfLost } from './db.js';
 import {
   newProject, newEpisode, normalize, fromSingle, serialize, parse, fileName, countChars,
-  draftOf, DRAFT_FIELDS, SITE_KEYS, newMemo, DEFAULT_MEMO_TITLE,
+  draftOf, DRAFT_FIELDS, SITE_KEYS, LEGACY_SITES, newMemo, DEFAULT_MEMO_TITLE,
 } from './format.js';
+import { siteOrder, siteSupports } from './sites/index.js';
+import kakuyomuSite from './sites/kakuyomu.js';
 import * as format from './format.js';
 import { categorizedTable, chapterList, CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 import {
@@ -39,7 +41,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.19-0.95';
+const APP_VERSION = '2026.11.19-0.96';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -83,7 +85,20 @@ let otherTabEditing = false;
 const episode = () => project.episodes[epIndex];
 // 編集中のエピソードの、編集中サイトの原稿
 const cur = () => episode().drafts[editSite];
-const subSite = () => SITE_KEYS.find((s) => s !== project.site);
+// この作品で使う投稿サイト（メインが先頭。残りはなろう・カクヨム・アルファの順）
+const siteList = () => siteOrder(project);
+// 「コピー…」の初期値：メイン → 表示中のサイト（メインを表示中なら、次のサイト）
+function copyPair() {
+  const list = siteList();
+  const from = project.site;
+  const to = editSite !== from && list.includes(editSite) ? editSite : list.find((s) => s !== from);
+  return { from, to };
+}
+// 「ほかのサイトの稿は変わりません」（1サイトだけの作品では空）
+function otherSitesText(site) {
+  const others = siteList().filter((s) => s !== site);
+  return others.length ? `${others.map((s) => `${SITES[s].short}用`).join('・')}の稿は変わりません。` : '';
+}
 const episodeName = (ep) => format.episodeName(ep, project.site);
 // メイン側の原稿（一覧・並べ替え・文字数の基準）
 const mainDraft = (ep) => draftOf(ep, project.site);
@@ -555,7 +570,9 @@ function setEpisodeSort(next) {
 // project.episodes の並び＝ファイル順。常に「章の順 → 章の中の順 → 最後に未分類」に揃えておく。
 
 const UNCAT = '__uncategorized__';
-const chapterName = (ch) => ch?.title || '（無題の章）';
+const chapterName = (ch) => ch?.title || (ch?.level === 1 ? '（無題の部）' : '（無題の章）');
+// 一覧・プルダウンでの名前（部には印を付ける）
+const chapterLabel = (ch) => (ch?.level === 1 ? `【部】${chapterName(ch)}` : chapterName(ch));
 
 // エピソードの並びを章の順に揃える（章の中の順番は保つ）。存在しない章を指していたら未分類にする
 function normalizeOrder() {
@@ -597,13 +614,16 @@ function chapterMenu(ch) {
   const summary = Object.assign(document.createElement('summary'), { className: 'tool', textContent: '⋯' });
   summary.setAttribute('aria-label', `章「${chapterName(ch)}」の操作`);
   const list = Object.assign(document.createElement('div'), { className: 'menu-list' });
+  // 部（level 1）と章（level 2）は同じ操作。「部にする」「章にする」で切り替える（v4）
+  const kind = ch.level === 1 ? '部' : '章';
   const items = [
-    ['add-ep', '＋ この章にエピソードを追加'],
+    ['add-ep', `＋ この${kind}にエピソードを追加`],
     ['rename', '名前を変える…'],
-    ['plot', '章のプロットを開く'],
-    ['up', '↑ 章を上へ'],
-    ['down', '↓ 章を下へ'],
-    ['delete', '章を削除…'],
+    ['plot', `${kind}のプロットを開く`],
+    ['up', `↑ ${kind}を上へ`],
+    ['down', `↓ ${kind}を下へ`],
+    ['level', ch.level === 1 ? '章にする' : '部にする'],
+    ['delete', `${kind}を削除…`],
   ];
   for (const [act, text] of items) {
     const b = Object.assign(document.createElement('button'), { type: 'button', textContent: text, className: act === 'delete' ? 'danger' : '' });
@@ -652,9 +672,9 @@ function episodeMenu(i) {
   // 章の移動：章の数が多くても場所を取らないよう、プルダウンで選ぶ（選んだらすぐ移す）
   const sel = Object.assign(document.createElement('select'), { className: 'menu-select-input' });
   sel.setAttribute('aria-label', `「${episodeName(ep)}」を移す章`);
-  const current = ep.chapterId ? chapterName(project.chapters.find((c) => c.id === ep.chapterId)) : '未分類';
+  const current = ep.chapterId ? chapterLabel(project.chapters.find((c) => c.id === ep.chapterId)) : '未分類';
   sel.append(Object.assign(new Option(`今の章：${current}`, '__current__'), { disabled: true, selected: true }));
-  for (const ch of project.chapters) if (ch.id !== ep.chapterId) sel.append(new Option(chapterName(ch), ch.id));
+  for (const ch of project.chapters) if (ch.id !== ep.chapterId) sel.append(new Option(chapterLabel(ch), ch.id));
   if (ep.chapterId) sel.append(new Option('未分類', ''));
   sel.disabled = sel.options.length < 2;
   sel.addEventListener('change', () => episodeAction('chapter', i, sel.value));
@@ -749,13 +769,24 @@ function renderEpisodeList() {
   const uncategorized = groups.find((g) => !g.chapter);
   const chapterGroups = groups.filter((g) => g.chapter);
   if (epSort.dir === 'desc') chapterGroups.reverse();
+  // 部（v4）：部のあとの章は字下げして出す。部を折りたたむと、次の部までの章も隠す（昇順のときだけ）
+  const nested = epSort.dir !== 'desc' && project.chapters.some((c) => c.level === 1);
+  let inPart = false;
+  let partClosed = false;
   for (const g of [...chapterGroups, uncategorized].filter(Boolean)) {
     const key = g.chapter ? g.chapter.id : UNCAT;
     // 未分類は、中身があるときか、章が1つもないときに出す
     if (!g.chapter && !g.indexes.length && project.chapters.length) continue;
+    const isPart = g.chapter?.level === 1;
+    if (isPart) { inPart = nested; partClosed = false; }
+    if (!g.chapter) { inPart = false; partClosed = false; }
+    if (partClosed && !isPart) continue;
     const isOpen = !collapsed.has(key);
+    if (isPart && !isOpen && nested) partClosed = true;
 
-    const head = Object.assign(document.createElement('li'), { className: 'chapter-row' + (g.chapter ? '' : ' uncategorized') });
+    const head = Object.assign(document.createElement('li'), {
+      className: 'chapter-row' + (g.chapter ? '' : ' uncategorized') + (isPart ? ' part-row' : inPart ? ' in-part' : ''),
+    });
     const toggle = Object.assign(document.createElement('button'), { type: 'button', className: 'chapter-toggle' });
     toggle.dataset.toggleChapter = key;
     toggle.setAttribute('aria-expanded', String(isOpen));
@@ -770,7 +801,11 @@ function renderEpisodeList() {
     list.append(head);
     if (!isOpen) continue;
 
-    for (const i of sortedEpisodeIndexes(g.indexes)) list.append(episodeRow(i, sort));
+    for (const i of sortedEpisodeIndexes(g.indexes)) {
+      const row = episodeRow(i, sort);
+      if (inPart && !isPart) row.classList.add('in-part');
+      list.append(row);
+    }
   }
 }
 
@@ -835,7 +870,17 @@ function chapterAction(act, chapterId) {
   else if (act === 'plot') { outline.select(ch.id); setView('outline'); }
   else if (act === 'up') moveChapter(ch, -1);
   else if (act === 'down') moveChapter(ch, 1);
+  else if (act === 'level') setChapterLevel(ch, ch.level === 1 ? 2 : 1);
   else if (act === 'delete') removeChapter(ch);
+}
+
+// 部（大見出し）⇔ 章（小見出し）を切り替える。並び・所属するエピソードは変わらない
+function setChapterLevel(ch, level) {
+  ch.level = level;
+  changed();
+  renderEpisodeList();
+  if (view === 'outline') outline.render();
+  toast(`「${chapterName(ch)}」を${level === 1 ? '部' : '章'}にしました`);
 }
 
 // エピソードを別の章（または未分類）へ移す。移した先の章の最後に並べる。開いているエピソードはそのまま
@@ -931,6 +976,8 @@ async function migrateProjectReports() {
 // 編集中の原稿（なろう用／アルファ用）に合わせて、使える機能（ボタン・前書き・後書き）を切り替える
 function applySite() {
   document.body.dataset.site = editSite;
+  document.body.classList.toggle('short-story', !!project.shortStory);
+  document.body.classList.toggle('single-site', project.sites.length < 2);
   el.body.placeholder = editSite === 'narou'
     ? '本文\n\nみてみんの画像URL（https://〜.mitemin.net/i〜/）を貼り付けると、挿絵タグに自動で変わります'
     : '本文';
@@ -938,8 +985,13 @@ function applySite() {
 
 // なろう用／アルファ用のタブ。メイン側に印を付ける
 function renderSiteTabs() {
+  // 使う投稿サイトだけを、メインを先頭に並べる（v4）
+  const order = siteList();
+  const tabs = $('report-tab').parentElement;
+  for (const s of order) tabs.insertBefore(tabs.querySelector(`[data-edit-site="${s}"]`), $('report-tab'));
   document.querySelectorAll('[data-edit-site]').forEach((b) => {
     const s = b.dataset.editSite;
+    b.hidden = !order.includes(s);
     const d = draftOf(episode(), s);
     const filled = d.body || d.title ? '' : '（空）';
     b.replaceChildren(document.createTextNode(`${SITES[s].short}用${filled}`));
@@ -947,16 +999,20 @@ function renderSiteTabs() {
     b.classList.toggle('sub-site', s !== project.site);
     b.setAttribute('aria-selected', String(s === editSite && !reportMode));
   });
+  // コピー（1サイトだけの作品では出さない）
   const copyBtn = $('copy-main-to-sub');
+  const { from, to } = copyPair();
+  copyBtn.hidden = !to;
+  if (!to) return;
   copyBtn.replaceChildren(
-    Object.assign(document.createElement('span'), { className: 'long', textContent: `${SITES[project.site].short}（メイン）→ ${SITES[subSite()].short}（サブ）にコピー…` }),
-    Object.assign(document.createElement('span'), { className: 'short', textContent: `${SITES[subSite()].short}へコピー…` }));
-  copyBtn.setAttribute('aria-label', `${SITES[project.site].short}（メイン）から${SITES[subSite()].short}（サブ）へコピー`);
+    Object.assign(document.createElement('span'), { className: 'long', textContent: `${SITES[from].short}→${SITES[to].short}にコピー…` }),
+    Object.assign(document.createElement('span'), { className: 'short', textContent: `${SITES[to].short}へコピー…` }));
+  copyBtn.setAttribute('aria-label', `${SITES[from].short}から${SITES[to].short}へコピー`);
 }
 
 function setEditSite(site) {
-  if (reportMode) setReportMode(false); // 活動報告からなろう用・アルファ用へ戻る
-  if (!SITE_KEYS.includes(site) || site === editSite) return;
+  if (reportMode) setReportMode(false); // 活動報告から原稿へ戻る
+  if (!project.sites.includes(site) || site === editSite) return;
   editSite = site;
   applySite();
   showEpisode();
@@ -986,16 +1042,22 @@ function showProject(p, handle = null) {
   if (project?.id !== p.id && epSearch) { epSearch = ''; $('ep-search').value = ''; } // 作品を替えたら検索を消す
   if (project?.id !== p.id) fsUI?.reset(); // 伏線の編集中の欄も消す
   if (project?.id !== p.id) csUI?.reset(); // 串刺し検索の結果も消す
+  // v3 までの作品を初めて開いたときは、移行する前の状態を作品全体のバックアップ版に残す（v4）
+  if (p && !Array.isArray(p.sites) && p.id) savePreMigrationVersion(p).catch(() => {});
   project = normalize(p);
   fileHandle = handle;
   el.novelTitle.value = project.title;
-  el.site.value = project.site;
   el.synopsis.value = project.synopsis;
   renderMemos();
   el.narouUrl.value = project.narouUrl;
   el.alphaUrl.value = project.alphaUrl;
   $('work-ncode').value = project.narouNcode || '';
   $('work-alpha-id').value = project.alphaWorkId || '';
+  $('kakuyomu-url').value = project.kakuyomuUrl || '';
+  $('work-kakuyomu-id').value = project.kakuyomuWorkId || '';
+  $('kakuyomu-catchphrase').value = project.kakuyomu.catchphrase || '';
+  $('kakuyomu-tags').value = project.kakuyomu.tags.join(' ');
+  renderSiteSettings();
   renderWorkCodes();
   // 前回開いていたエピソード（ID で覚える。旧版は位置で覚えていた）
   const last = prefs.get('ep:' + project.id, 0);
@@ -1009,6 +1071,7 @@ function showProject(p, handle = null) {
   lastAutoVersionAt = Date.now();
   prefs.set('currentId', project.id);
   editSite = project.site;
+  renderSiteSettings();
   applySite();
   showEpisode();
   setView('episode');
@@ -1304,17 +1367,112 @@ async function deleteEpisode(index = epIndex) {
 
 // メイン投稿サイトを変える。原稿はサイトごとに別々に持っているので、書き換えや変換はしない
 function changeSite(site) {
-  if (site === project.site) return;
+  if (site === project.site || !project.sites.includes(site)) return;
   project.site = site;
   changed();
   editSite = site;
+  renderSiteSettings();
   applySite();
   showEpisode();
   renderEpisodeList();
   const empty = project.episodes.every((e) => !draftOf(e, site).body);
   toast(`メイン投稿サイトを${SITES[site].label}にしました。`
-    + (empty ? '　こちらの原稿はまだ空です（もう一方の原稿は残っています）' : '　なろう用・アルファ用の原稿はそれぞれそのまま残っています'));
+    + (empty ? '　こちらの原稿はまだ空です（ほかのサイトの原稿は残っています）' : '　各サイトの原稿はそれぞれそのまま残っています'));
   updateStatus();
+}
+
+// ---------- 使う投稿サイト（v4。作品ごと） ----------
+// 外したサイトの原稿は消さずに残す（もう一度チェックすると戻る）。メインは外せない
+function renderSiteSettings() {
+  const sel = el.site;
+  sel.replaceChildren(...siteList().map((s) => new Option(SITES[s].label, s)));
+  sel.value = project.site;
+  // 1サイトだけの作品では、メインの選択は出さない
+  sel.closest('label').hidden = project.sites.length < 2;
+  document.querySelectorAll('[data-use-site]').forEach((c) => {
+    c.checked = project.sites.includes(c.dataset.useSite);
+    c.disabled = c.checked && (c.dataset.useSite === project.site || project.sites.length < 2);
+    c.closest('label').title = c.dataset.useSite === project.site ? 'メインの投稿サイトは外せません（先にメインを変えてください）' : '';
+  });
+  // 使っていないサイトの作品情報の欄は出さない
+  document.querySelectorAll('[data-site-field]').forEach((n) => { n.hidden = !project.sites.includes(n.dataset.siteField); });
+  $('short-story').checked = !!project.shortStory;
+}
+
+async function setSiteUsed(site, on) {
+  if (on === project.sites.includes(site)) return;
+  if (!on) {
+    if (site === project.site) { toast('メインの投稿サイトは外せません。先にメインを変えてください', true); renderSiteSettings(); return; }
+    const n = project.episodes.filter((e) => DRAFT_FIELDS.some((f) => draftOf(e, site)[f])).length;
+    if (!(await ask(`${SITES[site].label}を、この作品で使う投稿サイトから外しますか？\n${SITES[site].short}用のタブ・ボタン・作品情報の欄が出なくなります。`
+      + `\n${n ? `${SITES[site].short}用の原稿（${n}話分）は消さずに残ります。` : ''}もう一度チェックを入れると戻ります。`, { ok: '外す' }))) { renderSiteSettings(); return; }
+    project.sites = project.sites.filter((s) => s !== site);
+    if (editSite === site) editSite = project.site;
+  } else {
+    project.sites = format.normalizeSites([...project.sites, site], project.site);
+    // 新しく使うサイトの原稿が空の話には、ほかのサイトの原稿からコピーできる
+    const empty = project.episodes.filter((e) => !DRAFT_FIELDS.some((f) => draftOf(e, site)[f]));
+    const sources = siteList().filter((s) => s !== site && project.episodes.some((e) => draftOf(e, s).body));
+    if (empty.length && sources.length) {
+      const pick = await choose(`${SITES[site].label}を使う投稿サイトに加えました。\n${SITES[site].short}用の原稿が空の話（${empty.length}話）に、ほかのサイトの原稿をコピーしますか？（書式は${SITES[site].short}用に変換します）`,
+        [...sources.map((s, i) => ({ value: s, label: `${SITES[s].short}用からコピー`, primary: i === 0 })), { value: 'none', label: '空のまま' }]);
+      if (pick && pick !== 'none') await copyAllEpisodes(pick, site, empty);
+    }
+  }
+  changed();
+  renderSiteSettings();
+  renderWorkCodes();
+  applySite();
+  showEpisode();
+  renderEpisodeList();
+  updateStatus();
+}
+
+// 全話コピー（サイトを加えたとき）。コピー先の原稿が空の話だけ。書式は変換する
+async function copyAllEpisodes(from, to, eps) {
+  const warnings = [];
+  const now = new Date().toISOString();
+  for (const ep of eps) {
+    for (const f of DRAFT_FIELDS) {
+      if (!siteSupports(to, f)) continue;
+      const src = draftOf(ep, from)[f];
+      if (!src) continue;
+      const conv = convertText(from, to, src);
+      mergeWarnings(warnings, conv.warnings);
+      ep.drafts[to] = { ...draftOf(ep, to), [f]: conv.text };
+    }
+    // 短編のなろう版は話のタイトルがないので、作品タイトルを入れる
+    if (project.shortStory && !ep.drafts[to].title && siteSupports(to, 'title')) ep.drafts[to].title = project.title || '';
+    ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [to]: now };
+  }
+  toast(`${SITES[from].short}用の原稿を、${SITES[to].short}用に${eps.length}話コピーしました`
+    + warnings.map((w) => `\n⚠ ${w.message}（${w.count}か所）`).join(''));
+}
+
+// 短編（v4）：1話だけの作品。なろうの短編は話のタイトルを持たないので、なろう用ではエピソードタイトルの欄を出さない
+async function setShortStory(on) {
+  if (on && project.episodes.length > 1) {
+    toast(`短編にできるのは1話だけの作品です（今 ${project.episodes.length}話）`, true);
+    $('short-story').checked = false;
+    return;
+  }
+  project.shortStory = on;
+  changed();
+  applySite();
+  renderEpisodeList();
+}
+
+// v3 までの作品を v4 にする前の状態を残す（読み込んだ元のデータのまま）
+async function savePreMigrationVersion(raw) {
+  const list = await versions.list(raw.id).catch(() => null);
+  if (Array.isArray(list) && list.some((v) => v.premigration)) return;
+  await versions.put({
+    id: newVersionId(), kind: 'project', projectId: raw.id, name: 'データ形式更新前（自動）',
+    memo: '3サイト対応（データ形式 v4）にする前の状態', auto: false, premigration: true, createdAt: new Date().toISOString(),
+    chars: (raw.episodes || []).reduce((n, e) => n + countChars(draftOf(e, raw.site || 'narou').body).all, 0),
+    episodes: (raw.episodes || []).length,
+    data: structuredClone(raw),
+  });
 }
 
 // ---------- 作品一覧 ----------
@@ -1326,7 +1484,7 @@ async function allProjects() {
 async function createProject() {
   await flush();
   if (isEmptyProject(project)) { el.novelTitle.focus(); return; }
-  await switchTo(newProject({ site: project.site }));
+  await switchTo(newProject({ site: project.site, sites: [...project.sites] }));
   el.novelTitle.focus();
   toast('新しい作品を作成しました');
 }
@@ -1982,7 +2140,7 @@ async function createBackupPack(btn = $('backup-pack-save')) {
     return false;
   }
   const saved = await runTask('backup', async () => {
-    for (const site of SITE_KEYS) {
+    for (const site of project.sites) {
       const state = await ensureEdition(episode(), site);
       await storeEdition(episode(), site, state.cur);
     }
@@ -2047,7 +2205,7 @@ function itemDetail(item) {
     return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].concat((d.foreshadows || []).length ? [`伏線：${d.foreshadows.length}件`] : []).join('\n');
   }
   const ep = item.episode || {};
-  const sites = ['narou', 'alpha'].map((site) => {
+  const sites = SITE_KEYS.filter((site) => LEGACY_SITES.includes(site) || (item.versions || []).some((v) => v.site === site) || draftOf(ep, site).body).map((site) => {
     const list = (item.versions || []).filter((v) => v.site === site);
     const d = draftOf(ep, site);
     return `${SITES[site].short}：${list.length}稿・本文 ${countChars(d.body).all.toLocaleString()}字`;
@@ -2230,10 +2388,10 @@ async function epOpen({ force = false, only = '' } = {}) {
   const data = parseEpisodeFile(text);
   const ep = episode();
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
-  if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（なろう用・アルファ用の原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、両サイトとも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
+  if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（各サイトの原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、どのサイトも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
   await withBusy('読み込み中…', async () => {
-    // 開く前の原稿は前の番号の稿に残し、両サイトとも新しい稿に開く
-    for (const site of SITE_KEYS) await raiseEdition(ep, site);
+    // 開く前の原稿は前の番号の稿に残し、どのサイトも新しい稿に開く
+    for (const site of project.sites) await raiseEdition(ep, site);
     applyEpisodeSnapshot(ep, data.episode);
     touchEpisode(ep);
     changed();
@@ -2291,8 +2449,7 @@ async function exportAll() {
 // ---------- メイン → サブのコピー（明示的に押したときだけ。自動では同期しない） ----------
 
 const COPY_FIELDS = [['title', 'タイトル'], ['body', '本文'], ['foreword', '前書き'], ['afterword', '後書き']];
-// コピー先がその欄を持てるか（アルファポリスには前書き・後書きの欄を出していない）
-const siteSupports = (site, f) => site === 'narou' || f === 'title' || f === 'body';
+// コピー先がその欄を持てるかは、サイトのモジュールが決める（カクヨム・アルファポリスには前書き・後書きの欄がない）
 
 function mergeWarnings(into, list) {
   for (const w of list) {
@@ -2305,8 +2462,8 @@ function mergeWarnings(into, list) {
 // mode：'new' サブ側に新しい稿を作ってコピー（今の稿は残る）／'overwrite' サブ側の今の稿に上書き
 function buildCopyPlan() {
   const form = $('site-copy-form');
-  const from = project.site;
-  const to = subSite();
+  const from = $('site-copy-from').value;
+  const to = $('site-copy-to').value;
   const mode = form.elements.mode.value === 'overwrite' ? 'overwrite' : 'new';
   const fields = COPY_FIELDS.map(([f]) => f).filter((f) => form.elements['f-' + f]?.checked && siteSupports(to, f));
   const eps = [episode()];
@@ -2314,7 +2471,8 @@ function buildCopyPlan() {
   const warnings = [];
   for (const ep of eps) {
     for (const f of fields) {
-      const src = draftOf(ep, from)[f];
+      // 短編のなろう版は話のタイトルがないので、タイトルは作品タイトルにする
+      const src = draftOf(ep, from)[f] || (f === 'title' && project.shortStory && from === 'narou' ? project.title : '');
       if (!src) continue; // 空でコピー先を消さない
       const conv = convertText(from, to, src);
       mergeWarnings(warnings, conv.warnings);
@@ -2325,15 +2483,37 @@ function buildCopyPlan() {
   return { from, to, mode, fields, eps, changes, warnings };
 }
 
+// 「コピー…」：コピー元・コピー先は、画面の上で選び直せる（v4。どのサイトからどのサイトへでも）
 async function openSiteCopy() {
-  const from = project.site;
-  const to = subSite();
+  const { from, to } = copyPair();
+  if (!to) return;
+  const fromSel = $('site-copy-from');
+  fromSel.replaceChildren(...siteList().map((s) => new Option(`${SITES[s].short}用${s === project.site ? '（メイン）' : ''}`, s)));
+  fromSel.value = from;
+  fillCopyTo(to);
+  $('site-copy-form').elements.mode.value = 'new';
+  await prepareSiteCopy();
+  $('site-copy-dialog').showModal();
+}
+
+// コピー先の選択肢（コピー元は除く）
+function fillCopyTo(want) {
+  const from = $('site-copy-from').value;
+  const toSel = $('site-copy-to');
+  const list = siteList().filter((s) => s !== from);
+  toSel.replaceChildren(...list.map((s) => new Option(`${SITES[s].short}用${s === project.site ? '（メイン）' : ''}`, s)));
+  toSel.value = list.includes(want) ? want : list[0];
+}
+
+async function prepareSiteCopy() {
+  const from = $('site-copy-from').value;
+  const to = $('site-copy-to').value;
   const ep = episode();
   const [src, dest] = [await ensureEdition(ep, from), await ensureEdition(ep, to)];
   const next = `第${nextEditionNo(dest.list)}稿`;
   // コピーするのは開いているエピソードだけ（題に話数を出して分かるようにする）
-  $('site-copy-title').textContent = `第${project.episodes.indexOf(ep) + 1}話：${SITES[from].short}（メイン）の${src.cur.name} → ${SITES[to].short}（サブ）にコピー`;
-  $('site-copy-desc').textContent = '';
+  $('site-copy-title').textContent = `第${project.episodes.indexOf(ep) + 1}話をコピー`;
+  $('site-copy-desc').textContent = `${SITES[from].short}用の${src.cur.name} → ${SITES[to].short}用`;
   $('site-copy-mode-new').textContent = `新しい稿（${next}）として追加`;
   $('site-copy-mode-over').textContent = `今の稿（${dest.cur.name}）に上書き`;
   $('site-copy-form').dataset.overName = dest.cur.name;
@@ -2346,9 +2526,7 @@ async function openSiteCopy() {
     l.append(input, ` ${label}${ok ? '' : '（コピー先に欄がないため対象外）'}`);
     box.append(l);
   }
-  $('site-copy-form').elements.mode.value = 'new';
   updateSiteCopy();
-  $('site-copy-dialog').showModal();
 }
 
 function updateSiteCopy() {
@@ -2405,8 +2583,8 @@ async function runSiteCopy() {
     if (!maps) return;
     for (const c of withImages) c.text = applyImageMap(plan.from, plan.to, c.src, c.before, maps.get(c.f)).text;
   }
-  if (over.length && !(await ask(`${toName}用の今の稿（${dest.name}）の内容を、メインからのコピーで上書きします。\n上書きした内容は元に戻せません（残したいときは「新しい稿として追加」を選んでください）。よろしいですか？`, { ok: '上書きする', danger: true }))) return;
-  // 新しい稿として追加：サブ側の今の稿はそのまま残し、次の番号の稿にコピーする
+  if (over.length && !(await ask(`${toName}用の今の稿（${dest.name}）の内容を、${SITES[plan.from].short}用からのコピーで上書きします。\n上書きした内容は元に戻せません（残したいときは「新しい稿として追加」を選んでください）。よろしいですか？`, { ok: '上書きする', danger: true }))) return;
+  // 新しい稿として追加：コピー先の今の稿はそのまま残し、次の番号の稿にコピーする
   let target = dest;
   if (plan.mode === 'new') target = (await raiseEdition(ep, plan.to)).to;
   for (const c of plan.changes) c.ep.drafts[plan.to][c.f] = c.text;
@@ -2595,7 +2773,7 @@ function migrateLegacyEditions(ep) {
       for (const v of legacy) {
         const name = String(v.name || '').replace(/^第(\d+)版$/, '第$1稿');
         const ids = {};
-        for (const site of SITE_KEYS) {
+        for (const site of LEGACY_SITES) {
           // 両サイトの原稿を持つ版と、さらに古い1サイトだけの版（メイン投稿サイトの原稿）
           const src = v.data?.drafts ? v.data.drafts[site] : (site === project.site ? v.data : null);
           const data = editionData(src);
@@ -2749,19 +2927,18 @@ async function switchEpisodeVersion(id) {
   toast(`${SITES[site].short}用を ${v.name} に切り替えました（${cur.name}は残っています）`);
 }
 
-// 「この稿を削除」：編集中のサイトの、今表示している稿を削除する。もう一方のサイトの稿は変えない。
+// 「この稿を削除」：編集中のサイトの、今表示している稿を削除する。ほかのサイトの稿は変えない。
 // 残っている稿があれば一番新しい稿を、なければ空の「第1稿」にし、共通のプロット・フリーメモも空にする
 async function deleteEpisodeVersion() {
   const ep = episode();
   const site = editSite;
-  const other = SITE_KEYS.find((s) => s !== site);
   const { list, cur } = await ensureEdition(ep, site);
   const rest = sortEditions(list.filter((v) => v.id !== cur.id));
   const chars = countChars(draftOf(ep, site).body).all;
   const after = rest.length
     ? `削除すると「${rest[0].name}」を表示します。`
     : `${SITES[site].short}用の稿はこれだけなので、削除すると空の「第1稿」になります（タイトル・前書き・本文・後書き・プロット・フリーメモが空になります）。`;
-  if (!(await ask(`${SITES[site].label}用の「${cur.name}」（本文 ${chars.toLocaleString()}字）を削除しますか？\n${after}\n${SITES[other].short}用の稿は変わりません。削除した稿は元に戻せません。`, { ok: '削除する', danger: true }))) return;
+  if (!(await ask(`${SITES[site].label}用の「${cur.name}」（本文 ${chars.toLocaleString()}字）を削除しますか？\n${after}\n${otherSitesText(site)}削除した稿は元に戻せません。`, { ok: '削除する', danger: true }))) return;
   await versions.remove(cur.id);
   let next = rest[0];
   if (next) {
@@ -2781,12 +2958,11 @@ async function deleteEpisodeVersion() {
 }
 
 // 「最終稿にする」：編集中のサイトの、今表示している稿を最終稿にする（一覧に【最終稿】と出る。最終稿はサイトごとに1つ）。
-// ほかの稿を削除するかどうかを選んでもらう。もう一方のサイトの稿・以前の版（6.0 より前）は変えない
+// ほかの稿を削除するかどうかを選んでもらう。ほかのサイトの稿・以前の版（6.0 より前）は変えない
 async function finalizeEpisodeVersion() {
   await flush();
   const ep = episode();
   const site = editSite;
-  const other = SITE_KEYS.find((s) => s !== site);
   const { list, cur } = await ensureEdition(ep, site);
   const rest = list.filter((v) => v.id !== cur.id);
   const chars = countChars(draftOf(ep, site).body).all;
@@ -2796,11 +2972,11 @@ async function finalizeEpisodeVersion() {
     const how = await choose(`${head}\n\nほかの稿（${sortEditions(rest).map((v) => v.name).join('・')}、${rest.length}件）をどうしますか？\n`
       + '・すべて削除：今表示している稿だけを残します。削除した稿は元に戻せません。\n'
       + '・残す：ほかの稿はそのまま残し、今の稿に【最終稿】の印だけを付けます。\n'
-      + `${SITES[other].short}用の稿は、どちらでも変わりません。`,
+      + otherSitesText(site),
     [{ value: 'delete', label: 'すべて削除', danger: true }, { value: 'keep', label: '残す', primary: true }]);
     if (!how) return;
     removeRest = how === 'delete';
-  } else if (!(await ask(`${head}\n${SITES[other].short}用の稿は変わりません。`, { ok: '最終稿にする' }))) return;
+  } else if (!(await ask(`${head}\n${otherSitesText(site)}`, { ok: '最終稿にする' }))) return;
   const stored = await storeEdition(ep, site, cur);
   await versions.put({ ...stored, final: true });
   for (const v of rest) {
@@ -3130,7 +3306,7 @@ async function cloudHasChanges() {
 async function buildEpisodeBackup(reason = 'auto-episode', targets = null, { onlyChanged = false } = {}) {
   // 表示中の稿は編集中の内容を稿ストアへ確定してからパックする。
   await flush();
-  for (const site of SITE_KEYS) {
+  for (const site of project.sites) {
     const state = await ensureEdition(episode(), site);
     await storeEdition(episode(), site, state.cur);
   }
@@ -4223,8 +4399,9 @@ function insertRuby() {
   const t = target();
   const { selectionStart: s, selectionEnd: e } = t;
   const sel = t.value.slice(s, e).replace(/\n/g, '');
-  if (editSite === 'narou' && [...sel].length > RUBY_LIMIT) {
-    toast(`なろうのルビは${RUBY_LIMIT}文字までです（選択 ${[...sel].length}文字）`, true);
+  const limit = SITES[editSite].rubyBaseLimit;
+  if (limit && [...sel].length > limit) {
+    toast(`${SITES[editSite].short}のルビは${limit}文字までです（選択 ${[...sel].length}文字）`, true);
     return;
   }
   replaceSelection(t, ruby(editSite, sel, ''), s, e);
@@ -4548,18 +4725,21 @@ function onBodyPaste(e) {
   pasteConvertedForNarou(e.currentTarget, text);
 }
 
-// なろう用の本文・前書き・後書きで、変換が必要な文字か（「貼り付け」ボタンでも使う）
+// なろう用・カクヨム用の本文・前書き・後書きで、変換が必要な文字か（「貼り付け」ボタンでも使う）
+// カクヨム用は、アルファポリスのルビ・傍点だけを変換する（v4）
 function narouPasteNeedsConversion(t, text) {
-  return editSite === 'narou' && [el.body, el.foreword, el.afterword].includes(t) && (countAlphaNotation(text) > 0 || hasMiteminUrl(text));
+  if (![el.body, el.foreword, el.afterword].includes(t)) return false;
+  if (editSite === 'kakuyomu') return countAlphaNotation(text) > 0;
+  return editSite === 'narou' && (countAlphaNotation(text) > 0 || hasMiteminUrl(text));
 }
 
 function pasteConvertedForNarou(t, text) {
   const alpha = countAlphaNotation(text);
-  const mitemin = hasMiteminUrl(text);
-  const conv = convertText('alpha', 'narou', text, { keepImages: true });
+  const mitemin = editSite === 'narou' && hasMiteminUrl(text);
+  const conv = editSite === 'kakuyomu' ? convertText('alpha', 'kakuyomu', text) : convertText('alpha', 'narou', text, { keepImages: true });
   replaceSelection(t, conv.text);
   const msg = [];
-  if (alpha) msg.push(`アルファポリスのルビ・傍点（${alpha}件）を、なろうの書き方に変換して貼り付けました`);
+  if (alpha) msg.push(`アルファポリスのルビ・傍点（${alpha}件）を、${SITES[editSite].short}の書き方に変換して貼り付けました`);
   if (mitemin) msg.push('みてみんのURLを挿絵タグに変換しました');
   const images = countAlphaImages(text);
   if (images) msg.push(`アルファポリスの画像タグ（${images}件）はそのままです`);
@@ -4987,6 +5167,14 @@ const WORK_CODES = {
     key: 'alphaUrl', input: 'alpha-url', pair: 'alphaWorkId',
     toPair: (v) => /alphapolis\.co\.jp\/novel\/\d+\/(\d+)/.exec(v)?.[1] || '',
   },
+  kakuyomu: {
+    key: 'kakuyomuWorkId', input: 'work-kakuyomu-id', pair: 'kakuyomuUrl',
+    toPair: (v) => kakuyomuSite.workUrl(v),
+  },
+  kakuyomuUrl: {
+    key: 'kakuyomuUrl', input: 'kakuyomu-url', pair: 'kakuyomuWorkId',
+    toPair: (v) => kakuyomuSite.workIdOf(v),
+  },
 };
 const WORK_KEY_INPUT = Object.fromEntries(Object.values(WORK_CODES).map((c) => [c.key, c.input]));
 
@@ -5006,11 +5194,13 @@ function setWorkCode(kind, value) {
 
 function renderWorkCodes() {
   const parts = [];
-  if (project.narouNcode || project.narouUrl) parts.push(project.narouNcode || 'なろう');
-  if (project.alphaWorkId || project.alphaUrl) parts.push(project.alphaWorkId ? `アルファ ${project.alphaWorkId}` : 'アルファ');
-  $('work-codes-state').textContent = parts.length ? parts.join('・') : '（任意・未設定）';
+  const used = project.sites;
+  if (used.includes('narou') && (project.narouNcode || project.narouUrl)) parts.push(project.narouNcode || 'なろう');
+  if (used.includes('kakuyomu') && (project.kakuyomuWorkId || project.kakuyomuUrl)) parts.push(project.kakuyomuWorkId ? `カクヨム ${project.kakuyomuWorkId}` : 'カクヨム');
+  if (used.includes('alpha') && (project.alphaWorkId || project.alphaUrl)) parts.push(project.alphaWorkId ? `アルファ ${project.alphaWorkId}` : 'アルファ');
+  $('work-codes-state').textContent = siteList().map((s) => SITES[s].short).join('・') + (parts.length ? `（${parts.join('・')}）` : '');
   $('work-codes-state').classList.toggle('unset', !parts.length);
-  $('report-url-state').textContent = `今の作品URL：なろう ${project.narouUrl || '（未設定）'}／アルファ ${project.alphaUrl || '（未設定）'}`;
+  $('report-url-state').textContent = `今の作品URL：${siteList().map((s) => `${SITES[s].short} ${project[SITES[s].urlKey] || '（未設定）'}`).join('／')}`;
 }
 
 // 同じ Nコード・作品IDが別の作品にも入っていたら知らせる（1つの投稿作品は1つの作品に対応させるため）
@@ -5020,7 +5210,7 @@ async function warnSameWorkCode(kind) {
   if (!v) return;
   const others = (await allProjects()).filter((p) => p.id !== project.id && (p[key] || '').toLowerCase() === v);
   if (!others.length) return;
-  const what = kind === 'ncode' ? 'Nコード' : '作品ID';
+  const what = kind === 'ncode' ? 'Nコード' : `${kind === 'kakuyomu' ? 'カクヨムの' : ''}作品ID`;
   toast(`この${what}は「${others.map((p) => p.title || '（無題）').join('」「')}」にも入っています。別の作品なら見直してください`, true);
 }
 
@@ -6006,7 +6196,11 @@ function bindEvents() {
   bindDialog('site-copy-dialog', runSiteCopy);
   bindDialog('episode-notes-copy-dialog', copyEpisodeNotes);
   $('episode-notes-copy-source').addEventListener('change', updateEpisodeNotesCopyPreview);
-  $('site-copy-form').addEventListener('change', updateSiteCopy);
+  $('site-copy-form').addEventListener('change', (e) => {
+    if (e.target.id === 'site-copy-from') { fillCopyTo($('site-copy-to').value); prepareSiteCopy().catch(fail); return; }
+    if (e.target.id === 'site-copy-to') { prepareSiteCopy().catch(fail); return; }
+    updateSiteCopy();
+  });
   bindDialog('version-save-dialog', async () => {
     const form = $('version-save-form');
     const v = await saveVersion(form.name.value.trim() || '名前なし', form.memo.value.trim());
@@ -6034,8 +6228,16 @@ function bindEvents() {
   $('ep-grouping').addEventListener('change', (e) => setEpisodeSort({ grouped: e.target.value === 'chapters' }));
   for (const [kind, c] of Object.entries(WORK_CODES)) {
     $(c.input).addEventListener('input', (e) => setWorkCode(kind, e.target.value));
-    if (kind === 'ncode' || kind === 'alpha') $(c.input).addEventListener('change', () => warnSameWorkCode(kind).catch(fail));
+    if (kind === 'ncode' || kind === 'alpha' || kind === 'kakuyomu') $(c.input).addEventListener('change', () => warnSameWorkCode(kind).catch(fail));
   }
+  // 使う投稿サイト・短編・カクヨムの作品情報（v4）
+  document.querySelectorAll('[data-use-site]').forEach((c) => c.addEventListener('change', () => setSiteUsed(c.dataset.useSite, c.checked).catch(fail)));
+  $('short-story').addEventListener('change', (e) => setShortStory(e.target.checked).catch(fail));
+  $('kakuyomu-catchphrase').addEventListener('input', (e) => { project.kakuyomu = { ...project.kakuyomu, catchphrase: e.target.value }; changed(); });
+  $('kakuyomu-tags').addEventListener('input', (e) => {
+    project.kakuyomu = { ...project.kakuyomu, tags: e.target.value.split(/[\s　]+/).filter(Boolean) };
+    changed();
+  });
   // 表示・ボタンの設定はチェックした時点で反映・保存する
   document.querySelectorAll('[data-ui]').forEach((c) => c.addEventListener('change', () => setUiPref(c.dataset.ui, c.checked)));
   document.querySelectorAll('[data-uiv]').forEach((s) => s.addEventListener('change', () => setUiPref(s.dataset.uiv, s.value)));

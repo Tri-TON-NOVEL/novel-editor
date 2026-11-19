@@ -1,6 +1,6 @@
 // 全体バックアップ：端末内のすべての作品・ひな型・設定を1つのファイルにまとめる
 import { db, meta, prefs, versions } from './db.js';
-import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION } from './format.js';
+import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES } from './format.js';
 
 // ファイルの形式。形を変えたら、その形式の VERSION を上げる。
 // 中に入る作品データの形式は、format.js の SCHEMA_VERSION（どのファイルにも schemaVersion として記録する）。
@@ -302,13 +302,7 @@ function environmentPayload() {
 function projectMaterials(p) {
   const n = normalize(p);
   return {
-    title: n.title,
-    site: n.site,
-    narouUrl: n.narouUrl,
-    alphaUrl: n.alphaUrl,
-    narouNcode: n.narouNcode,
-    alphaWorkId: n.alphaWorkId,
-    synopsis: n.synopsis,
+    ...Object.fromEntries(PROJECT_INFO_KEYS.map((k) => [k, clone(n[k])])),
     projectMemo: n.projectMemo || '',
     memos: clone(n.memos),
     foreshadows: clone(n.foreshadows),
@@ -560,8 +554,8 @@ export function parseAnyBackup(text) {
 // ファイル名は人が見分けるためのもの。同じ作品・エピソードかどうかは、中の workId・エピソードの id で見分ける（名前では判断しない）。
 
 const episodeNo = (item) => (Number.isInteger(item.order) && item.order >= 0 ? item.order + 1 : null);
-// エピソードの名前（なろう用、なければアルファ用のタイトル）。ないときは空
-const episodeTitle = (ep) => (ep ? draftOf(ep, 'narou').title || draftOf(ep, 'alpha').title || '' : '');
+// エピソードの名前（なろう用、なければカクヨム用・アルファ用のタイトル）。ないときは空
+const episodeTitle = (ep) => (ep ? SITE_KEYS.map((s) => draftOf(ep, s).title).find(Boolean) || '' : '');
 
 function episodesLabel(list) {
   const nos = list.map(episodeNo).filter((n) => n !== null).sort((a, b) => a - b);
@@ -711,6 +705,11 @@ export function materialsSignature(p) {
 // 日時と、開いただけで付く稿の番号（editionIds）は含めない。空白を入れて消しただけなら同じ印になる
 export function episodeSignature(ep) {
   const { createdAt, updatedAt, siteUpdatedAt, editionIds, versionId, ...rest } = ep || {};
+  // v4 で増えたサイト（カクヨム）の空の原稿は入れない（更新しただけで、全部の話が変わったことにならないように）
+  if (rest.drafts) {
+    rest.drafts = Object.fromEntries(Object.entries(rest.drafts)
+      .filter(([s, d]) => LEGACY_SITES.includes(s) || Object.values(d || {}).some(Boolean)));
+  }
   return signatureOf(JSON.stringify(rest));
 }
 

@@ -1,6 +1,6 @@
 // オフラインでも起動できるよう、アプリ本体をキャッシュする。
 // ファイルを更新したら VERSION を上げる。
-const VERSION = 'v159';
+const VERSION = 'v160';
 const CACHE = 'novel-editor-' + VERSION;
 const SHELL = [
   './',
@@ -25,6 +25,11 @@ const SHELL = [
   'js/localfile.js',
   'js/notation.js',
   'js/imagematch.js',
+  'js/sites/index.js',
+  'js/sites/common.js',
+  'js/sites/narou.js',
+  'js/sites/kakuyomu.js',
+  'js/sites/alpha.js',
   'js/tables.js',
   'js/backup.js',
   'js/archive.js',
