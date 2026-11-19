@@ -136,13 +136,23 @@ export function toAlpha(text, warnings) {
 
 // ---------- 公式バックアップ（ZIP）の読み取り ----------
 
+// 確認できた見出し（about.txt・episode_NNNN.txt）
+const KNOWN_LABELS = new Set(['タイトル', '作者名', '連載状態', 'ジャンル', 'キャッチコピー', '紹介文', 'セルフレイティング', 'タグ',
+  'イメージカラー', '作成日時', '公開日時', '更新日時', '文字数', '目次', '公開状態', '本文']);
+const labelOf = (line) => /^【(.+?)】\s*$/.exec(line)?.[1].replace(/（[\d,]+行）$/, '') ?? null;
+
 // 【見出し】で区切られた文章を読む。戻り値：Map（見出し → 行の配列）
+// 見出しは、先頭・空行のあと・確認できた見出しの行だけ（「【プロローグ】」のような話のタイトルを見出しと取り違えない）
 export function parseSections(text) {
   const lines = String(text || '').replace(/^﻿/, '').split(/\r\n|\r|\n/);
+  const isHead = (j) => {
+    const label = labelOf(lines[j]);
+    return label !== null && (j === 0 || !lines[j - 1].trim() || KNOWN_LABELS.has(label));
+  };
   const fields = new Map();
   let i = 0;
   while (i < lines.length) {
-    const m = /^【(.+?)】\s*$/.exec(lines[i]);
+    const m = isHead(i) && /^【(.+?)】\s*$/.exec(lines[i]);
     if (!m) { i++; continue; }
     let label = m[1];
     let count = null;
@@ -155,7 +165,7 @@ export function parseSections(text) {
       i += count;
     } else {
       value = [];
-      while (i < lines.length && !/^【.+?】\s*$/.test(lines[i])) value.push(lines[i++]);
+      while (i < lines.length && !isHead(i)) value.push(lines[i++]);
       while (value.length && !value.at(-1).trim()) value.pop();
     }
     if (!fields.has(label)) fields.set(label, value);
@@ -193,6 +203,9 @@ export function parseBackup(files) {
   episodes.sort((x, y) => x.no - y.no);
   const others = [...byBase.keys()].filter((n) => n !== 'about.txt' && !/^episode_\d+\.txt$/i.test(n));
   if (others.length) warnings.push(`読まなかったファイル：${others.join('、')}`);
+  // 確認できていない見出しは、読まずに知らせる（章の見出しなど、書き方の分からないもの）
+  const unknown = [...a.keys()].filter((k) => !KNOWN_LABELS.has(k));
+  if (unknown.length) warnings.push(`about.txt の、読まなかった項目：${unknown.map((k) => `【${k}】`).join('、')}`);
   // 目次：「1. タイトル」の行（確認できた書き方）。それ以外の行（章の見出しかもしれない）は読まずに知らせる
   const toc = [];
   const tocOther = [];

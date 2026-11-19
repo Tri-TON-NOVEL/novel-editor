@@ -421,7 +421,6 @@ body.hide-nav-ep-menu .episode-list .chapter-menu { display: none !important; }
 .ep-sort:not(:has(> :not(.ui-off))) { display: none; }
 .nav-add:not(:has(> :not(.ui-off))) { display: none; }
 .ep-version:not(:has(> :not(.ui-off))) { display: none; }
-.hide-sub-site .site-tabs .sub-site:not([aria-selected="true"]) { display: none; }
 /* 編集機能（本文の上のボタン）を隠す。最大化中は「本文の最大化中」の設定に従う */
 .field:not(.maximized) .editor-tools .edit-tool-off { display: none !important; }
 body.hide-foreword [data-field="foreword"],

@@ -223,9 +223,13 @@ export const versions = {
   },
   // 一つの作品（episodeId を渡したときは、その話）の稿をすべて削除する（バックアップで上書きするとき、稿をそっくり入れ替えるため）。
   // 作品全体の復元ポイントは消さない
-  async removeEditions(projectId, episodeId = null) {
+  // keepSites（0.97）：そのサイトの稿は消さない（以前の版のバックアップにはカクヨムの稿がないため、この端末の稿を残す）
+  async removeEditions(projectId, episodeId = null, keepSites = []) {
     let ids;
-    if (useMemory) ids = [...memoryVersions.values()].filter((v) => v.projectId === projectId && isEditionKind(v.kind) && (!episodeId || v.episodeId === episodeId)).map((v) => v.id);
+    if (keepSites.length) {
+      const all = useMemory ? [...memoryVersions.values()].filter((v) => v.projectId === projectId && isEditionKind(v.kind)) : await this.editions(projectId);
+      ids = all.filter((v) => (!episodeId || v.episodeId === episodeId) && !keepSites.includes(v.site)).map((v) => v.id);
+    } else if (useMemory) ids = [...memoryVersions.values()].filter((v) => v.projectId === projectId && isEditionKind(v.kind) && (!episodeId || v.episodeId === episodeId)).map((v) => v.id);
     else if (!episodeId) {
       const range = IDBKeyRange.bound([projectId, 'episode', ''], [projectId, 'episode-legacy', '￿']);
       ids = await runVersions('readonly', (s) => s.index('projectKindId').getAllKeys(range));

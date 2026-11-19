@@ -41,7 +41,7 @@ const AUTOSAVE_MS = 2000;       // 入力が止まってから端末へ保存す
 const AUTOSAVE_MAX_MS = 30_000; // 打ち続けていても、これより長くは待たない
 const SAVE_RETRY_MS = 15_000;  // 0.80：端末への保存に失敗したとき、もう一度試すまで
 // 更新したら上げる（設定の「表示」タブに出るので、どの版が動いているか確認できる）
-const APP_VERSION = '2026.11.19-0.96';
+const APP_VERSION = '2026.11.19-0.97';
 
 const el = {
   novelTitle: $('novel-title'),
@@ -997,6 +997,8 @@ function renderSiteTabs() {
     b.replaceChildren(document.createTextNode(`${SITES[s].short}用${filled}`));
     if (s === project.site) b.append(Object.assign(document.createElement('span'), { className: 'main-mark', textContent: 'メイン' }));
     b.classList.toggle('sub-site', s !== project.site);
+    // 「設定」→「表示」で隠したサイトのタブ。メインと、編集中のタブは隠さない（戻れなくならないように）
+    b.classList.toggle('ui-off', s !== project.site && s !== editSite && !uiPref(`other.site.${s}`));
     b.setAttribute('aria-selected', String(s === editSite && !reportMode));
   });
   // コピー（1サイトだけの作品では出さない）
@@ -1546,6 +1548,8 @@ async function importContent(content, links = {}) {
     || projects.find((p) => Object.entries(links).some(([k, v]) => p.links?.[k] === v))
     || projects.find((p) => p.createdAt === content.createdAt && p.title === content.title);
   if (same) {
+    // 以前の版で保存したファイル：この端末のカクヨムの原稿・作品情報・部は残す（0.97）
+    if (content.legacyRaw) content = format.mergeLegacyProject(content.legacyRaw, normalize(same));
     const localNewer = content.updatedAt && same.updatedAt > content.updatedAt;
     if (localNewer && serialize(same) !== serialize({ ...same, ...content })
       && !(await ask('この端末の内容の方が新しいようです。\n読み込んだ内容で上書きしますか？\n（「キャンセル」で端末の内容を開きます）'))) {
@@ -2390,8 +2394,9 @@ async function epOpen({ force = false, only = '' } = {}) {
   const name = mainDraft(ep).title || `第${epIndex + 1}話`;
   if (!(await ask(`今のエピソード「${name}」を、「${src.name}」の内容で上書きしますか？\n（各サイトの原稿、プロット、フリーメモが入れ替わります。上書き前の原稿は、どのサイトも前の番号の稿に残ります）`, { ok: '上書きする' }))) return;
   await withBusy('読み込み中…', async () => {
-    // 開く前の原稿は前の番号の稿に残し、どのサイトも新しい稿に開く
-    for (const site of project.sites) await raiseEdition(ep, site);
+    // 開く前の原稿は前の番号の稿に残し、どのサイトも新しい稿に開く（使っていないサイトでも、ファイルで入れ替わる原稿は残す）
+    const replaced = data.episode.drafts ? Object.keys(data.episode.drafts) : [project.site];
+    for (const site of SITE_KEYS.filter((s) => project.sites.includes(s) || replaced.includes(s))) await raiseEdition(ep, site);
     applyEpisodeSnapshot(ep, data.episode);
     touchEpisode(ep);
     changed();
@@ -5275,7 +5280,10 @@ function uiActive() {
 }
 
 function uiPref(key, profile = uiActive()) {
-  return uiProfiles()[profile][key] !== false;
+  const p = uiProfiles()[profile];
+  // 0.97：サイトごとの原稿タブ。まだ決めていなければ、0.96 までの「メイン以外の原稿タブ」に合わせる
+  if (key.startsWith('other.site.') && p[key] === undefined) return p['other.sub-site'] !== false;
+  return p[key] !== false;
 }
 
 function uiValue(key, fallback, profile = uiActive()) {
@@ -5371,8 +5379,8 @@ function applyUiPrefs() {
   for (const k of ['plot', 'free-memo']) {
     document.querySelectorAll(`[data-jump="${k}"]`).forEach((b) => b.classList.toggle('ui-off', !uiPref('jump.' + k)));
   }
-  // サブ側（メインでないほう）の原稿タブ。編集中のときは、戻れなくならないよう出しておく（0.86）
-  cls.toggle('hide-sub-site', !uiPref('other.sub-site'));
+  // メインでない原稿タブ（サイトごと：0.97）。表示・非表示は renderSiteTabs で決める
+  if (project && episode()) renderSiteTabs();
   cls.toggle('hide-nav-ep-menu', !uiPref('nav.ep-menu'));
   cls.toggle('hide-status', !uiPref('other.status'));
   // プロット・メモの欄が隠れている状態でそのタブを開いていたら本文へ

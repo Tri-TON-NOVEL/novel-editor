@@ -79,7 +79,8 @@ export function newProject(content = {}) {
     workId: makeId(),
     title: '',
     site: 'narou',
-    sites: [...LEGACY_SITES],
+    sites: [...SITE_KEYS],
+    sitesV2: true, // 0.97：カクヨムを足す見直しが済んでいる印
     narouUrl: '',
     alphaUrl: '',
     kakuyomuUrl: '',
@@ -116,16 +117,59 @@ export function episodeName(ep, mainSite = 'narou') {
   return '（無題）';
 }
 
-// 作品で使う投稿サイト（重なり・知らないサイトを除く。記録がなければ v3 までと同じ2サイト）。メインは必ず入れる
+// 作品で使う投稿サイト（重なり・知らないサイトを除く。記録がなければ3サイトすべて：0.97）。メインは必ず入れる
 export function normalizeSites(sites, main) {
-  const list = Array.isArray(sites) ? SITE_KEYS.filter((s) => sites.includes(s)) : [...LEGACY_SITES];
-  if (!list.length) list.push(...(SITES[main] ? [main] : LEGACY_SITES));
+  const list = Array.isArray(sites) ? SITE_KEYS.filter((s) => sites.includes(s)) : [...SITE_KEYS];
+  if (!list.length) list.push(...(SITES[main] ? [main] : SITE_KEYS));
   if (SITES[main] && !list.includes(main)) list.push(main);
   return SITE_KEYS.filter((s) => list.includes(s));
 }
 
 // 作品資料（バックアップの「作品資料」）に入れる、作品全体の情報の項目
-export const PROJECT_INFO_KEYS = ['title', 'site', 'sites', 'narouUrl', 'alphaUrl', 'kakuyomuUrl', 'narouNcode', 'alphaWorkId', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'synopsis'];
+export const PROJECT_INFO_KEYS = ['title', 'site', 'sites', 'sitesV2', 'narouUrl', 'alphaUrl', 'kakuyomuUrl', 'narouNcode', 'alphaWorkId', 'kakuyomuWorkId', 'kakuyomu', 'shortStory', 'synopsis'];
+
+// ---------- 以前の版（v3）のバックアップを読み込むとき（0.97） ----------
+// v3 のバックアップには、カクヨムの原稿・作品情報、部（章の level）がない。
+// そのまま入れ替えると、この端末で書いたカクヨムの原稿などが消えるので、バックアップにないものは この端末のものを残す。
+export const V4_PROJECT_KEYS = ['sites', 'sitesV2', 'kakuyomuUrl', 'kakuyomuWorkId', 'kakuyomu', 'shortStory'];
+
+// 以前の版の作品 raw を、この端末の同じ作品 local に入れるときの中身（カクヨムの原稿・作品情報・部は local のまま）
+export function mergeLegacyProject(raw, local) {
+  const fixed = keepLocalProjectInfo(structuredClone(raw), local);
+  fixed.episodes = (raw.episodes || []).map((e) => keepLocalDrafts(structuredClone(e), (local.episodes || []).find((x) => x.id === e.id), missingSites(e)));
+  return stripLocal(normalize(fixed));
+}
+
+// バックアップのエピソードにないサイト（drafts にそのサイトの欄がない＝以前の版のバックアップ）
+export function missingSites(ep) {
+  return ep?.drafts && typeof ep.drafts === 'object' ? SITE_KEYS.filter((s) => !(s in ep.drafts)) : [];
+}
+
+// バックアップのエピソード src に、この端末のエピソード local の、そのサイトの原稿と稿の番号を入れる（src を変える）
+export function keepLocalDrafts(src, local, sites) {
+  if (!local || !sites.length) return src;
+  src.drafts = { ...src.drafts };
+  for (const s of sites) {
+    if (local.drafts?.[s]) src.drafts[s] = structuredClone(local.drafts[s]);
+    if (local.editionIds?.[s]) src.editionIds = { ...(src.editionIds || {}), [s]: local.editionIds[s] };
+  }
+  return src;
+}
+
+// バックアップの作品 raw（normalize の前）にない v4 の項目は、この端末の作品 local から入れる
+export function keepLocalProjectInfo(raw, local) {
+  if (!local) return raw;
+  const out = { ...raw };
+  for (const k of V4_PROJECT_KEYS) if (!(k in raw) && k in local) out[k] = structuredClone(local[k]);
+  if (Array.isArray(out.chapters)) out.chapters = keepChapterLevels(out.chapters, local.chapters);
+  return out;
+}
+
+// level のない章（v3）は、この端末の同じ章の level（部・章）にする
+export function keepChapterLevels(chapters, localChapters) {
+  const levels = new Map((localChapters || []).map((c) => [c.id, c.level]));
+  return chapters.map((c) => (c && !('level' in c) && levels.has(c.id) ? { ...c, level: levels.get(c.id) } : c));
+}
 
 // カクヨムの作品情報（キャッチコピー・タグ）
 export function normalizeKakuyomuInfo(k) {
@@ -194,8 +238,11 @@ export function normalize(p) {
   const base = newProject();
   const project = { ...base, ...p, reports: { ...base.reports, ...(p.reports || {}) }, links: { ...(p.links || {}) } };
   if (!SITE_KEYS.includes(project.site)) project.site = 'narou';
-  // v4：使う投稿サイト。v3 までのデータ（記録なし）は、なろう・アルファの2サイト
+  // v4：使う投稿サイト。v3 までのデータ（記録なし）は3サイトすべて（0.97）
   project.sites = normalizeSites(p.sites, project.site);
+  // 0.96 で なろう・アルファの2サイトにしたデータは、一度だけカクヨムを足す（0.97）
+  if (!p.sitesV2 && project.sites.length === 2 && LEGACY_SITES.every((s) => project.sites.includes(s))) project.sites = [...SITE_KEYS];
+  project.sitesV2 = true;
   project.kakuyomu = normalizeKakuyomuInfo(p.kakuyomu);
   project.shortStory = !!p.shortStory;
   for (const k of ['kakuyomuUrl', 'kakuyomuWorkId']) project[k] = String(p[k] ?? '');
@@ -269,7 +316,12 @@ export function parse(text, fileName = '') {
     if (v > SCHEMA_VERSION) {
       throw new FileFormatError(`「${fileName}」は新しい版のエディター（データ形式 v${v}）で作られています。エディターを更新してから開いてください`);
     }
-    if (v >= 2 && o.project) return stripLocal(normalize(o.project));
+    if (v >= 2 && o.project) {
+      const content = stripLocal(normalize(o.project));
+      // 以前の版（v3 まで）のファイル：同じ作品に入れるとき、この端末のカクヨムの原稿などを残すため、元の中身も持たせる（0.97）
+      if (v < 4) Object.defineProperty(content, 'legacyRaw', { value: o.project, enumerable: false });
+      return content;
+    }
     return stripLocal(fromSingle(o));
   }
   if (o !== null && isJsonName) throw new FileFormatError(`「${fileName}」はこのエディターの作品ファイルではありません`);

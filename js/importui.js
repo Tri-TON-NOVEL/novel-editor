@@ -241,6 +241,7 @@ export function initImport(ctx) {
     const isZip = /\.zip$/i.test(file.name) || file.type === 'application/zip'
       || (bytes.length >= 4 && bytes[0] === 0x50 && bytes[1] === 0x4b && [0x03, 0x05, 0x07].includes(bytes[2]));
     resetZipSelection();
+    if (!isZip && isKakuyomu()) throw new ZipError('カクヨムは、「作品データをダウンロード」で作った ZIP を選んでください（TXT は読めません）');
     if (!isZip) {
       state.fileName = file.name;
       state.buffer = buffer;
@@ -1346,8 +1347,8 @@ export function initImport(ctx) {
           p.site = state.site;
         }
       } else {
-        // 新しい作品は、取り込んだサイトだけを使う（ほかのサイトは、あとから「使う投稿サイト」で加えられる）
-        p = newProject({ title, site: state.site, sites: [state.site] });
+        // 新しい作品は3サイトとも使う（取り込んだサイトがメイン。要らないサイトは「使う投稿サイト」で外せる：0.97）
+        p = newProject({ title, site: state.site });
         p.chapters = [];
         p.episodes = [];
       }
@@ -1403,7 +1404,9 @@ export function initImport(ctx) {
       if (rename) p.title = title;
       // 先頭の未解析の行（タイトル行以外）をあらすじへ
       if (state.useHead && state.result.head.lines.length) {
-        const lines = state.result.head.lines.filter((l, i) => !(i === state.result.head.lines.findIndex((x) => x.trim()) && l.trim() === state.result.head.title));
+        // カクヨムの紹介文には題名の行がないので、そのまま入れる
+        const lines = isKakuyomu() ? state.result.head.lines
+          : state.result.head.lines.filter((l, i) => !(i === state.result.head.lines.findIndex((x) => x.trim()) && l.trim() === state.result.head.title));
         const text = lines.join('\n').trim();
         if (text) p.synopsis = text;
       }

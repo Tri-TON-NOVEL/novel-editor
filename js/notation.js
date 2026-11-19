@@ -125,7 +125,9 @@ export function toNarou(text) { return convertText('alpha', 'narou', text).text;
 export function toAlpha(text) { return convertText('narou', 'alpha', text).text; }
 
 // 旧版との互換：その投稿先の書き方にする
+// カクヨムは、まぎれこんだアルファポリスの書き方だけを直す（《《傍点》》・ルビはそのまま。0.97）
 export function convertRuby(site, text) {
+  if (site === 'kakuyomu') return convertText('alpha', 'kakuyomu', text).text;
   return site === 'alpha' ? toAlpha(text) : toNarou(text);
 }
 export function convert(site, text) {

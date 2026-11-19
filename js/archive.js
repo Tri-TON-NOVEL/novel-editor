@@ -2,7 +2,10 @@
 // 利用者からは一つの .ayabackup ファイルだが、内部は索引＋項目ごとの gzip ブロック。
 // 巨大なJSON全体を file.text() / JSON.parse() せず、必要なブロックだけ順番に読む。
 import { db, meta, prefs, versions } from './db.js';
-import { normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES } from './format.js';
+import {
+  normalize, newProject, makeId, draftOf, SCHEMA_VERSION, SITE_KEYS, PROJECT_INFO_KEYS, LEGACY_SITES,
+  missingSites, keepLocalDrafts, keepLocalProjectInfo, keepChapterLevels,
+} from './format.js';
 import { applyEnvironment, environmentSummary } from './backup.js';
 
 export const ARCHIVE_FORMAT = 'ayatuzuri-block-backup';
@@ -375,9 +378,10 @@ function remapEditionIds(holder, map) {
 
 // 上書きするときは、この端末の稿（その作品、またはその話の分）を消して、バックアップの稿にそっくり入れ替える。
 // 消す前の状態は、読み込む前に「同期の前の状態」として端末全体を残している（app.js の protectBeforeRestore）
-async function restoreVersions(archive, item, localProjectId, { remap = null, existing = false, episodeId = null } = {}) {
+// keepSites（0.97）：以前の版のバックアップにないサイト（カクヨム）の稿は、この端末のものを残す
+async function restoreVersions(archive, item, localProjectId, { remap = null, existing = false, episodeId = null, keepSites = [] } = {}) {
   const blocks = blocksOf(archive, item).filter(isEditionBlock);
-  if (existing) await versions.removeEditions(localProjectId, episodeId);
+  if (existing) await versions.removeEditions(localProjectId, episodeId, keepSites);
   for (const block of blocks) {
     const v = await readArchiveBlock(archive, block);
     v.projectId = localProjectId;
@@ -427,16 +431,26 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
     if (item.type === 'project') {
       const baseBlock = itemBlocks.find((b) => blockKind(b) === 'project');
       if (!baseBlock) throw new ArchiveFormatError('作品データがありません');
-      const src = normalize(await readArchiveBlock(archive, baseBlock));
+      const rawBase = await readArchiveBlock(archive, baseBlock);
+      let src = normalize(rawBase);
       src.episodes = [];
       for (const block of itemBlocks.filter((b) => blockKind(b) === 'episode').sort((a, b) => a.order - b.order)) src.episodes.push(await readArchiveBlock(archive, block));
       const existing = !asNew ? byWork.get(src.workId) : null;
+      // 以前の版（v3）のバックアップ：カクヨムの原稿・作品情報・部は、この端末のものを残す（0.97）
+      let keepSites = [];
+      if (existing) {
+        const rawEps = src.episodes;
+        keepSites = SITE_KEYS.filter((s) => rawEps.length && rawEps.every((e) => missingSites(e).includes(s)));
+        const fixed = keepLocalProjectInfo(rawBase, existing);
+        fixed.episodes = rawEps.map((e) => keepLocalDrafts(e, existing.episodes.find((x) => x.id === e.id), missingSites(e)));
+        src = normalize(fixed);
+      }
       const localId = existing?.id || makeId();
       const idMap = new Map(versionBlocks.map((b) => [b.versionId, (asNew || !existing) ? makeId() : b.versionId]));
       remapEditionIds(src, idMap);
       const restored = normalize({ ...src, id: localId, links: existing?.links || {}, workId: asNew ? makeId() : src.workId });
       await db.put(restored);
-      await restoreVersions(archive, item, localId, { remap: idMap, existing: !!existing });
+      await restoreVersions(archive, item, localId, { remap: idMap, existing: !!existing, keepSites });
       if (existing) addResult(result.updatedList, restored); else addResult(result.addedList, restored);
       byWork.set(restored.workId, restored);
       continue;
@@ -451,6 +465,8 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       const data = await readArchiveBlock(archive, block);
       // 0.63 までのバックアップにはメモが1つ（projectMemo）だけ：この端末の複数のメモを残さず、その1つにする
       if (!Array.isArray(data.memos)) delete target.memos;
+      // 0.95 までのバックアップの章には部・章の区別（level）がない：この端末の区別を残す（0.97）
+      if (Array.isArray(data.chapters)) data.chapters = keepChapterLevels(data.chapters, target.chapters);
       // 0.65 までのバックアップには伏線がない：この端末の伏線は消さずに残す（Object.assign で上書きされない）
       Object.assign(target, data, { id: target.id, workId: target.workId, links: target.links || {}, episodes: target.episodes });
     } else if (item.type === 'episode') {
@@ -461,11 +477,13 @@ export async function restoreArchive(opened, { selected = null, asNew = false, e
       remapEditionIds({ episodes: [ep] }, idMap);
       if (item.chapter && !target.chapters.some((c) => c.id === item.chapter.id)) target.chapters.push(structuredClone(item.chapter));
       const at = target.episodes.findIndex((e) => e.id === ep.id);
-      if (at >= 0) target.episodes[at] = ep;
+      // 以前の版のバックアップにないサイト（カクヨム）の原稿・稿は、この端末のものを残す（0.97）
+      const keepSites = at >= 0 && existing ? missingSites(ep) : [];
+      if (at >= 0) target.episodes[at] = keepLocalDrafts(ep, target.episodes[at], keepSites);
       else if (target.episodes.length === 1 && !target.episodes[0].plot && !target.episodes[0].freeMemo
         && Object.values(target.episodes[0].drafts || {}).every((d) => !d.title && !d.body && !d.foreword && !d.afterword)) target.episodes[0] = ep;
       else target.episodes.splice(Math.min(item.order ?? target.episodes.length, target.episodes.length), 0, ep);
-      await restoreVersions(archive, item, target.id, { remap: idMap, existing, episodeId: ep.id });
+      await restoreVersions(archive, item, target.id, { remap: idMap, existing, episodeId: ep.id, keepSites });
     }
     target.updatedAt = new Date().toISOString();
     const saved = normalize(target);
