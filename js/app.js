@@ -1594,7 +1594,7 @@ async function confirmProjectDelete(p) {
   if (!(await ask(`作品「${name}」をこの端末から削除しますか？`))) return false;
   if (!(await ask(`【2回目の確認】\n「${name}」の ${n.episodes.length}話・本文 ${totalChars(n).toLocaleString()}字、`
     + `プロット・世界観・用語・登場人物、変更履歴${vcount}件がすべて消えます。\n`
-    + '（「ファイル」で保存したものや、サーバのバックアップファイルは残ります）\n本当に削除しますか？'))) return false;
+    + '（「作品」→「保存…」で保存したものや、サーバのバックアップファイルは残ります）\n本当に削除しますか？'))) return false;
   const word = n.title || '削除';
   const typed = await askText(`【最終確認】削除するには、${n.title ? '作品名' : '「削除」'}を正確に入力してください。\n${word}`, '', { ok: '削除する', danger: true });
   if (typed === null) return false;
@@ -2030,7 +2030,7 @@ async function allOpen({ force = false } = {}) {
   const opened = await openBackupSource(src);
   if (opened.archive) { renderBackupInspection(opened.archive, src.name); return; }
   const { text } = opened;
-  if (isEpisodeFile(text)) { toast('エピソードのファイルです。「ファイル」→ エピソードの「開く」で開いてください', true); return; }
+  if (isEpisodeFile(text)) { toast('エピソードのファイルです。「作品」→ エピソードの「開く」で開いてください', true); return; }
   if (isBackup(text)) { openRestoreDialog(text, src.name); return; }
   if (isPack(text)) { await inspectBackupText(text, src.name); return; }
   await withBusy('読み込み中…', async () => switchTo(await importContent(parse(text, src.name))));
@@ -2208,7 +2208,7 @@ async function createBackupPack(btn = $('backup-pack-save')) {
   const dialog = $('backup-pack-dialog');
   const mode = packMode;
   if (mode === 'pack' && sync.getState() !== 'on') {
-    setTaskError(dialog, '自動バックアップの保存先が使えません。「設定」→「バックアップ」で保存先とフォルダを確かめてください（好きな場所に保存するときは「ファイル」→「保存」）');
+    setTaskError(dialog, '自動バックアップの保存先が使えません。「設定」→「バックアップ」で保存先とフォルダを確かめてください（好きな場所に保存するときは「作品」→「保存…」）');
     return false;
   }
   const saved = await runTask('backup', async () => {
@@ -3102,7 +3102,7 @@ async function keepLatestEditions() {
   const msg = `${SITES[site].short}用の稿を整理します。\n`
     + `${p.remove ? `全話で、最新稿のほかの稿（${p.remove}件）を削除します。` : ''}残した稿は「第1稿」になります。\n`
     + `${p.older ? `古い稿を表示している話（${p.older}話）は、最新稿の内容に変わります。\n` : ''}`
-    + `${otherSitesText(site)}\n⚠ 削除した稿は元に戻せません。心配なときは、先に「ファイル」→「保存…」で保存してください。`;
+    + `${otherSitesText(site)}\n⚠ 削除した稿は元に戻せません。心配なときは、先に「作品」→「保存…」で保存してください。`;
   if (!(await ask(msg, { ok: p.remove ? '削除する' : '第1稿にする', danger: !!p.remove }))) return;
   const now = new Date().toISOString();
   let removed = 0;
@@ -3333,8 +3333,8 @@ async function remindBackup() {
   const days = last ? Math.floor((Date.now() - new Date(last)) / 86400000) : null;
   if (days === null || days >= BACKUP_REMIND_DAYS) {
     toast(days === null
-      ? 'まだ全体のバックアップがありません。「設定」→「バックアップ」で自動バックアップの保存先を選ぶか、「ファイル」→「保存…」で保存しておくと安心です'
-      : `最後のバックアップから${days}日たっています。「ファイル」→「保存…」か、「設定」→「バックアップ」の自動バックアップをおすすめします`);
+      ? 'まだ全体のバックアップがありません。「設定」→「バックアップ」で自動バックアップの保存先を選ぶか、「作品」→「保存…」で保存しておくと安心です'
+      : `最後のバックアップから${days}日たっています。「作品」→「保存…」か、「設定」→「バックアップ」の自動バックアップをおすすめします`);
   }
 }
 
@@ -4818,7 +4818,7 @@ function scrollLineIntoView(t, y) {
   const vv = window.visualViewport;
   const viewTop = vv ? vv.offsetTop : 0;
   const viewH = vv ? vv.height : window.innerHeight;
-  const area = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const area = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight, left: 0, right: Infinity };
   const top = Math.max(area.top, viewTop);
   const bottom = Math.min(area.bottom, viewTop + viewH);
   if (lineTop >= top && lineTop + lh <= bottom) return; // もう見えている
@@ -5345,11 +5345,12 @@ async function warnSameWorkCode(kind) {
   toast(`この${what}は「${others.map((p) => p.title || '（無題）').join('」「')}」にも入っています。別の作品なら見直してください`, true);
 }
 
+// 0.97：「小説」→「投稿サイト情報…」。左の一覧から、別の画面に移した
 function openWorkCodes() {
-  document.body.classList.add('drawer-open');
-  $('work-codes').open = true;
-  $('work-codes').scrollIntoView({ block: 'nearest' });
-  $('work-ncode').focus();
+  closeMenus();
+  renderSiteSettings();
+  renderWorkCodes();
+  $('work-codes-dialog').showModal();
 }
 
 function applyPrefs() {
@@ -5448,7 +5449,8 @@ function renderUiProfileEditor(profile = uiEditing || uiActive()) {
 
 // 表示・非表示を切り替える部品（キー → 要素）
 const UI_TARGETS = {
-  'editor.file': () => document.querySelector('.actions details.menu:not(#links-menu)'),
+  'editor.file': () => $('work-menu'), // 「作品」メニュー（0.96 までの「ファイル」）
+  'editor.novel': () => $('novel-menu'), // 「小説」メニュー（0.97）
   'editor.links': () => $('links-menu'),
   'novel.synopsis': () => document.querySelector('.nav-item[data-view="synopsis"]'),
   'novel.outline': () => document.querySelector('.nav-item[data-view="outline"]'),
@@ -5457,7 +5459,7 @@ const UI_TARGETS = {
   'novel.project-memo': () => document.querySelector('.nav-item[data-view="project-memo"]'),
   'novel.foreshadows': () => document.querySelector('.nav-item[data-view="foreshadows"]'),
   'novel.search': () => document.querySelector('.nav-item[data-view="search"]'),
-  'novel.workcodes': () => $('work-codes'),
+  'novel.workcodes': () => $('novel-menu-workcodes'), // 「小説」→「投稿サイト情報…」（0.97。前は左の一覧）
   'show.report': () => $('report-tab'),
   'nav.add-episode': () => document.querySelector('.nav-add [data-action="add-episode"]'),
   'nav.add-chapter': () => document.querySelector('.nav-add [data-action="add-chapter"]'),
@@ -5485,8 +5487,8 @@ function applyUiPrefs() {
   const viewKey = { synopsis: 'novel.synopsis', outline: 'novel.outline', world: 'novel.world', characters: 'novel.characters', 'project-memo': 'novel.project-memo', foreshadows: 'novel.foreshadows', search: 'novel.search' }[view];
   if (viewKey && project && !uiPref(viewKey)) setView('episode');
   if (reportMode && !uiPref('show.report')) setReportMode(false);
-  // 左の一覧を開くボタンは「作品」と呼ぶ（作品の資料とエピソードを選ぶ場所のため。7.7.7 から全端末・全表示で同じ）
-  const drawerName = '作品';
+  // 左の一覧を開くボタンは「目次」と呼ぶ（0.97。上部バーの「作品」メニューと分けるため。7.7.7〜0.96 は「作品」）
+  const drawerName = '目次';
   const drawerBtn = document.querySelector('.drawer-toggle');
   drawerBtn.textContent = `☰ ${drawerName}`;
   drawerBtn.setAttribute('aria-label', drawerName);
@@ -5857,14 +5859,22 @@ function placeMenu(d) {
   const list = d.querySelector('.menu-list');
   if (!list) return;
   list.classList.remove('up');
+  list.style.transform = '';
   let box = d.parentElement;
   while (box && box !== document.body && !/(auto|scroll)/.test(getComputedStyle(box).overflowY)) box = box.parentElement;
-  const limit = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight };
+  const limit = box && box !== document.body ? box.getBoundingClientRect() : { top: 0, bottom: window.innerHeight, left: 0, right: Infinity };
   const bottom = Math.min(limit.bottom, window.innerHeight);
   const top = Math.max(limit.top, 0);
   const r = list.getBoundingClientRect();
   const s = d.getBoundingClientRect();
   if (r.bottom > bottom && s.top - top > bottom - s.bottom) list.classList.add('up');
+  // 枠や画面の左右からはみ出すなら、収まるように横へずらす（入りきらないときは左端に合わせる）
+  const left = Math.max(limit.left, 0) + 4;
+  const right = Math.min(limit.right, document.documentElement.clientWidth) - 4;
+  let dx = 0;
+  if (r.right > right) dx = right - r.right;
+  if (r.left + dx < left) dx = left - r.left;
+  if (Math.abs(dx) > 0.5) list.style.transform = `translateX(${dx}px)`;
 }
 
 function closeMenus(except) {
@@ -6258,6 +6268,10 @@ function bindEvents() {
     }
     if (!e.target.closest('details.menu')) closeMenus();
   });
+  // iPhone・iPad では、ボタンでない所をタップしても click が届かないことがあるので、触れた時点でもメニューを閉じる
+  document.addEventListener('pointerdown', (e) => {
+    if (e.target instanceof Element && !e.target.closest('details.menu')) closeMenus();
+  });
   // 入力補助のボタンを押しても本文の選択範囲が外れないようにする
   document.querySelectorAll('[data-insert], [data-symbol], .editor-tools summary')
     .forEach((b) => b.addEventListener('pointerdown', (e) => e.preventDefault()));
@@ -6283,6 +6297,7 @@ function bindEvents() {
     closeMenus(d);
     if (d.id === 'links-menu') buildLinksMenu();
     if (d.id === 'image-menu') buildImageMenu();
+    placeMenu(d);
   }));
 
   bindDialog('settings-dialog');

@@ -17,22 +17,29 @@
 </head>
 <body>
 <header class="toolbar">
-  <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="作品">☰ 作品</button>
+  <button type="button" class="drawer-toggle" data-action="toggle-drawer" aria-label="目次">☰ 目次</button>
   <div class="brand" title="文（あや）と文（あや）で綾（あや）を綴る。"><img class="brand-icon" src="icons/header-icon.png?v=90" alt="" aria-hidden="true">あや綴り</div>
   <nav class="actions toolbar-left">
-    <details class="menu">
-      <summary>ファイル</summary>
+    <!-- 0.97：「作品」は作品全般（作品の選択・ファイルの開く／保存）、「小説」は開いている小説ごとの操作（インポート・エクスポートも） -->
+    <details class="menu" id="work-menu">
+      <summary>作品</summary>
       <div class="menu-list">
         <button type="button" data-action="library">作品一覧…</button>
         <button type="button" data-action="new-project">新しい作品…</button>
-        <div class="menu-head">新規登録（この作品）</div>
-        <button type="button" data-action="new-chapter-at">新しい章…</button>
-        <button type="button" data-action="new-episode-at">新しいエピソード…</button>
-        <div class="menu-head">稿（この作品）</div>
-        <button type="button" data-action="keep-latest-editions">最新稿だけ残す…</button>
         <div class="menu-head">ファイル（バックアップパックと同じ形式）</div>
         <button type="button" data-action="ep-open">開く…</button>
         <button type="button" data-action="ep-save-as">保存…</button>
+      </div>
+    </details>
+    <details class="menu" id="novel-menu">
+      <summary>小説</summary>
+      <div class="menu-list">
+        <button type="button" data-action="open-work-codes" id="novel-menu-workcodes">投稿サイト情報…</button>
+        <div class="menu-head">新規登録</div>
+        <button type="button" data-action="new-chapter-at">新しい章…</button>
+        <button type="button" data-action="new-episode-at">新しいエピソード…</button>
+        <div class="menu-head">稿</div>
+        <button type="button" data-action="keep-latest-editions">最新稿だけ残す…</button>
         <div class="menu-head">インポート（プレーンテキスト）</div>
         <button type="button" data-action="import-text">エピソードエリアへ…</button>
         <div class="menu-head">エクスポート（プレーンテキスト）</div>
@@ -83,25 +90,7 @@
         <button type="button" class="nav-item" draggable="true" data-view="foreshadows">伏線</button>
         <button type="button" class="nav-item" draggable="true" data-view="search">串刺し検索</button>
       </div>
-      <details class="work-codes" id="work-codes">
-        <summary>小説投稿サイト情報 <span class="work-codes-state" id="work-codes-state"></span></summary>
-        <div class="work-codes-body">
-          <fieldset class="use-sites">
-            <legend>使う投稿サイト</legend>
-            <label><input type="checkbox" data-use-site="narou"> なろう</label>
-            <label><input type="checkbox" data-use-site="kakuyomu"> カクヨム</label>
-            <label><input type="checkbox" data-use-site="alpha"> アルファ</label>
-          </fieldset>
-          <label class="inline-check"><input type="checkbox" id="short-story"> 短編</label>
-          <label data-site-field="narou">なろうの Nコード <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
-          <label data-site-field="narou">なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
-          <label data-site-field="kakuyomu">カクヨムの作品ID <input id="work-kakuyomu-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：1177354054880000000"></label>
-          <label data-site-field="kakuyomu">カクヨムの作品URL <input id="kakuyomu-url" type="url" autocomplete="off" placeholder="https://kakuyomu.jp/works/…"></label>
-          <label data-site-field="kakuyomu">カクヨムのキャッチコピー <input id="kakuyomu-catchphrase" type="text" autocomplete="off" maxlength="35" placeholder="35字まで"></label>
-          <label data-site-field="alpha">アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
-          <label data-site-field="alpha">アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
-        </div>
-      </details>
+      <!-- 0.97：投稿サイト情報は「小説」→「投稿サイト情報…」のダイアログへ移した（work-codes-dialog） -->
       <div class="nav-head">
         <span>章・エピソード</span>
         <span class="nav-add">
@@ -537,6 +526,29 @@
   </main>
 </div>
 
+<dialog id="work-codes-dialog" aria-labelledby="work-codes-title">
+  <form method="dialog" class="dialog">
+    <h2 id="work-codes-title">投稿サイト情報 <small class="work-codes-state" id="work-codes-state"></small></h2>
+    <div class="work-codes-body">
+      <fieldset class="use-sites">
+        <legend>使う投稿サイト</legend>
+        <label><input type="checkbox" data-use-site="narou"> なろう</label>
+        <label><input type="checkbox" data-use-site="kakuyomu"> カクヨム</label>
+        <label><input type="checkbox" data-use-site="alpha"> アルファ</label>
+      </fieldset>
+      <label class="inline-check"><input type="checkbox" id="short-story"> 短編</label>
+      <label data-site-field="narou">なろうの Nコード <input id="work-ncode" type="text" autocomplete="off" spellcheck="false" placeholder="例：n1234ab"></label>
+      <label data-site-field="narou">なろうの作品URL <input id="narou-url" type="url" autocomplete="off" placeholder="https://ncode.syosetu.com/n0000aa/"></label>
+      <label data-site-field="kakuyomu">カクヨムの作品ID <input id="work-kakuyomu-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：1177354054880000000"></label>
+      <label data-site-field="kakuyomu">カクヨムの作品URL <input id="kakuyomu-url" type="url" autocomplete="off" placeholder="https://kakuyomu.jp/works/…"></label>
+      <label data-site-field="kakuyomu">カクヨムのキャッチコピー <input id="kakuyomu-catchphrase" type="text" autocomplete="off" maxlength="35" placeholder="35字まで"></label>
+      <label data-site-field="alpha">アルファポリスの作品ID <input id="work-alpha-id" type="text" autocomplete="off" spellcheck="false" inputmode="numeric" placeholder="例：123456789"></label>
+      <label data-site-field="alpha">アルファポリスの作品URL <input id="alpha-url" type="url" autocomplete="off" placeholder="https://www.alphapolis.co.jp/novel/…"></label>
+    </div>
+    <div class="dialog-foot"><button value="close">閉じる</button></div>
+  </form>
+</dialog>
+
 <dialog id="library-dialog">
   <form method="dialog" class="dialog">
     <h2>作品一覧 <small>（この端末に自動保存されている作品）</small></h2>
@@ -804,6 +816,7 @@
             <button type="button" id="imp-title-list-paste" class="tool" title="コピーしてあるタイトル一覧を、この欄へ貼り付けます">貼り付け</button>
           </div>
           <textarea id="imp-title-list-text" rows="8" placeholder="作品ページのタイトル一覧をコピーして、ここへ貼り付けます（右上の「貼り付け」でも入ります）"></textarea>
+          <p class="hint">最後のエピソードの文字数の行まで含めてコピーしてください。</p>
         </div>
       </div>
       </div>
@@ -1230,8 +1243,10 @@
     </fieldset>
     <fieldset class="checks">
       <legend>上部バー</legend>
-      <label><input type="checkbox" data-ui="editor.file"> ファイル</label>
+      <label><input type="checkbox" data-ui="editor.file"> 作品</label>
+      <label><input type="checkbox" data-ui="editor.novel"> 小説</label>
       <label><input type="checkbox" data-ui="editor.links"> リンク</label>
+      <label><input type="checkbox" data-ui="novel.workcodes"> 小説 → 投稿サイト情報</label>
     </fieldset>
     <fieldset class="checks">
       <legend>小説全体（目次）</legend>
@@ -1242,7 +1257,6 @@
       <label><input type="checkbox" data-ui="novel.project-memo"> メモ</label>
       <label><input type="checkbox" data-ui="novel.foreshadows"> 伏線一覧</label>
       <label><input type="checkbox" data-ui="novel.search"> 串刺し検索</label>
-      <label><input type="checkbox" data-ui="novel.workcodes"> 小説投稿サイト情報</label>
     </fieldset>
     <fieldset class="checks">
       <legend>章・エピソード（目次）</legend>
