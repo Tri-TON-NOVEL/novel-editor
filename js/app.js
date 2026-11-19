@@ -2614,7 +2614,8 @@ async function runSiteCopy() {
   const over = plan.mode === 'overwrite' ? plan.changes.filter((c) => c.before) : [];
   const { cur: dest } = await ensureEdition(ep, plan.to);
   // 0.89：コピー先にすでに画像があるときは、画像の対応を確かめる。コピー先の画像タグはそのまま残し、文章だけを入れ替える
-  const withImages = plan.changes.filter((c) => imageSlots(c.before).length);
+  // カクヨムには挿絵がないので確かめない（コピー先に残っていた画像も消える。0.97）
+  const withImages = plan.to === 'kakuyomu' ? [] : plan.changes.filter((c) => imageSlots(c.before).length);
   if (withImages.length) {
     const maps = await imageMatchDialog(withImages.map((c) => ({ f: c.f, src: c.src, dest: c.before })), plan.from, plan.to);
     if (!maps) return;
@@ -4775,7 +4776,7 @@ function narouPasteNeedsConversion(t, text) {
 function pasteConvertedForNarou(t, text) {
   const alpha = countAlphaNotation(text);
   const mitemin = editSite === 'narou' && hasMiteminUrl(text);
-  const conv = editSite === 'kakuyomu' ? convertText('alpha', 'kakuyomu', text) : convertText('alpha', 'narou', text, { keepImages: true });
+  const conv = editSite === 'kakuyomu' ? convertText('alpha', 'kakuyomu', text, { keepImages: true }) : convertText('alpha', 'narou', text, { keepImages: true });
   replaceSelection(t, conv.text);
   const msg = [];
   if (alpha) msg.push(`アルファポリスのルビ・傍点（${alpha}件）を、${SITES[editSite].short}の書き方に変換して貼り付けました`);

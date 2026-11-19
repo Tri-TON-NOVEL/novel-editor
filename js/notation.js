@@ -109,6 +109,7 @@ function alphaToNarou(text, warnings, opts = {}) {
 /**
  * from の記法で書かれた文章を to の記法へ変換する。変換できないものは原文のまま残し、warnings に入れる。
  * opts.keepImages（アルファ → なろうのとき）：アルファの画像タグを目印にせず、そのまま残す。
+ *   （→ カクヨムのとき）：画像を消さずに残す（貼り付け。0.97）
  * @returns {{ text: string, warnings: { type, message, count, samples }[] }}
  */
 export function convertText(from, to, text, opts = {}) {
@@ -116,7 +117,7 @@ export function convertText(from, to, text, opts = {}) {
   if (!text || from === to) return { text: text || '', warnings };
   let out;
   if (from === 'kakuyomu') out = to === 'alpha' ? kakuyomu.toAlpha(text, warnings) : kakuyomu.toNarou(text, warnings);
-  else if (to === 'kakuyomu') out = from === 'alpha' ? kakuyomu.fromAlpha(text, warnings) : kakuyomu.fromNarou(text, warnings);
+  else if (to === 'kakuyomu') out = from === 'alpha' ? kakuyomu.fromAlpha(text, warnings, opts) : kakuyomu.fromNarou(text, warnings, opts);
   else out = to === 'alpha' ? narouToAlpha(text, warnings) : alphaToNarou(text, warnings, opts);
   return { text: out, warnings };
 }

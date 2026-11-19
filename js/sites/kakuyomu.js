@@ -4,7 +4,7 @@
 //   ルビ  |漢字《かんじ》・｜漢字《かんじ》、漢字だけなら 漢字《かんじ》。対象20字・ルビ50字まで
 //   傍点  《《傍点》》（ルビと重ねられない。改行をまたげない）
 //   《 を文字として出す  ｜《
-//   挿絵  公式に記法なし（本文に画像は入れられない）
+//   挿絵  公式に記法なし（本文に画像は入れられない）。カクヨムへ変換するときは画像を消す（0.97）
 // 欄    タイトル・本文だけ（前書き・後書きなし。アルファポリスと同じ扱い）
 // 章    大見出し・小見出しの2階層（章の level 1・2。このアプリでもカクヨムだけの作品では同じ呼び名）
 //
@@ -57,12 +57,29 @@ const site = {
 export default site;
 
 const narouRuby = (b, r) => `|${b}《${r}》`;
-const IMAGE_KEEP = 'カクヨムには挿絵の書き方がないため、画像タグ・画像の URL はそのまま残しました（投稿する前に消してください）';
+const IMAGE_REMOVE = 'カクヨムには挿絵がないため、画像を消しました';
+const IMAGE_ANY = new RegExp(`${NAROU_IMAGE.source}|${MITEMIN_URL.source}|${ALPHA_IMAGE.source}|【ここに画像を挿入：[^】\n]*】`, 'g');
 
-function warnKeptImages(text, warnings, kinds) {
-  if (kinds.includes('narou')) for (const m of text.matchAll(NAROU_IMAGE)) addWarning(warnings, 'image-keep', IMAGE_KEEP, m[0]);
-  if (kinds.includes('mitemin')) for (const m of text.matchAll(MITEMIN_URL)) addWarning(warnings, 'image-keep', IMAGE_KEEP, m[0]);
-  if (kinds.includes('alpha')) for (const m of text.matchAll(ALPHA_IMAGE)) addWarning(warnings, 'image-keep', IMAGE_KEEP, m[0]);
+// カクヨムへ変換するとき、画像（なろうの挿絵タグ・みてみんの URL・アルファの画像タグ・「ここに画像を挿入」の目印）を消す（0.97）。
+//   画像だけの行は行ごと消し、前後の空行が重なるときは1つにする。文の途中の画像は、画像だけを消す
+//   opts.keepImages（カクヨム用の欄への貼り付け）：消さずに残す
+export function removeImages(text, warnings, opts = {}) {
+  if (opts.keepImages) return text;
+  const lines = text.split('\n').map((line) => {
+    const rest = line.replace(IMAGE_ANY, (m) => { addWarning(warnings, 'image-remove', IMAGE_REMOVE, m); return ''; });
+    if (rest === line) return line;
+    return rest.trim() ? rest : null;
+  });
+  const out = [];
+  let dropped = false;
+  for (const line of lines) {
+    if (line === null) { dropped = true; continue; }
+    if (dropped && !line.trim() && (!out.length || !out[out.length - 1].trim())) continue;
+    dropped = false;
+    out.push(line);
+  }
+  if (dropped) while (out.length && !out[out.length - 1].trim()) out.pop();
+  return out.join('\n');
 }
 
 function warnRubyLength(text, warnings, baseLimit, textLimit, message) {
@@ -81,14 +98,13 @@ const joinDots = (t) => t.replace(/》》《《/g, '');
 
 // ---------- なろう → カクヨム ----------
 // ルビは同じ書き方なのでそのまま。ルビで付けた傍点（|傍点《・・》）は《《傍点》》にする
-export function fromNarou(text, warnings) {
+export function fromNarou(text, warnings, opts = {}) {
   let t = text.replace(/[|｜]([^|｜《》\n]+?)《(・+)》/g, (m, base, dots) => ([...base].length === dots.length ? `《《${base}》》` : m));
   t = joinDots(t);
   for (const m of t.matchAll(PAREN_RUBY)) {
     addWarning(warnings, 'paren-ruby', '「漢字（かな）」はなろうでは自動でルビになりますが、カクヨムではなりません。そのまま残しました', m[0]);
   }
-  warnKeptImages(t, warnings, ['narou', 'mitemin', 'alpha']);
-  return t;
+  return removeImages(t, warnings, opts);
 }
 
 // ---------- カクヨム → なろう ----------
@@ -106,7 +122,7 @@ export function toNarou(text, warnings) {
 
 // ---------- アルファ → カクヨム ----------
 // #漢字__かんじ__# → |漢字《かんじ》、#傍点__・・__# → 《《傍点》》。《《傍点》》はそのまま
-export function fromAlpha(text, warnings) {
+export function fromAlpha(text, warnings, opts = {}) {
   let t = text.replace(ALPHA_RUBY, (m, base, reading, i, all) => {
     if (/[|｜《》]/.test(base + reading)) {
       addWarning(warnings, 'ruby-unsafe', 'ルビに「|」「《」「》」が含まれるため変換しませんでした（カクヨムでは正しく表示できません）', sampleOf(all, i));
@@ -117,8 +133,7 @@ export function fromAlpha(text, warnings) {
   });
   t = joinDots(t);
   warnRubyLength(t, warnings, RUBY_BASE_LIMIT, RUBY_TEXT_LIMIT, `カクヨムのルビは対象${RUBY_BASE_LIMIT}文字・読み${RUBY_TEXT_LIMIT}文字までです。長いルビはカクヨムでは表示されません`);
-  warnKeptImages(t, warnings, ['alpha', 'narou', 'mitemin']);
-  return t;
+  return removeImages(t, warnings, opts);
 }
 
 // ---------- カクヨム → アルファ ----------

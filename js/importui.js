@@ -1260,6 +1260,7 @@ export function initImport(ctx) {
   function imageFieldsOf(row) {
     const dest = pairTarget(row);
     if (!dest || state.replacing) return [];
+    if (state.site === 'kakuyomu') return []; // カクヨムには挿絵がないので確かめない（0.97）
     const out = [];
     for (const f of IMAGE_FIELDS) {
       if (f !== 'body' && !row.it[f]) continue; // TXT に前書き・後書きがなければ、今のものがそのまま残る
