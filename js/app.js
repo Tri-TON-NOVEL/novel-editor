@@ -1521,7 +1521,7 @@ async function renderLibrary() {
       }
       renderLibrary();
     }, 'danger'));
-    const codes = [p.narouNcode && `なろう ${p.narouNcode}`, p.alphaWorkId && `アルファ ${p.alphaWorkId}`].filter(Boolean);
+    const codes = [p.narouNcode && `なろう ${p.narouNcode}`, p.kakuyomuWorkId && `カクヨム ${p.kakuyomuWorkId}`, p.alphaWorkId && `アルファ ${p.alphaWorkId}`].filter(Boolean);
     const meta = `${p.episodes.length}話 ・ 本文 ${totalChars(p).toLocaleString()}字 ・ ${fmtTime(p.updatedAt)}${codes.length ? ' ・ ' + codes.join('・') : ''}`;
     list.append(listItem(p.title || '（無題）', meta, buttons, current));
   }
