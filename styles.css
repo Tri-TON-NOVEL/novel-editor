@@ -297,8 +297,8 @@ button.warn { background: #fff4d6; border-color: #e0b84a; color: #6b4e00; }
 .menu-list button:disabled { color: var(--muted); opacity: .6; cursor: default; }
 .episode-list .ep-row { padding-left: 14px; }
 .ep-sort { display: flex; gap: 4px; align-items: center; }
-.ep-sort select { flex: 1; min-width: 0; padding: 4px 6px; font-size: 13px; }
-.ep-sort .ep-grouping { flex: 0 0 auto; width: 5em; }
+.ep-sort select { flex: 1; min-width: 0; padding: 4px 8px; font-size: 13px; }
+.ep-sort .ep-grouping { flex: 0 0 auto; width: 6.5em; }
 .ep-sort .tool { flex: none; white-space: nowrap; }
 .episode-list button[data-ep] { display: flex; flex-direction: column; align-items: flex-start; gap: 0; }
 .episode-list .ep-name { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

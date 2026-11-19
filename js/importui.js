@@ -2,7 +2,7 @@
 // 解析は importer.js。この画面は、確定するまで作品データを一切変更しない。
 // 途中の作業は IndexedDB の meta.importSession に自動で残し、あとから再開できる。
 import * as I from './importer.js';
-import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS, normalizeSites, siteOrderFromFile, setSiteOrder } from './format.js';
+import { normalize, newProject, newEpisode, newChapter, draftOf, serialize, countChars, SITE_KEYS, normalizeSites, episodeOrderFromFile } from './format.js';
 import { SITES, countImages } from './notation.js';
 import { looksLikeBackup, parseBackup } from './sites/kakuyomu.js';
 import { imageSlots, contextOf, suggestPairs, pairScore, applyImageMap, PAIR_WEAK } from './imagematch.js';
@@ -736,6 +736,7 @@ export function initImport(ctx) {
     // 対にならない話を勝手に新しい話として足さない（エラーにして、各行で手動で決める）のは、
     // 別サイト版を足すとき・メインでない投稿先の原稿を取り込むとき。メインの原稿の更新では、増えた話はふつうに追加する
     const strict = !!target && !state.replacing && state.strictMatch && (state.crossSite || (target.site || 'narou') !== state.site);
+    state.reorder = false; // ファイルの順に並べ替える（選んだときだけ。0.97）
     state.rows = items.map((it, i) => {
       const dup = dups[i];
       const action = strict && dup.kind === 'none' ? 'unmatched' : dup.action;
@@ -904,6 +905,14 @@ export function initImport(ctx) {
       const nUnpaired = state.rows.filter((r) => r.dup.kind !== 'title' && r.dup.kind !== 'same').length;
       onlyLabel.append(only, ` 対になっていない話だけ表示（${nUnpaired}話。似たタイトルで対にした話も含む）`);
       sum.append(onlyLabel);
+    }
+    // 目次順とファイルの順が違うとき：ファイルの順に並べ替えるか選ぶ（目次順は3サイト共通。0.97）
+    if (target && !state.replacing) {
+      const l = Object.assign(document.createElement('label'), { id: 'imp-reorder', className: 'check', hidden: true });
+      const cb = Object.assign(document.createElement('input'), { type: 'checkbox', checked: !!state.reorder });
+      cb.addEventListener('change', () => { state.reorder = cb.checked; updateCommitSummary(); });
+      l.append(cb, Object.assign(document.createElement('span'), { className: 'imp-reorder-text' }));
+      sum.append(l);
     }
     if (isKakuyomu()) renderKakuyomuInfo(sum, target);
     const stat = (t) => sum.append(Object.assign(document.createElement('div'), { className: 'stat', textContent: t }));
@@ -1202,8 +1211,7 @@ export function initImport(ctx) {
     return { add, pair, overwrite, edition, skip, errors };
   }
 
-  // ファイルの順に並べる話（既存の作品へ取り込むとき。0.97）：対にした話（スキップも含む）を、ファイルの順に。
-  // newIds（行 → 新しく足した話の ID）を渡すと、新しい話も入れる
+  // ファイルの順に並べる話（対にした話。スキップも含む）。newIds（行 → 新しく足した話の ID）を渡すと、新しい話も入れる
   function fileOrderIds(newIds = null) {
     const out = [];
     for (const row of state.rows) {
@@ -1214,23 +1222,29 @@ export function initImport(ctx) {
     return out;
   }
 
-  // 取り込むと並びが変わる話の数（プレビュー用。新しく足す話は数えない）
+  // ファイルの順にすると位置が変わる話の数（新しく足す話は数えない）
   function orderChanges() {
     const t = state.targetProject;
     if (!t || state.replacing) return 0;
-    return siteOrderFromFile(normalize(t), state.site, fileOrderIds()).changed;
+    return episodeOrderFromFile(t, fileOrderIds()).changed;
   }
 
   function updateCommitSummary() {
     const c = counts();
     const moved = orderChanges();
+    const box = $('imp-reorder');
+    if (box) {
+      box.hidden = !moved;
+      box.querySelector('.imp-reorder-text').textContent = ` 目次順を${srcWord()}の順に並べ替える（${moved}話）`;
+    }
+    c.moved = state.reorder ? moved : 0;
     const siteWaiting = state.siteMismatch && !state.siteAck;
     const waiting = siteWaiting || (state.ncodeOwner && !state.ncodeAck);
     $('imp-commit-summary').textContent = (state.replacing ? `作り直す（今の ${state.targetProject.episodes.length}話を削除）・` : '') + countText(c) + (c.errors ? `・未対応 ${c.errors}話` : '')
-      + (moved ? `・${SITES[state.site].short}の並びが ${moved}話変わります` : '')
+      + (c.moved ? `・並べ替え ${c.moved}話` : '')
       + (siteWaiting ? '（「取り込む原稿」を確かめてください。上のボタンで選ぶと取り込めます）'
         : waiting ? '（同じ Nコードの作品があります。上の「続行」を押すと取り込めます）' : '');
-    $('imp-commit').disabled = !(c.add + c.pair + c.overwrite + c.edition + moved) || waiting;
+    $('imp-commit').disabled = !(c.add + c.pair + c.overwrite + c.edition + c.moved) || waiting;
     updateCorrespondenceErrors();
     applyActionFilter();
   }
@@ -1334,7 +1348,7 @@ export function initImport(ctx) {
 
   async function commit() {
     const c = counts();
-    const moved = orderChanges(); // 並びだけが変わるときも取り込める（0.97）
+    const moved = state.reorder ? orderChanges() : 0; // 並べ替えだけでも取り込める
     if (!(c.add + c.pair + c.overwrite + c.edition) && !moved) return;
     const target = state.targetProject;
     // 取り込み先の画像との対応（自動で決められない話だけ、先に確かめてもらう）
@@ -1348,7 +1362,7 @@ export function initImport(ctx) {
     // 作り直すと消える、ほかの投稿先の原稿（なろうがメインの作品をアルファの TXT で作り直すと、なろう用の原稿が消える）
     const otherLost = state.replacing ? otherLostText(target) : '';
     if (state.replacing && !(await ask(`「${name}」を作り直します。\n今のエピソード ${target.episodes.length}話・章 ${target.chapters.length}件をすべて削除して、この ${srcWord()} の ${c.add}話に入れ替えます。${otherLost ? `\n⚠ ${otherLost}もすべて消えます。ほかのサイトの話と対にしたいときは、キャンセルして「置き換える」を選んでください。` : ''}${(target.site || 'narou') !== state.site ? `\nメインの投稿先も「${SITES[state.site].short}用」に変わります。` : ''}\n（取り込む前の状態は「バックアップ版」に残します）\nよろしいですか？`, { danger: true, ok: '作り直す' }))) return;
-    if (!state.replacing && !(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n${countText(c, '（今の稿は残ります）')}${c.errors ? `（うち未対応 ${c.errors}話）` : ''}${moved ? `\n${SITES[state.site].short}の並びが ${moved}話変わります` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
+    if (!state.replacing && !(await ask(`「${name}」に、${SITES[state.site].label}用の原稿として\n${countText(c, '（今の稿は残ります）')}${c.errors ? `（うち未対応 ${c.errors}話）` : ''}${moved ? `\n目次順を ${moved}話並べ替えます（3サイト共通）` : ''}\nで取り込みます。よろしいですか？`, { ok: '取り込む' }))) return;
     const btn = $('imp-commit');
     btn.disabled = true;
     try {
@@ -1356,7 +1370,7 @@ export function initImport(ctx) {
       await ctx.flush();
       const now = new Date().toISOString();
       let p;
-      const newIds = new Map(); // 行 → 新しく足した話の ID（ファイルの順に並べるため）
+      const newIds = new Map(); // 行 → 新しく足した話の ID（ファイルの順に並べ替えるとき用）
       // 取り込み先が中身のない話だけの作品（無題の新しい作品など）なら、その空の話は取り込んだあと消す（0.92）。
       // 置き換えなので、空の「無題」の話が紛れ込まないようにする
       const blankIds = target && !state.replacing && target.episodes.every(isBlankEpisode) ? new Set(target.episodes.map((e) => e.id)) : null;
@@ -1453,10 +1467,10 @@ export function initImport(ctx) {
       const pos = new Map(p.chapters.map((ch, i) => [ch.id, i]));
       p.episodes = p.episodes.map((e, i) => ({ e, i, k: pos.has(e.chapterId) ? pos.get(e.chapterId) : Infinity }))
         .sort((a, b) => a.k - b.k || a.i - b.i).map((x) => x.e);
-      // 既存の作品へ取り込むとき：取り込んだサイトの目次順を、ファイルの順にする（章の中だけ。ファイルにない話は今の位置のまま：0.97）
-      if (target && !state.replacing) {
-        p.siteOrder = normalize(p).siteOrder;
-        setSiteOrder(p, state.site, siteOrderFromFile(p, state.site, fileOrderIds(newIds)).ids);
+      // 選んだときは、目次順をファイルの順にする（章の中だけ。ファイルにない話は今の位置のまま）
+      if (target && !state.replacing && state.reorder) {
+        const byId = new Map(p.episodes.map((e) => [e.id, e]));
+        p.episodes = episodeOrderFromFile(p, fileOrderIds(newIds)).ids.map((id) => byId.get(id));
       }
       // プレビューで書き換えた作品名（既存の作品は、書き換えたときだけ変える）
       if (rename) p.title = title;
