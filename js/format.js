@@ -11,7 +11,7 @@
 //   memos: [{ id, title, body }]（作品全体のメモ。タブで切り替える。1つ以上）,
 //   projectMemo（1つ目のメモの本文の写し。前の版で読んでも1つ目のメモが残るように）,
 //   chapters: [{ id, title, plot, order, level }],                章（全体プロットの章と同じもの）。
-//               level（v4）：1＝部（カクヨムの大見出し）、2＝章（小見出し）。並びは1列のまま（部のあとに章・話が続く）
+//               level（v4）：1＝大見出し、2＝小見出し（カクヨムだけの作品で使う。ほかの作品ではどちらも「章」として扱う）。並びは1列のまま
 //   episodes: [{
 //     id, chapterId（null＝未分類。部の id も可）, order,
 //     drafts: { narou: { title, foreword, body, afterword }, kakuyomu: { ... }, alpha: { ... } },  サイト別原稿（エディション）
@@ -255,7 +255,7 @@ export function normalize(p) {
   const chapterSrc = Array.isArray(p.chapters) && p.chapters.length
     ? [...p.chapters].sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     : base.chapters;
-  // level（v4）：1＝部、2＝章。記録のない章（v3 まで）は章
+  // level（v4）：1＝大見出し、2＝小見出し（ふつうの章）。記録のない章（v3 まで）は2
   project.chapters = chapterSrc.map(({ order, ...c }) => newChapter({ ...c, id: c.id || makeId(), level: c.level === 1 ? 1 : 2 }));
   // 旧「作品メモ」は章として引き継ぐ
   if (p.memo) project.chapters.push(newChapter({ title: '作品メモ', plot: p.memo }));

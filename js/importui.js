@@ -296,6 +296,8 @@ export function initImport(ctx) {
     state.kakuyomu = parsed;
     state.kakuyomuInfo = true;
     state.shortStory = parsed.episodes.length === 1;
+    // 小見出しのある ZIP は、カクヨムだけの作品として取り込む（なろう・アルファは章が1段だけ：0.97）
+    state.kakuyomuOnly = parsed.chapters.some((c) => c.level === 2);
     state.fileName = file.name;
     state.buffer = null;
     state.text = about.text.replace(/^﻿/, '');
@@ -614,14 +616,14 @@ export function initImport(ctx) {
   }
 
   function buildResult() {
-    // カクヨムのバックアップ：話はファイルの番号順。章は取り込まない（章のある ZIP の書き方は未確認）
+    // カクヨムのバックアップ：話はファイルの番号順。目次の大見出し・小見出しを章の level 1・2 にする（0.97）
     if (isKakuyomu()) {
       const k = state.kakuyomu;
       return {
         head: { title: k.title, lines: k.synopsis ? k.synopsis.split('\n') : [] },
-        chapters: [],
+        chapters: (k.chapters || []).map((c) => ({ title: c.title, level: c.level, line: -1 })),
         episodes: k.episodes.map((e, i) => ({
-          title: e.title, body: e.body, foreword: '', afterword: '', chapter: null, line: i,
+          title: e.title, body: e.body, foreword: '', afterword: '', chapter: e.chapter ?? null, line: i,
           warnings: e.status && e.status !== '公開済' ? [e.status] : [],
         })),
       };
@@ -961,6 +963,12 @@ export function initImport(ctx) {
     if ((!target || state.replacing) && k.episodes.length === 1) {
       check('短編として登録', state.shortStory, (v) => { state.shortStory = v; });
     }
+    // 大見出し・小見出しはカクヨムだけの作品で使う（0.97）。小見出しがあるかで自動で決める
+    // （なろう・アルファは章が1段だけなので、小見出しのある作品はカクヨムだけの作品。大見出しだけなら3サイトの章と同じ）
+    const info = (text) => sum.append(Object.assign(document.createElement('div'), { className: 'imp-info', textContent: text }));
+    const hasSub = (k.chapters || []).some((c) => c.level === 2);
+    if (hasSub && !target) info('小見出しがあるので、カクヨムだけの作品として取り込みます');
+    else if (hasSub && target && !(target.sites?.length === 1 && target.sites[0] === 'kakuyomu')) info('この作品はほかのサイトも使うので、大見出し・小見出しは章として並びます');
   }
 
   function renderTable() {
@@ -1348,7 +1356,9 @@ export function initImport(ctx) {
         }
       } else {
         // 新しい作品は3サイトとも使う（取り込んだサイトがメイン。要らないサイトは「使う投稿サイト」で外せる：0.97）
-        p = newProject({ title, site: state.site });
+        p = isKakuyomu() && state.kakuyomuOnly && state.result.chapters.length
+          ? newProject({ title, site: 'kakuyomu', sites: ['kakuyomu'] })
+          : newProject({ title, site: state.site });
         p.chapters = [];
         p.episodes = [];
       }
@@ -1359,12 +1369,23 @@ export function initImport(ctx) {
       const findOrCreateChapter = (index) => {
         if (index === null || index === undefined) return null;
         if (chapterIds.has(index)) return chapterIds.get(index);
-        const title = state.result.chapters[index]?.title || '';
-        let ch = p.chapters.find((x) => I.normalizeTitle(x.title) === I.normalizeTitle(title));
-        if (!ch) { ch = newChapter({ title }); p.chapters.push(ch); }
+        const src = state.result.chapters[index];
+        const title = src?.title || '';
+        // カクヨムの小見出しは、先にその大見出しを作る。大見出し・小見出しは level も合うものを使う（0.97）
+        const level = src?.level === 1 || src?.level === 2 ? src.level : null;
+        if (level === 2) {
+          for (let j = index - 1; j >= 0; j--) {
+            if (state.result.chapters[j]?.level === 1) { findOrCreateChapter(j); break; }
+          }
+        }
+        let ch = p.chapters.find((x) => I.normalizeTitle(x.title) === I.normalizeTitle(title)
+          && (level === null || (x.level === 1 ? 1 : 2) === level));
+        if (!ch) { ch = newChapter(level ? { title, level } : { title }); p.chapters.push(ch); }
         chapterIds.set(index, ch.id);
         return ch.id;
       };
+      // カクヨムの新しい作品・作り直し：話のない見出しも、目次のとおりに作る（0.97）
+      if (isKakuyomu() && (!target || state.replacing)) state.result.chapters.forEach((_, i) => findOrCreateChapter(i));
       for (const row of state.rows) {
         if (!row.include || row.action === 'skip' || row.action === 'unmatched') continue;
         const { it, dup } = row;

@@ -720,9 +720,9 @@ export function categorizedTable(container, getData, opts) {
 export function chapterList(container, getChapters, ops) {
   const { onChange, toast, copy } = ops;
   let current = 0;
-  const chapterName = (ch) => ch.title || (ch.level === 1 ? '（無題の部）' : '（無題の章）');
-  // 部（v4）には印を付ける
-  const chapterLabel = (ch) => (ch.level === 1 ? `【部】${chapterName(ch)}` : chapterName(ch));
+  // 名前と印は呼び出し側に合わせる（カクヨムだけの作品では大見出し・小見出し：0.97）
+  const chapterName = (ch) => ops.name?.(ch) ?? (ch.title || '（無題の章）');
+  const chapterLabel = (ch) => ops.label?.(ch) ?? chapterName(ch);
 
   function render(focusTitle = false) {
     const chapters = getChapters();

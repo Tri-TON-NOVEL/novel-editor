@@ -6,13 +6,21 @@
 //   《 を文字として出す  ｜《
 //   挿絵  公式に記法なし（本文に画像は入れられない）
 // 欄    タイトル・本文だけ（前書き・後書きなし。アルファポリスと同じ扱い）
-// 章    大見出し・小見出しの2階層（このアプリの「部」「章」）
+// 章    大見出し・小見出しの2階層（章の level 1・2。このアプリでもカクヨムだけの作品では同じ呼び名）
 //
 // 公式バックアップ（作品データをダウンロード）の ZIP（2026-11-19 に実ファイル1つで確認。短編・1話・章なし）
 //   about.txt         作品情報。【見出し】の次の行から値。「【紹介文（5行）】」「【本文（1,058行）】」のように行数のあるものは、その行数が値
 //   episode_0001.txt  話ごと。【タイトル】【公開状態】【作成日時】【公開日時】【更新日時】【文字数】【本文（N行）】
 //   文字コード UTF-8、改行 CRLF
-//   未確認：章（大見出し・小見出し）がある作品の about.txt【目次】の書き方、複数話のときのファイル番号と掲載順の関係
+//   【目次】（2026-11-19 に大見出し・小見出し・下書き4話の実ファイルで確認）
+//     § 大見出し          ← 字下げなし
+//       § 小見出し        ← 2字下げ（大見出しの中）
+//         1. 第1話 …      ← 見出しより深く字下げ（その見出しの中の話）
+//     § 大見出し２
+//       3. 第3話 …        ← 小見出しのない大見出しの中の話
+//   下書きの話もファイルに入る（【公開状態】下書き）
+//   小見出しは大見出しの中にしか作れない（利用者がカクヨムで確認：2026-11-19）。字下げなしの見出しは必ず大見出し
+//   ファイル番号は掲載順（目次の順）。作った順ではない（話を並べ替えた実ファイルで確認：2026-11-19）
 
 import {
   addWarning, sampleOf, imageMark, miteminUrl, dotsByRuby,
@@ -184,7 +192,8 @@ export function looksLikeBackup(names) {
 
 /**
  * カクヨムのバックアップの中身を読む。files：[{ name, text }]（ZIP の中のテキストファイル）
- * 戻り値：{ title, catchphrase, synopsis, tags, info: [[見出し, 値]], episodes: [{ file, no, title, body, status }], tocOther: [], warnings: [] }
+ * 戻り値：{ title, catchphrase, synopsis, tags, info: [[見出し, 値]], episodes: [{ file, no, title, body, status, chapter }],
+ *          chapters: [{ title, level }]（level 1＝大見出し、2＝小見出し。episodes の chapter はこの番号か null）, tocOther: [], warnings: [] }
  */
 export function parseBackup(files) {
   const warnings = [];
@@ -206,17 +215,41 @@ export function parseBackup(files) {
   // 確認できていない見出しは、読まずに知らせる（章の見出しなど、書き方の分からないもの）
   const unknown = [...a.keys()].filter((k) => !KNOWN_LABELS.has(k));
   if (unknown.length) warnings.push(`about.txt の、読まなかった項目：${unknown.map((k) => `【${k}】`).join('、')}`);
-  // 目次：「1. タイトル」の行（確認できた書き方）。それ以外の行（章の見出しかもしれない）は読まずに知らせる
+  // 目次：「1. タイトル」の行が話、「§ 見出し」の行が章の見出し（字下げなし＝大見出し、字下げあり＝小見出し：0.97）。
+  // 話は、直前の見出しのうち、その話より字下げの浅いもののうち一番近いものに入る。それ以外の行は読まずに知らせる
   const toc = [];
   const tocOther = [];
+  const chapters = [];
+  const stack = []; // [{ indent, index }]（今いる見出し。字下げの浅い順）
+  const indentOf = (line) => /^[ \t　]*/.exec(line)[0].replace(/\t/g, '  ').replace(/　/g, '  ').length;
   for (const line of a.get('目次') || []) {
     if (!line.trim()) continue;
+    const indent = indentOf(line);
+    while (stack.length && stack.at(-1).indent >= indent) stack.pop();
+    const h = /^\s*§\s*(.*)$/.exec(line);
+    if (h) {
+      chapters.push({ title: h[1].trim(), level: indent === 0 ? 1 : 2 });
+      stack.push({ indent, index: chapters.length - 1 });
+      continue;
+    }
     const m = /^\s*(\d+)\.\s*(.*)$/.exec(line);
-    if (m) toc.push({ no: Number(m[1]), title: m[2].trim() }); else tocOther.push(line.trim());
+    if (m) toc.push({ no: Number(m[1]), title: m[2].trim(), chapter: stack.length ? stack.at(-1).index : null });
+    else tocOther.push(line.trim());
   }
-  if (tocOther.length) warnings.push(`目次に、話ではない行が ${tocOther.length}行あります（章の見出しかもしれません。この書き方はまだ確認できていないため、章としては取り込みません）`);
+  if (tocOther.length) warnings.push(`目次に、読めない行が ${tocOther.length}行あります（取り込みません）`);
   if (toc.length && (toc.length !== episodes.length || toc.some((t, i) => episodes[i] && t.title !== episodes[i].title))) {
     warnings.push('目次の話の並びと、話のファイルの番号順が一致しません。ファイルの番号順で取り込みます');
+  }
+  // 話の章：目次の同じ位置の話（タイトルが同じとき）、なければ同じタイトルの話の章
+  const used = new Set();
+  for (const [i, e] of episodes.entries()) {
+    let t = toc[i] && toc[i].title === e.title ? toc[i] : null;
+    if (!t) t = toc.find((x) => !used.has(x) && x.title === e.title) || null;
+    if (t) used.add(t);
+    e.chapter = t ? t.chapter : null;
+  }
+  if (chapters.length && episodes.some((e) => e.chapter === null)) {
+    warnings.push(`目次で見つからなかった話が ${episodes.filter((e) => e.chapter === null).length}話あります（章に入れずに取り込みます）`);
   }
   const info = ['作者名', '連載状態', 'ジャンル', 'セルフレイティング', '公開日時', '更新日時']
     .map((k) => [k, (a.get(k) || []).map((l) => l.replace(/^\s*-\s*/, '').trim()).filter(Boolean).join('・')])
@@ -228,6 +261,7 @@ export function parseBackup(files) {
     tags: list(a, 'タグ'),
     info,
     episodes,
+    chapters,
     tocOther,
     warnings,
   };

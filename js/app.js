@@ -525,10 +525,10 @@ const bindings = [
 
 // ---------- 画面表示 ----------
 
-// ---------- エピソードの並び順（目次の表示だけを並べ替える。データの順番＝ファイル順は変えない） ----------
+// ---------- エピソードの並び順（目次の表示だけを並べ替える。データの順番＝目次順は変えない） ----------
 
 const EP_SORTS = {
-  file: { label: 'ファイル順', value: (e, i) => i },
+  file: { label: '目次順', value: (e, i) => i },
   updated: { label: '更新日時', value: (e) => e.updatedAt || '', meta: (e) => fmtTime(e.updatedAt) },
   created: { label: '作成日時', value: (e) => e.createdAt || '', meta: (e) => fmtTime(e.createdAt) },
   // タイトル順は章をまたいで全エピソードを並べる（flat）。補足に章名を出す
@@ -550,7 +550,7 @@ function sortedEpisodeIndexes(indexes = project.episodes.map((_, i) => i)) {
   const sort = EP_SORTS[epSort.key];
   const dir = epSort.dir === 'desc' ? -1 : 1;
   const idx = [...indexes];
-  // 同じ値どうしはファイル順のまま
+  // 同じ値どうしは目次順のまま
   idx.sort((a, b) => {
     const va = sort.value(project.episodes[a], a);
     const vb = sort.value(project.episodes[b], b);
@@ -576,12 +576,17 @@ function setEpisodeSort(next) {
 }
 
 // ---------- 章とエピソード（A方式：章は独立した配列、エピソードは chapterId で章を指す） ----------
-// project.episodes の並び＝ファイル順。常に「章の順 → 章の中の順 → 最後に未分類」に揃えておく。
+// project.episodes の並び＝目次順（0.97 までの表示名は「ファイル順」）。常に「章の順 → 章の中の順 → 最後に未分類」に揃えておく。
 
 const UNCAT = '__uncategorized__';
-const chapterName = (ch) => ch?.title || (ch?.level === 1 ? '（無題の部）' : '（無題の章）');
-// 一覧・プルダウンでの名前（部には印を付ける）
-const chapterLabel = (ch) => (ch?.level === 1 ? `【部】${chapterName(ch)}` : chapterName(ch));
+// 大見出し・小見出し（章の level 1・2）を使えるのは、カクヨムだけを使う作品（カクヨムの呼び名に合わせる：0.97）。
+// ほかのサイトも使う作品では、すべて「章」として扱う（データの level はそのまま残し、カクヨムだけに戻すと元の区切りに戻る）
+const usesHeadings = () => project.sites?.length === 1 && project.sites[0] === 'kakuyomu';
+const levelOf = (ch) => (usesHeadings() && ch?.level === 1 ? 1 : 2);
+const chapterKind = (ch) => (usesHeadings() ? (levelOf(ch) === 1 ? '大見出し' : '小見出し') : '章');
+const chapterName = (ch) => ch?.title || `（無題の${chapterKind(ch)}）`;
+// 一覧・プルダウンでの名前（大見出しには印を付ける）
+const chapterLabel = (ch) => (levelOf(ch) === 1 ? `【大見出し】${chapterName(ch)}` : chapterName(ch));
 
 // エピソードの並びを章の順に揃える（章の中の順番は保つ）。存在しない章を指していたら未分類にする
 function normalizeOrder() {
@@ -621,17 +626,17 @@ function toggleChapter(key) {
 function chapterMenu(ch) {
   const menu = Object.assign(document.createElement('details'), { className: 'menu chapter-menu' });
   const summary = Object.assign(document.createElement('summary'), { className: 'tool', textContent: '⋯' });
-  summary.setAttribute('aria-label', `章「${chapterName(ch)}」の操作`);
+  const kind = chapterKind(ch);
+  summary.setAttribute('aria-label', `${kind}「${chapterName(ch)}」の操作`);
   const list = Object.assign(document.createElement('div'), { className: 'menu-list' });
-  // 部（level 1）と章（level 2）は同じ操作。「部にする」「章にする」で切り替える（v4）
-  const kind = ch.level === 1 ? '部' : '章';
+  // 大見出し（level 1）と小見出し（level 2）は同じ操作。カクヨムだけの作品で「大見出しにする」「小見出しにする」で切り替える（0.97）
   const items = [
     ['add-ep', `＋ この${kind}にエピソードを追加`],
     ['rename', '名前を変える…'],
     ['plot', `${kind}のプロットを開く`],
     ['up', `↑ ${kind}を上へ`],
     ['down', `↓ ${kind}を下へ`],
-    ['level', ch.level === 1 ? '章にする' : '部にする'],
+    ...(usesHeadings() ? [['level', levelOf(ch) === 1 ? '小見出しにする' : '大見出しにする']] : []),
     ['delete', `${kind}を削除…`],
   ];
   for (const [act, text] of items) {
@@ -657,7 +662,7 @@ function episodeRow(i, sort, flat = false) {
   const item = Object.assign(document.createElement('li'), { className: 'ep-row' + (flat ? ' flat' : '') });
   item.append(b);
   // 「⋯」（並べ替え・章の移動・削除）はいつも出す（0.90）。
-  // 上へ・下へだけは、並び順が「ファイル順」で検索していないときに使える（他の並びでは見た目の上下とファイルの順が合わないため）
+  // 上へ・下へだけは、並び順が「目次順」で検索していないときに使える（他の並びでは見た目の上下と目次の順が合わないため）
   item.append(episodeMenu(i));
   return item;
 }
@@ -677,7 +682,7 @@ function episodeMenu(i) {
   const canMove = epSort.key === 'file' && !epSearch;
   item('↑ 上へ', 'up', '', !canMove);
   item('↓ 下へ', 'down', '', !canMove);
-  if (!canMove) for (const b of list.querySelectorAll('button')) b.title = epSearch ? '検索中は使えません' : '並び順が「ファイル順」のときに使えます';
+  if (!canMove) for (const b of list.querySelectorAll('button')) b.title = epSearch ? '検索中は使えません' : '並び順が「目次順」のときに使えます';
   // 章の移動：章の数が多くても場所を取らないよう、プルダウンで選ぶ（選んだらすぐ移す）
   const sel = Object.assign(document.createElement('select'), { className: 'menu-select-input' });
   sel.setAttribute('aria-label', `「${episodeName(ep)}」を移す章`);
@@ -778,15 +783,15 @@ function renderEpisodeList() {
   const uncategorized = groups.find((g) => !g.chapter);
   const chapterGroups = groups.filter((g) => g.chapter);
   if (epSort.dir === 'desc') chapterGroups.reverse();
-  // 部（v4）：部のあとの章は字下げして出す。部を折りたたむと、次の部までの章も隠す（昇順のときだけ）
-  const nested = epSort.dir !== 'desc' && project.chapters.some((c) => c.level === 1);
+  // 大見出し（カクヨムだけの作品）：大見出しのあとの小見出しは字下げして出す。大見出しを折りたたむと、次の大見出しまでの小見出しも隠す（昇順のときだけ）
+  const nested = epSort.dir !== 'desc' && project.chapters.some((c) => levelOf(c) === 1);
   let inPart = false;
   let partClosed = false;
   for (const g of [...chapterGroups, uncategorized].filter(Boolean)) {
     const key = g.chapter ? g.chapter.id : UNCAT;
     // 未分類は、中身があるときか、章が1つもないときに出す
     if (!g.chapter && !g.indexes.length && project.chapters.length) continue;
-    const isPart = g.chapter?.level === 1;
+    const isPart = !!g.chapter && levelOf(g.chapter) === 1;
     if (isPart) { inPart = nested; partClosed = false; }
     if (!g.chapter) { inPart = false; partClosed = false; }
     if (partClosed && !isPart) continue;
@@ -879,17 +884,17 @@ function chapterAction(act, chapterId) {
   else if (act === 'plot') { outline.select(ch.id); setView('outline'); }
   else if (act === 'up') moveChapter(ch, -1);
   else if (act === 'down') moveChapter(ch, 1);
-  else if (act === 'level') setChapterLevel(ch, ch.level === 1 ? 2 : 1);
+  else if (act === 'level' && usesHeadings()) setChapterLevel(ch, ch.level === 1 ? 2 : 1);
   else if (act === 'delete') removeChapter(ch);
 }
 
-// 部（大見出し）⇔ 章（小見出し）を切り替える。並び・所属するエピソードは変わらない
+// 大見出し ⇔ 小見出しを切り替える（カクヨムだけの作品）。並び・所属するエピソードは変わらない
 function setChapterLevel(ch, level) {
   ch.level = level;
   changed();
   renderEpisodeList();
   if (view === 'outline') outline.render();
-  toast(`「${chapterName(ch)}」を${level === 1 ? '部' : '章'}にしました`);
+  toast(`「${chapterName(ch)}」を${level === 1 ? '大見出し' : '小見出し'}にしました`);
 }
 
 // エピソードを別の章（または未分類）へ移す。移した先の章の最後に並べる。開いているエピソードはそのまま
@@ -1336,7 +1341,7 @@ function runNewItem() {
 // 上へ・下へ：同じ章の中で前後と入れ替える。開いているエピソードはそのまま
 function moveEpisode(delta, index = epIndex) {
   if (epSort.key !== 'file') {
-    toast('並べ替えは、目次の並び順が「ファイル順」のときに使えます');
+    toast('並べ替えは、並び順が「目次順」のときに使えます');
     return;
   }
   if (epSort.dir === 'desc') delta = -delta; // 降順表示では見た目の上下に合わせる
@@ -1412,6 +1417,7 @@ function renderSiteSettings() {
 
 async function setSiteUsed(site, on) {
   if (on === project.sites.includes(site)) return;
+  const hadHeadings = usesHeadings();
   if (!on) {
     if (site === project.site) { toast('メインの投稿サイトは外せません。先にメインを変えてください', true); renderSiteSettings(); return; }
     const n = project.episodes.filter((e) => DRAFT_FIELDS.some((f) => draftOf(e, site)[f])).length;
@@ -1430,6 +1436,12 @@ async function setSiteUsed(site, on) {
       if (pick && pick !== 'none') await copyAllEpisodes(pick, site, empty);
     }
   }
+  // 大見出し・小見出しはカクヨムだけの作品で使う。区切り（level）は消さないので、戻せば元の形に戻る（0.97）
+  if (hadHeadings !== usesHeadings() && project.chapters.some((c) => c.level === 1)) {
+    toast(usesHeadings() ? 'カクヨムだけの作品になったので、大見出し・小見出しで表示します'
+      : 'ほかのサイトも使うので、大見出し・小見出しはすべて章として表示します（区切りは残り、カクヨムだけに戻すと元に戻ります）');
+  }
+  if (view === 'outline') outline.render();
   changed();
   renderSiteSettings();
   renderWorkCodes();
@@ -1492,10 +1504,21 @@ async function allProjects() {
   return (await db.all()).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+// 新しい作品：メインの投稿サイトを選ぶ。カクヨムのときだけ、小見出しを使うかを確かめる（0.97）。
+// 小見出しを使う作品はカクヨムだけの作品（なろう・アルファは章が1段だけ）。それ以外は3サイトとも使う（要らないサイトは後で外せる）
 async function createProject() {
   await flush();
-  if (isEmptyProject(project)) { el.novelTitle.focus(); return; }
-  await switchTo(newProject({ site: project.site, sites: [...project.sites] }));
+  const site = await choose('メインの投稿サイトは？', SITE_KEYS.map((s) => ({ value: s, label: SITES[s].label, primary: s === project.site })));
+  if (!site) return;
+  let sites = [...SITE_KEYS];
+  if (site === 'kakuyomu') {
+    const sub = await choose('小見出しを使いますか？\n使うと、カクヨムだけの作品になります。',
+      [{ value: 'yes', label: '使う' }, { value: 'no', label: '使わない', primary: true }]);
+    if (!sub) return;
+    if (sub === 'yes') sites = ['kakuyomu'];
+  }
+  // 何も書いていない今の作品は、switchTo が一覧から外す
+  await switchTo(newProject({ site, sites }));
   el.novelTitle.focus();
   toast('新しい作品を作成しました');
 }
@@ -4257,6 +4280,8 @@ async function copyText(text, label) {
 const sectionOpts = { onChange: () => changed(), toast, copy: (t, label) => copyText(t, label).catch(fail) };
 const outline = chapterList($('chapters'), () => project.chapters, {
   ...sectionOpts,
+  label: (ch) => chapterLabel(ch),
+  name: (ch) => chapterName(ch),
   onChange: (what) => { changed(); if (what?.chapterTitle) renderEpisodeList(); },
   addChapter: (afterIndex) => addChapter(afterIndex),
   moveChapter: (ch, d) => moveChapter(ch, d),
