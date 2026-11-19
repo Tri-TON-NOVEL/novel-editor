@@ -1426,14 +1426,29 @@ async function setSiteUsed(site, on) {
     project.sites = project.sites.filter((s) => s !== site);
     if (editSite === site) editSite = project.site;
   } else {
-    project.sites = format.normalizeSites([...project.sites, site], project.site);
     // 新しく使うサイトの原稿が空の話には、ほかのサイトの原稿からコピーできる
-    const empty = project.episodes.filter((e) => !DRAFT_FIELDS.some((f) => draftOf(e, site)[f]));
-    const sources = siteList().filter((s) => s !== site && project.episodes.some((e) => draftOf(e, s).body));
-    if (empty.length && sources.length) {
-      const pick = await choose(`${SITES[site].label}を使う投稿サイトに加えました。\n${SITES[site].short}用の原稿が空の話（${empty.length}話）に、ほかのサイトの原稿をコピーしますか？（書式は${SITES[site].short}用に変換します）`,
-        [...sources.map((s, i) => ({ value: s, label: `${SITES[s].short}用からコピー`, primary: i === 0 })), { value: 'none', label: '空のまま' }]);
-      if (pick && pick !== 'none') await copyAllEpisodes(pick, site, empty);
+    const hasDraft = (e) => DRAFT_FIELDS.some((f) => draftOf(e, site)[f]);
+    const empty = project.episodes.filter((e) => !hasDraft(e));
+    const kept = project.episodes.filter(hasDraft);
+    const sources = format.normalizeSites([...project.sites, site], project.site).filter((s) => s !== site && project.episodes.some((e) => draftOf(e, s).body));
+    if (kept.length && sources.length) {
+      // 0.97：前に外したときの原稿が残っている。残りを使う・メインからコピーし直す・白紙にするを選ぶ
+      //   コピーし直す・白紙にするときも、残っていた原稿はひとつ前の稿として残す（稿の切り替えで戻せる）
+      const src = sources.includes(project.site) ? project.site : sources[0];
+      const pick = await choose(`${SITES[site].label}を使う投稿サイトに加えます。\n${SITES[site].short}用の原稿が残っている話が${kept.length}話あります。`
+        + `\nコピーし直す・白紙にするときも、残っている原稿はひとつ前の稿として残ります。`,
+      [{ value: 'keep', label: '残っている原稿を使う', primary: true }, { value: 'copy', label: `${SITES[src].short}用からコピーし直す` }, { value: 'blank', label: '白紙にする' }]);
+      if (!pick) { renderSiteSettings(); return; }
+      project.sites = format.normalizeSites([...project.sites, site], project.site);
+      await reAddSite(site, pick, src, kept, empty);
+    } else {
+      project.sites = format.normalizeSites([...project.sites, site], project.site);
+      const from = siteList().filter((s) => sources.includes(s));
+      if (empty.length && from.length) {
+        const pick = await choose(`${SITES[site].label}を使う投稿サイトに加えました。\n${SITES[site].short}用の原稿が空の話（${empty.length}話）に、ほかのサイトの原稿をコピーしますか？（書式は${SITES[site].short}用に変換します）`,
+          [...from.map((s, i) => ({ value: s, label: `${SITES[s].short}用からコピー`, primary: i === 0 })), { value: 'none', label: '空のまま' }]);
+        if (pick && pick !== 'none') await copyAllEpisodes(pick, site, empty);
+      }
     }
   }
   // 大見出し・小見出しはカクヨムだけの作品で使う。区切り（level）は消さないので、戻せば元の形に戻る（0.97）
@@ -1452,6 +1467,26 @@ async function setSiteUsed(site, on) {
 }
 
 // 全話コピー（サイトを加えたとき）。コピー先の原稿が空の話だけ。書式は変換する
+// 外していたサイトをもう一度使うとき、残っていた原稿をどうするか（0.97）
+//   keep：残っている原稿はそのまま。空の話だけ src からコピーする
+//   copy：全部の話を src からコピーし直す／blank：全部の話を白紙にする
+//   copy・blank では、残っていた原稿をひとつ前の稿として残す（新しい稿を作ってから書き換える）
+async function reAddSite(site, pick, src, kept, empty) {
+  if (pick === 'keep') {
+    if (empty.length) await copyAllEpisodes(src, site, empty);
+    return;
+  }
+  const now = new Date().toISOString();
+  for (const ep of kept) {
+    await raiseEdition(ep, site);
+    ep.drafts[site] = format.emptyDraft();
+    ep.siteUpdatedAt = { ...(ep.siteUpdatedAt || {}), [site]: now };
+    ep.updatedAt = now;
+  }
+  if (pick === 'copy') await copyAllEpisodes(src, site, project.episodes);
+  else toast(`${SITES[site].short}用の原稿を白紙にしました（${kept.length}話。前の原稿はひとつ前の稿に残っています）`);
+}
+
 async function copyAllEpisodes(from, to, eps) {
   const warnings = [];
   const now = new Date().toISOString();
