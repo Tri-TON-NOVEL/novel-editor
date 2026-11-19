@@ -5344,6 +5344,12 @@ function renderUiProfileEditor(profile = uiEditing || uiActive()) {
   const active = uiActive();
   document.querySelectorAll('[name="ui-active"]').forEach((r) => { r.checked = r.value === active; });
   document.querySelectorAll('[data-ui]').forEach((c) => { c.checked = uiPref(c.dataset.ui, profile); });
+  // 対象小説サイト：今の作品で使わないサイト（カクヨムだけの作品のなろう・アルファなど）のタブは出ないので、選べなくする（0.97）
+  document.querySelectorAll('[data-ui^="other.site."]').forEach((c) => {
+    const unused = !project.sites.includes(c.dataset.ui.slice('other.site.'.length));
+    c.disabled = unused;
+    c.closest('label').title = unused ? 'この作品では使っていない投稿サイトです' : '';
+  });
   const defaults = { font: 'serif', fontSize: '18' };
   document.querySelectorAll('[data-uiv]').forEach((s) => { s.value = String(uiValue(s.dataset.uiv, defaults[s.dataset.uiv], profile)); });
 }

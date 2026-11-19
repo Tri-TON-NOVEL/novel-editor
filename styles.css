@@ -348,6 +348,8 @@ textarea {
 }
 /* 小説タイトル：長いタイトルも欄の中で折り返して全部見せる（改行は入れない。高さは中身に合わせる：0.97） */
 textarea#novel-title { flex: none; resize: none; overflow: hidden; line-height: 1.5; font-size: 18px; }
+/* 設定→表示：今の作品で使わない投稿サイトのタブの切り替えは薄く（0.97） */
+label:has(> input[data-ui]:disabled) { opacity: .45; cursor: default; }
 #plot, #memo, #x-text, #narou-report-body { font-size: max(16px, calc(var(--body-size) - 2px)); line-height: 1.7; }
 
 .panes {
