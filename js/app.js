@@ -633,6 +633,7 @@ function chapterMenu(ch) {
   const items = [
     ['add-ep', `＋ この${kind}にエピソードを追加`],
     ['rename', '名前を変える…'],
+    ['copy-title', 'タイトルをコピー'],
     ['plot', `${kind}のプロットを開く`],
     ['up', `↑ ${kind}を上へ`],
     ['down', `↓ ${kind}を下へ`],
@@ -679,10 +680,11 @@ function episodeMenu(i) {
     Object.assign(btn.dataset, { epAct: act, epIndex: i });
     list.append(btn);
   };
+  item('タイトルをコピー', 'copy-title');
   const canMove = epSort.key === 'file' && !epSearch;
   item('↑ 上へ', 'up', '', !canMove);
   item('↓ 下へ', 'down', '', !canMove);
-  if (!canMove) for (const b of list.querySelectorAll('button')) b.title = epSearch ? '検索中は使えません' : '並び順が「目次順」のときに使えます';
+  if (!canMove) for (const b of list.querySelectorAll('button[data-ep-act="up"], button[data-ep-act="down"]')) b.title = epSearch ? '検索中は使えません' : '並び順が「目次順」のときに使えます';
   // 章の移動：章の数が多くても場所を取らないよう、プルダウンで選ぶ（選んだらすぐ移す）
   const sel = Object.assign(document.createElement('select'), { className: 'menu-select-input' });
   sel.setAttribute('aria-label', `「${episodeName(ep)}」を移す章`);
@@ -702,7 +704,8 @@ function episodeMenu(i) {
 
 function episodeAction(act, index, to) {
   closeMenus();
-  if (act === 'up') moveEpisode(-1, index);
+  if (act === 'copy-title') { const ep = project.episodes[index]; copyTitle(ep && SITE_KEYS.some((s) => draftOf(ep, s).title) ? episodeName(ep) : '', 'エピソードのタイトル'); }
+  else   if (act === 'up') moveEpisode(-1, index);
   else if (act === 'down') moveEpisode(1, index);
   else if (act === 'chapter') moveEpisodeToChapter(to, index);
   else if (act === 'delete') deleteEpisode(index).catch(fail);
@@ -881,6 +884,7 @@ function chapterAction(act, chapterId) {
   closeMenus();
   if (act === 'add-ep') addEpisode(ch.id);
   else if (act === 'rename') renameChapter(ch);
+  else if (act === 'copy-title') copyTitle(ch.title, `${chapterKind(ch)}のタイトル`);
   else if (act === 'plot') { outline.select(ch.id); setView('outline'); }
   else if (act === 'up') moveChapter(ch, -1);
   else if (act === 'down') moveChapter(ch, 1);
@@ -4374,6 +4378,12 @@ async function writeClipboard(text) {
     ta.remove();
     return ok;
   }
+}
+
+// 目次の「⋯」→「タイトルをコピー」（章・エピソード）
+function copyTitle(text, label) {
+  if (!text) { toast(`${label}は空です`); return; }
+  writeClipboard(text).then((ok) => toast(ok ? `${label}「${text}」をコピーしました` : 'コピーできませんでした', !ok)).catch(fail);
 }
 
 async function copyText(text, label) {
