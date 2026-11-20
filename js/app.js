@@ -5954,8 +5954,19 @@ async function saveNow() {
 
 // ---------- 他のエピソードからプロット・フリーメモをコピー ----------
 
+// コピー元：ほかのエピソード、または全体プロットの、この話の章（値は "chapter:章のID"。章にはフリーメモがない：0.97）
+function episodeNotesSource(value) {
+  if (!project || !value) return null;
+  if (value.startsWith('chapter:')) {
+    const ch = project.chapters.find((c) => c.id === value.slice(8));
+    return ch ? { plot: ch.plot || '', freeMemo: '', chapter: true, name: `全体プロット「${chapterName(ch)}」` } : null;
+  }
+  const ep = project.episodes.find((e) => e.id === value);
+  return ep ? { plot: ep.plot || '', freeMemo: ep.freeMemo || '', chapter: false, name: `「${episodeName(ep)}」` } : null;
+}
+
 function updateEpisodeNotesCopyPreview() {
-  const source = project?.episodes.find((ep) => ep.id === $('episode-notes-copy-source').value);
+  const source = episodeNotesSource($('episode-notes-copy-source').value);
   const plot = $('episode-notes-copy-plot');
   const memo = $('episode-notes-copy-memo');
   const preview = $('episode-notes-copy-preview');
@@ -5970,7 +5981,7 @@ function updateEpisodeNotesCopyPreview() {
   if (memo.disabled) memo.checked = false;
   preview.textContent = [
     `プロット：${source.plot ? `${countChars(source.plot).all.toLocaleString()}字` : '（空）'}`,
-    `フリーメモ：${source.freeMemo ? `${countChars(source.freeMemo).all.toLocaleString()}字` : '（空）'}`,
+    `フリーメモ：${source.chapter ? '（章にはありません）' : source.freeMemo ? `${countChars(source.freeMemo).all.toLocaleString()}字` : '（空）'}`,
     '',
     source.plot ? `【プロット】\n${source.plot.slice(0, 500)}` : '',
     source.freeMemo ? `【フリーメモ】\n${source.freeMemo.slice(0, 500)}` : '',
@@ -5980,16 +5991,22 @@ function updateEpisodeNotesCopyPreview() {
 function openEpisodeNotesCopy() {
   const current = episode();
   const sources = project.episodes.filter((ep) => ep.id !== current.id && (ep.plot || ep.freeMemo));
-  if (!sources.length) {
-    toast('プロットまたはフリーメモが入っている、ほかのエピソードがありません', true);
+  // この話の章に、全体プロットで書いたプロットがあれば、いちばん上に出す（0.97）
+  const ch = current.chapterId ? project.chapters.find((c) => c.id === current.chapterId) : null;
+  const chapterPlot = ch && ch.plot ? ch : null;
+  if (!sources.length && !chapterPlot) {
+    toast('プロットまたはフリーメモが入っている、ほかのエピソードや章がありません', true);
     return;
   }
   const select = $('episode-notes-copy-source');
-  select.replaceChildren(...sources.map((ep) => {
-    const i = project.episodes.indexOf(ep);
-    const has = [ep.plot && 'プロット', ep.freeMemo && 'メモ'].filter(Boolean).join('・');
-    return new Option(`${i + 1}. ${episodeName(ep)}（${has}あり）`, ep.id);
-  }));
+  select.replaceChildren(
+    ...(chapterPlot ? [new Option(`【全体プロット】${chapterName(chapterPlot)}（この話の章）`, `chapter:${chapterPlot.id}`)] : []),
+    ...sources.map((ep) => {
+      const i = project.episodes.indexOf(ep);
+      const has = [ep.plot && 'プロット', ep.freeMemo && 'メモ'].filter(Boolean).join('・');
+      return new Option(`${i + 1}. ${episodeName(ep)}（${has}あり）`, ep.id);
+    }),
+  );
   $('episode-notes-copy-plot').checked = true;
   $('episode-notes-copy-memo').checked = true;
   updateEpisodeNotesCopyPreview();
@@ -5997,7 +6014,7 @@ function openEpisodeNotesCopy() {
 }
 
 async function copyEpisodeNotes() {
-  const source = project.episodes.find((ep) => ep.id === $('episode-notes-copy-source').value);
+  const source = episodeNotesSource($('episode-notes-copy-source').value);
   const dest = episode();
   const copyPlot = $('episode-notes-copy-plot').checked && !$('episode-notes-copy-plot').disabled;
   const copyMemo = $('episode-notes-copy-memo').checked && !$('episode-notes-copy-memo').disabled;
@@ -6006,13 +6023,13 @@ async function copyEpisodeNotes() {
     return;
   }
   const overwritten = [copyPlot && dest.plot && 'プロット', copyMemo && dest.freeMemo && 'フリーメモ'].filter(Boolean);
-  if (overwritten.length && !(await ask(`現在のエピソードの${overwritten.join('と')}を、\n「${episodeName(source)}」の内容で置き換えますか？`, { ok: '置き換えてコピー' }))) return;
+  if (overwritten.length && !(await ask(`現在のエピソードの${overwritten.join('と')}を、\n${source.name}の内容で置き換えますか？`, { ok: '置き換えてコピー' }))) return;
   if (copyPlot) dest.plot = source.plot;
   if (copyMemo) dest.freeMemo = source.freeMemo;
   touchEpisode(dest);
   changed();
   showEpisode();
-  toast(`「${episodeName(source)}」から${[copyPlot && 'プロット', copyMemo && 'フリーメモ'].filter(Boolean).join('と')}をコピーしました`);
+  toast(`${source.name}から${[copyPlot && 'プロット', copyMemo && 'フリーメモ'].filter(Boolean).join('と')}をコピーしました`);
 }
 
 const actions = {

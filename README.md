@@ -1,8 +1,8 @@
 # あや<ruby>綴<rp>（</rp><rt>つづ</rt><rp>）</rp></ruby>り
 
 <p align="center">
-  <a href="docs/images/ayatuzuri-promotion.png">
-    <img src="docs/images/ayatuzuri-promotion.png" alt="あや綴り――PCはしっかり、スマホはすっきり。画面は自分仕様に。PCの詳細表示とスマホの簡易表示の画面" width="880">
+  <a href="docs/images/ayatuzuri-promotion-20261120.png">
+    <img src="docs/images/ayatuzuri-promotion-20261120.png" alt="あや綴り――PCはしっかり、スマホはすっきり。画面は自分仕様に。PCの詳細表示とスマホの簡易表示の画面" width="880">
   </a>
 </p>
 

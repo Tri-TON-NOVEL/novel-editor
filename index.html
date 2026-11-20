@@ -309,7 +309,7 @@
               <span class="fold-info" id="fold-info-plot"></span>
               <span class="spacer"></span>
               <button type="button" class="tool" data-find="plot">検索</button>
-              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="plot" title="ほかのエピソードからプロットやフリーメモをコピー">他の話から…</button>
+              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="plot" title="ほかのエピソードや、全体プロットの章から、プロットやフリーメモをコピー">他の話から…</button>
               <button type="button" class="tool max-btn" data-max="plot" aria-label="プロットを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="plot">全て選択</button>
               <button type="button" class="copy" data-copy="plot">コピー</button>
@@ -328,7 +328,7 @@
               <span class="fold-info" id="fold-info-memo"></span>
               <span class="spacer"></span>
               <button type="button" class="tool" data-find="free-memo">検索</button>
-              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="free-memo" title="ほかのエピソードからプロットやフリーメモをコピー">他の話から…</button>
+              <button type="button" class="tool" data-action="copy-episode-notes" data-copy-other="free-memo" title="ほかのエピソードや、全体プロットの章から、プロットやフリーメモをコピー">他の話から…</button>
               <button type="button" class="tool max-btn" data-max="memo" aria-label="フリーメモを最大化" title="最大化">⤢</button>
               <button type="button" class="tool selall-btn" data-selall="free-memo">全て選択</button>
               <button type="button" class="copy" data-copy="free-memo">コピー</button>
@@ -379,8 +379,8 @@
 
     <dialog id="episode-notes-copy-dialog" class="wide-dialog" aria-labelledby="episode-notes-copy-title">
       <form method="dialog" class="dialog" id="episode-notes-copy-form">
-        <h2 id="episode-notes-copy-title">他のエピソードからコピー</h2>
-        <label class="stack">コピー元のエピソード
+        <h2 id="episode-notes-copy-title">他のエピソード・章からコピー</h2>
+        <label class="stack">コピー元（エピソード、または全体プロットの章）
           <select id="episode-notes-copy-source"></select>
         </label>
         <fieldset class="checks">
