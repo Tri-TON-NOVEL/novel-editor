@@ -5295,9 +5295,9 @@ function renderLinkEditor() {
 
 // ---------- 設定 ----------
 
-// 投稿サイトのアカウント（全作品共通・端末ごと）：{ narou: { userId, userName, author }, alpha: { ... } }
+// 投稿サイトのアカウント（全作品共通・端末ごと）：{ narou: { userId, userName, author }, kakuyomu: { ... }, alpha: { ... } }
 function accounts() {
-  return { narou: {}, alpha: {}, ...(prefs.get('accounts', {}) || {}) };
+  return { narou: {}, kakuyomu: {}, alpha: {}, ...(prefs.get('accounts', {}) || {}) };
 }
 
 // ---------- この作品と投稿サイトの作品の対応（作品データ。作品ごと・入れなくてもよい） ----------
@@ -5822,7 +5822,7 @@ function commitLinks() {
 }
 
 function commitAccounts() {
-  const acc = { narou: {}, alpha: {} };
+  const acc = { ...accounts(), narou: {}, kakuyomu: {}, alpha: {} };
   $('settings-form').querySelectorAll('[name^="acc."]').forEach((input) => {
     const [, site, key] = input.name.split('.');
     acc[site][key] = input.value.trim();
