@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="docs/images/ayatuzuri-promotion.png">
-    <img src="docs/images/ayatuzuri-promotion.png" alt="あや綴り――場所が変わっても、文と文で、物語の綾を綴っていく。" width="700">
+    <img src="docs/images/ayatuzuri-promotion.png" alt="あや綴り――PCはしっかり、スマホはすっきり。画面は自分仕様に。PCの詳細表示とスマホの簡易表示の画面" width="880">
   </a>
 </p>
 

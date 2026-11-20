@@ -164,7 +164,7 @@
             <tr><td>Android</td><td>実機では未テスト</td></tr>
           </tbody>
         </table>
-        <p class="notice">Safari・Edge・Android では、おかしな動作をすることがあります。大切な原稿は、こまめにバックアップしてください。</p>
+        <p class="notice">Safari・Edge・Android では、おかしな動作をすることもありえます。大切な原稿は、こまめにバックアップしてください。</p>
         <p class="back-top"><a href="#top">ページの先頭へ</a></p>
       </section>
 
@@ -510,10 +510,11 @@
         <ol>
           <li>「インポート元」（小説家になろう／カクヨム／アルファポリス）、「取り込み先」（新しい作品／既存の作品）、「文字コード」を選びます。なろうはなろう用、カクヨムはカクヨム用、アルファはアルファ用の原稿に取り込みます。新しい作品へ取り込むと、取り込んだサイトがメイン投稿先になります。既存の作品へ取り込むと、取り込んだサイトがその作品の「使う投稿サイト」に入ります。</li>
           <li>「ファイルを選ぶ…」で TXT か ZIP を選びます。いつも端末のファイル選択画面が開きます（「設定」→「ファイル」とは関係ありません）。ZIP は中の TXT を1つ選びます。</li>
-          <li>アルファポリスは、続いてタイトル一覧（ファイルか貼り付け）を入れます。作品ページの一覧は、最後のエピソードの文字数の行まで含めてコピーしてください。</li>
+          <li>アルファポリスは、続いてタイトル一覧（ファイルか貼り付け）を入れます。アルファポリスの TXT には章とエピソードのタイトルが入っていないため、この一覧で区切りを決めます。読者側の作品ページ（作品管理の画面ではありません）の「目次」で、<b>最初の章名から、最後のエピソードの文字数まで</b>をまとめて選んでコピーし、貼り付けます（図21）。途中の話も省かずに、全部を選んでください。</li>
           <li>「区切り確認」で、章・話の区切りを確かめます。違うところは行ごとに直せます。</li>
           <li>プレビューで、章・話・文字数・既存の話との関係を確かめ、「取り込む」を押します。</li>
         </ol>
+        <figure style="max-width: 560px; margin-left: auto; margin-right: auto;"><button type="button" data-zoom="images/manual/32_alpha_toc.png?v=20261120a" aria-label="アルファポリスの目次をコピーする範囲を拡大"><img src="images/manual/32_alpha_toc.png?v=20261120a" alt="アルファポリスの読者側の作品ページ。目次の最初の章名「序章　混沌の胎動」から、最後の話の文字数「3,304文字」までを選んだところ" loading="lazy"></button><figcaption>図21　アルファポリスの目次のコピー（青い部分。最初の章名から最後の話の文字数まで。図では途中の話を省いています）</figcaption></figure>
         <ul>
           <li>なろうの短編は、TXT の中身から自動で見分け、1話として取り込みます。</li>
           <li>カクヨムは、作品の管理画面から出力したバックアップの ZIP（<code>about.txt</code> と <code>episode_0001.txt</code> などが入ったもの）をそのまま選びます。区切り確認はなく、すぐにプレビューになります。プレビューで、キャッチコピー・紹介文を取り込むか、短編として取り込むかを選べます。</li>
@@ -527,8 +528,8 @@
           <li>取り込む前の状態はバックアップ版に残ります。途中の作業も残り、次に開くと続けられます（カクヨムの ZIP は、もう一度選び直します）。</li>
           <li>「設定」→「投稿サイト」にアカウントを入れておくと、TXT の作者情報と違うときに確認が出ます（なろう・アルファ）。</li>
         </ul>
-        <figure><button type="button" data-zoom="images/manual/28_import_pick.png?v=20261119e" aria-label="取り込み先を指定の画面を拡大"><img src="images/manual/28_import_pick.png?v=20261119e" alt="TXT の話と、取り込み先の作品の話の一覧" loading="lazy"></button><figcaption>図21　取り込み先を指定</figcaption></figure>
-        <figure><button type="button" data-zoom="images/manual/27_import_image_check.png?v=20261119e" aria-label="画像の確認の画面を拡大"><img src="images/manual/27_import_image_check.png?v=20261119e" alt="画像の対応を確かめる話の一覧" loading="lazy"></button><figcaption>図22　画像の確認（自動で決められなかった話だけ）</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/28_import_pick.png?v=20261119e" aria-label="取り込み先を指定の画面を拡大"><img src="images/manual/28_import_pick.png?v=20261119e" alt="TXT の話と、取り込み先の作品の話の一覧" loading="lazy"></button><figcaption>図22　取り込み先を指定</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/27_import_image_check.png?v=20261119e" aria-label="画像の確認の画面を拡大"><img src="images/manual/27_import_image_check.png?v=20261119e" alt="画像の対応を確かめる話の一覧" loading="lazy"></button><figcaption>図23　画像の確認（自動で決められなかった話だけ）</figcaption></figure>
         <p class="back-top"><a href="#top">ページの先頭へ</a></p>
       </section>
 
@@ -537,10 +538,10 @@
         <h2>設定</h2>
         <p>上のバーの「設定」で開きます。変えるとすぐに反映・保存されます（文字の欄は、欄を離れたとき）。設定は端末（ブラウザー）ごとです。</p>
         <h3 id="set-sites">投稿サイト</h3>
-        <figure><button type="button" data-zoom="images/manual/16_settings_sites.png?v=20261120a" aria-label="投稿サイトの設定を拡大"><img src="images/manual/16_settings_sites.png?v=20261120a" alt="小説家になろう・カクヨム・アルファポリスのアカウントを入れる画面" loading="lazy"></button><figcaption>図23　投稿サイト</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/16_settings_sites.png?v=20261120a" aria-label="投稿サイトの設定を拡大"><img src="images/manual/16_settings_sites.png?v=20261120a" alt="小説家になろう・カクヨム・アルファポリスのアカウントを入れる画面" loading="lazy"></button><figcaption>図24　投稿サイト</figcaption></figure>
         <p>なろう・アルファポリスのユーザ ID・ユーザ名・作者名を入れます。TXT インポートで、TXT の作者情報と照らし合わせるのに使います。</p>
         <h3 id="set-display">表示</h3>
-        <figure><button type="button" data-zoom="images/manual/17_settings_display.png?v=20261119e" aria-label="表示の設定を拡大"><img src="images/manual/17_settings_display.png?v=20261119e" alt="使う表示（簡易・詳細）と、表示する項目を選ぶ画面" loading="lazy"></button><figcaption>図24　表示</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/17_settings_display.png?v=20261119e" aria-label="表示の設定を拡大"><img src="images/manual/17_settings_display.png?v=20261119e" alt="使う表示（簡易・詳細）と、表示する項目を選ぶ画面" loading="lazy"></button><figcaption>図25　表示</figcaption></figure>
         <p>「簡易」「詳細」の2つの表示を持ち、「使う表示」で切り替えます。それぞれで、次のものを一つずつ出したり隠したりできます。隠しても内容は消えません。</p>
         <table>
           <thead><tr><th>グループ</th><th>選べるもの</th></tr></thead>
@@ -565,17 +566,17 @@
           <li>「編集エピソード保存」を隠しても、<kbd>Ctrl</kbd>+<kbd>S</kbd>（<kbd>⌘</kbd>+<kbd>S</kbd>）で保存できます。</li>
         </ul>
         <h3 id="set-links">リンク</h3>
-        <figure><button type="button" data-zoom="images/manual/18_settings_links.png?v=20261119e" aria-label="リンクの設定を拡大"><img src="images/manual/18_settings_links.png?v=20261119e" alt="リンクの名前と URL を並べた画面" loading="lazy"></button><figcaption>図25　リンク</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/18_settings_links.png?v=20261119e" aria-label="リンクの設定を拡大"><img src="images/manual/18_settings_links.png?v=20261119e" alt="リンクの名前と URL を並べた画面" loading="lazy"></button><figcaption>図26　リンク</figcaption></figure>
         <p>上のバーの「リンク」に出すサイトを登録します。「活動報告用」の X となろう活動報告は削除できません（名前・URL・順番は変えられます）。なろう活動報告には、自分の活動報告のページの URL を入れてください。</p>
         <h3 id="set-templates">ひな型</h3>
-        <figure><button type="button" data-zoom="images/manual/19_settings_templates.png?v=20261119e" aria-label="ひな型の設定を拡大"><img src="images/manual/19_settings_templates.png?v=20261119e" alt="X・活動報告・前書き・後書きのひな型のグループ" loading="lazy"></button><figcaption>図26　ひな型</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/19_settings_templates.png?v=20261119e" aria-label="ひな型の設定を拡大"><img src="images/manual/19_settings_templates.png?v=20261119e" alt="X・活動報告・前書き・後書きのひな型のグループ" loading="lazy"></button><figcaption>図27　ひな型</figcaption></figure>
         <ul>
           <li>「X のひな型」「活動報告のひな型」「前書きのひな型」「後書きのひな型」のグループごとに、「＋ 追加」「編集」「削除」をします。全作品で共通です。</li>
           <li>本文に <code>{作品名}</code> <code>{話数}</code> <code>{エピソード名}</code> <code>{URL}</code> などを書くと、使うときに今のエピソードのものが入ります。</li>
           <li><code>％1％</code>・<code>％2％</code> … と書くと、使うときに欄が出て、入れた文字に置き換わります（「＋ 差し込み欄を追加」でも入ります）。</li>
         </ul>
         <h3 id="set-cloud">クラウド</h3>
-        <figure><button type="button" data-zoom="images/manual/25_settings_cloud.png?v=20261119e" aria-label="クラウドの設定を拡大"><img src="images/manual/25_settings_cloud.png?v=20261119e" alt="利用できるクラウドとクライアント ID、ログインのボタン" loading="lazy"></button><figcaption>図27　クラウド（クライアント ID は例）</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/25_settings_cloud.png?v=20261119e" aria-label="クラウドの設定を拡大"><img src="images/manual/25_settings_cloud.png?v=20261119e" alt="利用できるクラウドとクライアント ID、ログインのボタン" loading="lazy"></button><figcaption>図28　クラウド（クライアント ID は例）</figcaption></figure>
         <ul>
           <li>「利用できるクラウド」で、なし／Google ドライブ／OneDrive を選びます（切り替えると画面を読み直します）。</li>
           <li>クライアント ID を入れて「（クラウド名）にログイン」を押します。ログイン中は同じボタンが「（クラウド名）からログアウト」になります。</li>
@@ -583,7 +584,7 @@
           <li>このタブでは保存先のフォルダは選びません。ファイルは「ファイル」タブ、自動バックアップは「バックアップ」タブで選びます。</li>
         </ul>
         <h3 id="set-file">ファイル</h3>
-        <figure><button type="button" data-zoom="images/manual/20_settings_file.png?v=20261119e" aria-label="ファイルの設定を拡大"><img src="images/manual/20_settings_file.png?v=20261119e" alt="ファイルを開く・保存する場所を選ぶ画面" loading="lazy"></button><figcaption>図28　ファイル</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/20_settings_file.png?v=20261119e" aria-label="ファイルの設定を拡大"><img src="images/manual/20_settings_file.png?v=20261119e" alt="ファイルを開く・保存する場所を選ぶ画面" loading="lazy"></button><figcaption>図29　ファイル</figcaption></figure>
         <table>
           <thead><tr><th>保存先</th><th>動き</th></tr></thead>
           <tbody>
@@ -598,7 +599,7 @@
         <h3 id="set-import">インポート</h3>
         <p>「TXT をインポート…」で、TXT インポートを開きます（<a href="#import">TXT インポート</a>）。</p>
         <h3 id="set-about">このアプリについて</h3>
-        <figure><button type="button" data-zoom="images/manual/22_settings_about.png?v=20261120a" aria-label="このアプリについてを拡大"><img src="images/manual/22_settings_about.png?v=20261120a" alt="バージョン、マニュアルと GitHub へのリンク、免責事項" loading="lazy"></button><figcaption>図29　このアプリについて</figcaption></figure>
+        <figure><button type="button" data-zoom="images/manual/22_settings_about.png?v=20261120a" aria-label="このアプリについてを拡大"><img src="images/manual/22_settings_about.png?v=20261120a" alt="バージョン、マニュアルと GitHub へのリンク、免責事項" loading="lazy"></button><figcaption>図30　このアプリについて</figcaption></figure>
         <p>バージョン、このマニュアルと GitHub へのリンク、免責事項があります。</p>
         <p class="back-top"><a href="#top">ページの先頭へ</a></p>
       </section>
@@ -671,8 +672,8 @@
       <section id="mobile">
         <h2>スマートフォン・タブレット</h2>
         <div class="pair">
-          <figure class="mobile"><button type="button" data-zoom="images/manual/23_mobile_editor.png?v=20261119e" aria-label="スマートフォンの執筆画面を拡大"><img src="images/manual/23_mobile_editor.png?v=20261119e" alt="スマートフォンの幅で表示した執筆画面" loading="lazy"></button><figcaption>図30　スマートフォンの執筆画面</figcaption></figure>
-          <figure class="mobile"><button type="button" data-zoom="images/manual/24_mobile_drawer.png?v=20261119e" aria-label="スマートフォンの目次を拡大"><img src="images/manual/24_mobile_drawer.png?v=20261119e" alt="「☰ 目次」で開いた目次" loading="lazy"></button><figcaption>図31　「☰ 目次」で開く目次</figcaption></figure>
+          <figure class="mobile"><button type="button" data-zoom="images/manual/23_mobile_editor.png?v=20261119e" aria-label="スマートフォンの執筆画面を拡大"><img src="images/manual/23_mobile_editor.png?v=20261119e" alt="スマートフォンの幅で表示した執筆画面" loading="lazy"></button><figcaption>図31　スマートフォンの執筆画面</figcaption></figure>
+          <figure class="mobile"><button type="button" data-zoom="images/manual/24_mobile_drawer.png?v=20261119e" aria-label="スマートフォンの目次を拡大"><img src="images/manual/24_mobile_drawer.png?v=20261119e" alt="「☰ 目次」で開いた目次" loading="lazy"></button><figcaption>図32　「☰ 目次」で開く目次</figcaption></figure>
         </div>
         <h3>ホーム画面に追加する</h3>
         <table>
@@ -688,7 +689,7 @@
           <li>ファイルの保存は共有メニューの「"ファイル"に保存」で、iCloud Drive などを選べます。</li>
           <li>最大化した欄がキーボードに隠れるときは、「設定」→「表示」→「iPhone：最大化時の高さ」で高さを決めます。</li>
           <li>不要なボタンを「設定」→「表示」で隠すと、書く場所を広く使えます。</li>
-          <li>Android は実機で確かめていません。おかしな動作をすることがあります（<a href="#env">動作環境</a>）。</li>
+          <li>Android は実機で確かめていません。おかしな動作をすることもありえます（<a href="#env">動作環境</a>）。</li>
         </ul>
         <p class="back-top"><a href="#top">ページの先頭へ</a></p>
       </section>
