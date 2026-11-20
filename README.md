@@ -12,7 +12,7 @@
 
 Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホーム画面に追加すればPWAとしても使用できます。通常の作品データは端末内に保存され、必要な場合だけGoogle DriveまたはOneDriveをバックアップ先として利用します。
 
-※Androidは実機でのテストをしていません。詳しくは[動作環境](#動作環境)を参照してください。
+※おすすめのブラウザは Chrome です。Safari・Edge は動作未検証、Android は実機でのテストをしていません。いずれも、おかしな動作をすることがあります。詳しくは[動作環境](#動作環境)を参照してください。
 
 ## ここから実行
 
@@ -21,7 +21,7 @@ Windows・Mac・iPhone・iPad・Android のブラウザで利用でき、ホー�
 ブラウザ（おすすめは Chrome）で開くだけで使えます。インストールや登録は不要です。
 
 - **バージョン**：0.97（`2026.11.19-0.97`）
-- **おすすめのブラウザ**：**Google Chrome**（Windows・Mac・iPhone・iPad・Android のどれでも）
+- **おすすめのブラウザ**：**Google Chrome**（Safari・Edge は動作未検証、Android は実機未テスト）
 - **マニュアル**：[https://tri-ton-novel.github.io/novel-editor/docs/manual.html](https://tri-ton-novel.github.io/novel-editor/docs/manual.html)
 
 > [!IMPORTANT]
@@ -145,13 +145,13 @@ Google DriveやOneDriveを使用すると決めた場合だけ、クラウドへ
 
 **Google Chrome をおすすめします。** どの端末でも Chrome で開くと、動作と画面がいちばんそろいます（作者は主に Chrome で確かめています）。
 
-| 端末 | おすすめ | ほかに使えるブラウザ | 補足 |
+| 端末 | おすすめ | 動作未検証のブラウザ | 補足 |
 |---|---|---|---|
 | Windows・Mac | **Chrome** | Edge、Safari（Mac） | Chrome・Edge は保存先を選ぶ画面が使え、自動バックアップの保存先に「フォルダ」（ネットワークドライブも可）も選べます。Mac の Safari は保存が「ダウンロード」フォルダへ、自動バックアップは Google ドライブか OneDrive |
 | iPhone・iPad | **Chrome** | Safari | 保存は共有メニュー（「"ファイル"に保存」）。自動バックアップは Google ドライブか OneDrive（iCloud には自動で保存できません）。ホーム画面に追加してアプリとしても使えます |
 | Android | **Chrome** | — | 自動バックアップは Google ドライブ・OneDrive（「フォルダ」は機種や Chrome の版によって使えないことがあります）。ファイルの保存は「ダウンロード」フォルダへ。**実機でのテストはしていません** |
 
-- **Android は実機でのテストを行っていません。** 機種やブラウザによっては、動かない・表示が崩れるなどの場合があります。
+- **Safari・Edge は動作未検証です。Android は実機でのテストを行っていません。** いずれも、おかしな動作をすることがあります（動かない・表示が崩れるなど）。大切な原稿は、こまめにバックアップしてください。
 - 同じ端末でも、ブラウザごと（Chrome と Safari、ブラウザとホーム画面のアプリ）に作品データと設定は別々です。ふだん使うブラウザを1つに決めておくと迷いません。
 
 ## データの保存先とプライバシー
