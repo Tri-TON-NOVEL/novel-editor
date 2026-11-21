@@ -308,15 +308,16 @@ function updateStatus() {
 // 「編集エピソード保存」：まだサーバへのバックアップに入っていない変更があれば印を付ける
 function renderSaveButton() {
   const b = $('sync-save-btn');
-  const unsaved = sync.isDirty();
+  // 0.97：印は、端末ごとの最新の記録にまだ入れていない変更（ボタンで上書きするのはそちら）
+  const unsaved = sync.isLiveDirty();
   const saving = manualServerSaving || sync.isRunning?.();
   b.textContent = saving ? '保存中…' : unsaved ? '編集エピソード保存●' : '編集エピソード保存';
   b.disabled = !!saving;
   b.classList.toggle('saving', !!saving);
   b.classList.toggle('unsaved', unsaved);
-  const last = prefs.get('lastAutoBackupAt', null);
+  const last = prefs.get('sync.liveSavedAt', null) || prefs.get('lastAutoBackupAt', null);
   b.title = (unsaved ? 'まだ保存していない変更があります。' : '')
-    + `表示中のエピソードをサーバへバックアップ（Ctrl+S／⌘S）${last ? `　最後の保存 ${fmtTime(last)}` : ''}`;
+    + `この端末の最新の記録をサーバに上書き保存（Ctrl+S／⌘S）${last ? `　最後の保存 ${fmtTime(last)}` : ''}`;
 }
 
 function setCount(id, text) {
@@ -6168,7 +6169,7 @@ function quickSave() {
 }
 
 /**
- * 「保存」ボタン：今の内容を、全端末で共有する自動バックアップに残す（毎回、新しいバックアップを1つ足す）。
+ * 「保存」ボタン：今の内容を、全端末で共有する保存先の、この端末の最新の記録に上書きする（0.97。ファイルは増やさない）。
  * ・保存先が決まっていない → 案内して「設定」→「自動バックアップ」を開く
  * ・Google ドライブのログイン切れ・フォルダの許可切れ → ログイン（許可）してから続ける
  * ・他の端末のほうが新しい → 保存せずに「どちらの記録を使うか」を聞く
@@ -6199,13 +6200,15 @@ async function saveNow() {
     await runSyncCheck({ manual: !!syncPending });
     if (syncPending || !sync.isChecked()) return;
   }
-  const ok = await withBusy('保存中…', () => sync.backupNow({ build: () => buildEpisodeBackup('manual-episode', currentSyncTarget()) }));
-  if (ok) {
-    toast(`保存が完了しました\n表示中のエピソードと、読み込んでから変えた話 → ${sync.folderName()}`);
-    sync.saveLive().catch(() => {}); // 端末ごとの最新の記録も書き直す（0.97）
-  }
+  // 0.97：端末ごとの最新の記録を上書きする（日時付きのバックアップは増やさない。そちらは自動で作る）。
+  // 先に、ほかの端末の新しい記録を取り込む（両方で書き換えていれば、どちらを使うか聞く）
+  const ok = await withBusy('保存中…', async () => {
+    await sync.pullLive();
+    return sync.saveLive({ manual: true });
+  });
+  if (ok) toast(`保存しました（最新の記録）→ ${sync.folderName()}`);
+  else if (ok === null) toast('読み込んでから変えたところがないので、保存しませんでした');
   else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください') + '\nもう一度「編集エピソード保存」を押すとやり直せます', true);
-  // 他の端末のほうが新しかったときは、sync.onNewer から確認の画面が出る
   } finally {
     manualServerSaving = false;
     btn?.classList.remove('task-running');

@@ -97,7 +97,8 @@ let autoBuilder = null;
 let changeCheck = null; // 前に保存したときから中身が本当に変わったか（アプリが決める）
 let liveBuilder = null; // 最新の記録を作る（アプリが決める）。入れるものがなければ null
 let livePuller = null;  // ほかの端末の最新の記録を取り込む（アプリが決める）
-let liveDirty = !!prefs.get('sync.liveDirty', false);
+// 前の版から上げたとき（記録がない）は、日時付きバックアップに入れていない変更があれば「まだ」とする
+let liveDirty = !!prefs.get('sync.liveDirty', prefs.get('sync.dirty', false));
 let lastPull = 0;
 let listener = () => {};
 let newerHandler = () => {};
@@ -110,6 +111,7 @@ export function getState() { return state; }
 export function getError() { return lastError; }
 export function isChecked() { return checked; }
 export function isDirty() { return dirty; }
+export function isLiveDirty() { return liveDirty; }
 export function isRunning() { return running; }
 
 export async function init({ provider, makeAutoBackup = null, hasChanges = null, makeLive = null, pullLive: puller = null }) {
@@ -543,24 +545,36 @@ export function flushNow() {
 
 // ---------- 端末ごとの最新の記録（0.97） ----------
 
-// 自分の最新の記録を上書きする。入れるものがなければ書かない
-export function saveLive() {
+// 自分の最新の記録を上書きする。入れるものがなければ書かない。
+// 戻り値：true（保存した）／null（入れるものがない）／false（保存できなかった。理由は getError()）
+// manual：「編集エピソード保存」から。保存中の表示を出し、失敗の理由を残す
+export function saveLive({ manual = false } = {}) {
   if (state !== 'on' || !checked || !liveBuilder) return Promise.resolve(false);
   return exclusive(async () => {
     const t = target();
     if (!t?.writeOver) return false;
     const startedAt = Date.now();
+    if (manual) { running = true; listener(); }
     try {
       const made = await liveBuilder();
       if (made) await t.writeOver(made.name || liveName(), made.blob || made.text);
       liveDirty = lastEdit > startedAt;
       prefs.set('sync.liveDirty', liveDirty);
-      if (made) prefs.set('sync.liveSavedAt', new Date().toISOString());
-      return !!made;
+      listener(); // 「編集エピソード保存」の印を消す
+      if (made) {
+        const now = new Date().toISOString();
+        prefs.set('sync.liveSavedAt', now);
+        prefs.set('lastBackupAt', now);
+      }
+      if (manual) lastError = '';
+      return made ? true : null;
     } catch (e) {
       if (e?.name === 'NeedLoginError') setState('need-login');
+      else if (manual) lastError = e?.message || String(e);
       console.warn('最新の記録を保存できませんでした', e);
       return false;
+    } finally {
+      if (manual) { running = false; listener(); }
     }
   });
 }
