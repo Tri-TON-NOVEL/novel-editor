@@ -11,13 +11,14 @@ import {
   requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
   packFileName, describePack, packSummary, materialsSignature, episodeSignature, environmentSignature,
-  emptyCumulative, normalizeCumulative, addToCumulative, withCumulative,
+  emptyCumulative, normalizeCumulative, addToCumulative, withCumulative, pruneCumulative, cumulativeCoveredFrom,
   // 前の版の .json バックアップ（全体・バックアップパック）を読むためのもの
   fileFormat, isBackup, isPack, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName,
   parseAnyBackup, parseBackupHead, packFromHead, restorePack, PACK_FORMAT,
 } from './backup.js';
 import {
   makeArchive, openArchive, restoreArchive, archiveSourceFromBlob, savePreRestoreArchive, isArchiveSource,
+  readArchiveBlock, bufferedSource,
   archiveEnvironmentSummary, ARCHIVE_EXT, ARCHIVE_MIME,
 } from './archive.js';
 import * as sync from './sync.js';
@@ -2352,7 +2353,9 @@ async function openBackupPackFile() {
 //   ・書きかけの原稿を今の稿にしまう（読み込んだあとも、この端末の稿として残るように）
 //   ・作品ごとに復元ポイント「バックアップ読み込み前（自動）」を作る（自動では消えない）
 //   ・端末全体の状態を「同期の前の状態」として残す（設定 → バックアップ の「同期の前の状態を書き出す」）
-async function protectBeforeRestore(pack, selected, name = '') {
+// light（0.97）：ほかの端末の最新の記録を取り込むとき。作品ごとの復元ポイントを「自動」として残し（古いものから自動で消える）、
+// 端末全体の「同期の前の状態」は作らない（何度も取り込むので、そのたびに全作品をまとめると重い）
+async function protectBeforeRestore(pack, selected, name = '', { light = false } = {}) {
   const keys = new Set(selected);
   const workIds = new Set((pack.items || []).filter((it) => keys.has(it.key))
     .map((it) => (it.type === 'project' ? it.project?.workId : it.project?.workId)).filter(Boolean));
@@ -2371,12 +2374,14 @@ async function protectBeforeRestore(pack, selected, name = '') {
     }
     await versions.put({
       id: newVersionId(), kind: 'project', projectId: p.id,
-      name: 'バックアップ読み込み前（自動）',
+      name: light ? 'ほかの端末の更新を取り込む前（自動）' : 'バックアップ読み込み前（自動）',
       memo: `${now.toLocaleString('ja-JP')} に${name ? `「${name}」を` : 'バックアップを'}読み込む前の状態`,
-      auto: false, createdAt: now.toISOString(), chars: totalChars(p), episodes: p.episodes.length,
+      auto: light, createdAt: now.toISOString(), chars: totalChars(p), episodes: p.episodes.length,
       data: JSON.parse(serialize(p)).project,
     });
+    if (light) await trimAutoVersions(p.id).catch(() => {});
   }
+  if (light) return;
   await savePreRestoreArchive(name, { environment: true, scope: 'all', reason: 'pre-restore', appVersion: APP_VERSION, device: { prefix: sync.prefix(), id: sync.deviceId() } });
 }
 
@@ -3420,7 +3425,8 @@ async function unsentSnapshot() {
 
 // 読み込み・復元のあと：読み込んだ内容はバックアップにあるものなので、送り済みとして記録する（すぐに自動バックアップしない）。
 // 読み込みで変わらなかった、この端末のまだ送っていない変更は、そのまま次の自動バックアップに入れる
-async function markRestoredAsSent(keep) {
+// reset：false のとき（ほかの端末の最新の記録を取り込んだとき）は、累積をやり直さない（0.97）
+async function markRestoredAsSent(keep, { reset = true } = {}) {
   const sent = cloudSent();
   const mat = { ...(prefs.get('sync.materialsSent', {}) || {}) };
   for (const p of await allProjects()) {
@@ -3437,7 +3443,7 @@ async function markRestoredAsSent(keep) {
   prefs.set('sync.materialsSent', mat);
   // 累積バックアップの起点を、読み込んだ今にする（0.97）。読み込みで消えなかった、この端末のまだ送っていない変更は、
   // 次の保存で「前に送ったときから変わったもの」として、また累積に入る
-  prefs.set('sync.cumulative', emptyCumulative());
+  if (reset) prefs.set('sync.cumulative', emptyCumulative());
 }
 
 // 累積バックアップ（0.97）：起点から今までに変えたエピソードと作品資料。記録がなければ、今を起点にする
@@ -3517,6 +3523,231 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null, { onl
   const d = describePack(made.pack);
   made.label = ['小説', d.project, d.episode !== '—' ? d.episode : '', made.pack.items.some((x) => x.type === 'materials') ? '作品資料' : ''].filter(Boolean).join('・');
   return made;
+}
+
+// ---------- 端末ごとの最新の記録（0.97） ----------
+// 端末ごとに「同期_端末名ID.ayabackup」を1つ置き、書いたら入力が少し止まったときに上書きする。
+// 中身は累積と同じ（起点から変えた話と資料。ほかの端末から取り込んだものも入れる）で、書式は今のバックアップと同じ。
+// ほかの端末の記録は、起動したとき・画面に戻ったとき・開いている間・保存の前に確かめ、新しければ黙って取り込む。
+// 両方の端末で同じ話（資料）を書き換えていたときだけ、どちらを使うか聞く。
+// 端末に残す記録（設定 sync.*。バックアップには入らない）
+//   sync.liveSeen  … { [端末ID]: 取り込んだ、その端末の記録の日時 }
+//   sync.liveFiles … { [ファイル名]: 確かめたときの更新日時 }（変わっていなければ中身を読まない）
+//   sync.liveKnown … { [workId]: { [エピソードの id | '#materials']: 最後に見た中身の印 } }
+//   sync.liveMine  … { [workId]: { [同]: この端末で書き換えたのを見つけた時刻(ms) } }
+const LIVE_KEEP_MS = 30 * 24 * 3600_000; // これより前に変えた分は、最新の記録から外す
+
+function prefObj(key) {
+  const v = prefs.get(key, null);
+  return v && typeof v === 'object' ? v : {};
+}
+
+// この端末で書き換えた話・資料を見つけて、その時刻を覚える。
+// 初めて見る作品（この版にしたとき・新しく作ったとき）は、今の中身を覚えるだけ
+function observeMine(projects, now = Date.now()) {
+  const known = prefObj('sync.liveKnown');
+  const mine = prefObj('sync.liveMine');
+  for (const p of projects) {
+    const first = !known[p.workId];
+    const k = known[p.workId] || (known[p.workId] = {});
+    const note = (key, sig) => {
+      if (k[key] === sig) return;
+      if (!first) (mine[p.workId] ||= {})[key] = now;
+      k[key] = sig;
+    };
+    for (const ep of p.episodes) note(ep.id, episodeSignature(ep));
+    note('#materials', materialsSignature(p));
+  }
+  const cutoff = now - LIVE_KEEP_MS;
+  for (const [w, m] of Object.entries(mine)) {
+    for (const [key, at] of Object.entries(m)) if (!(at >= cutoff)) delete m[key];
+    if (!Object.keys(m).length) delete mine[w];
+  }
+  prefs.set('sync.liveKnown', known);
+  prefs.set('sync.liveMine', mine);
+  return mine;
+}
+
+// 自分の最新の記録を作る。入れるものがなければ null
+async function buildLiveBackup() {
+  await flush();
+  if (project && episode()) {
+    for (const site of project.sites) {
+      const state = await ensureEdition(episode(), site);
+      await storeEdition(episode(), site, state.cur);
+    }
+    await flush();
+  }
+  const projects = await allProjects();
+  observeMine(projects);
+  let cum = addToCumulative(cumulativeRecord(), cloudChanges(projects));
+  cum = pruneCumulative(cum, Date.now() - LIVE_KEEP_MS);
+  prefs.set('sync.cumulative', cum);
+  const merged = withCumulative([], cum, projects);
+  const targets = merged.targets.map((t) => {
+    const p = projects.find((x) => x.workId === t.workId);
+    return p ? { projectId: p.id, episodeIds: t.episodeIds, materials: merged.materials.has(t.workId) } : null;
+  }).filter((t) => t && (t.episodeIds.length || t.materials));
+  if (!targets.length) return null;
+  const made = await makeArchive({
+    scope: 'targets', targets, reason: 'live', appVersion: APP_VERSION,
+    device: { prefix: sync.prefix(), id: sync.deviceId() },
+    live: { coveredFrom: new Date(cumulativeCoveredFrom(cum)).toISOString(), seen: prefObj('sync.liveSeen') },
+  });
+  made.name = sync.liveName();
+  return made;
+}
+
+// ほかの端末の最新の記録を確かめ、新しいものを古い順に取り込む
+async function pullLiveRecords() {
+  if (sync.getState() !== 'on') return false;
+  const files = await sync.listLive();
+  const myName = sync.liveName();
+  const myId = sync.deviceId();
+  const fileSeen = prefObj('sync.liveFiles');
+  const seen = prefObj('sync.liveSeen');
+  const found = [];
+  for (const f of files) {
+    if (f.name === myName) continue;
+    const stamp = String(f.modifiedTime || '');
+    if (stamp && fileSeen[f.name] === stamp) continue;
+    let archive;
+    try {
+      archive = await openArchive({ size: f.size, readRange: (s, e) => sync.readRange(f, s, e) });
+    } catch (e) {
+      console.warn('最新の記録を読めませんでした', f.name, e);
+      continue;
+    }
+    const dev = archive.index.device?.id;
+    const at = Date.parse(archive.index.createdAt || '') || 0;
+    if (!dev || dev === myId || !at || at <= (Date.parse(seen[dev] || '') || 0)) {
+      if (stamp) fileSeen[f.name] = stamp;
+      continue;
+    }
+    found.push({ f, stamp, archive, dev, at });
+  }
+  prefs.set('sync.liveFiles', fileSeen);
+  found.sort((a, b) => a.at - b.at);
+  let any = false;
+  for (const x of found) any = (await importLive(x)) || any;
+  return any;
+}
+
+// ほかの端末の最新の記録を1つ取り込む
+async function importLive({ f, stamp, archive, dev, at }) {
+  const myId = sync.deviceId();
+  const index = archive.index;
+  const who = String(index.device?.prefix || '').replace(/_+$/, '') || 'ほかの端末';
+  const prevAt = Date.parse(prefObj('sync.liveSeen')[dev] || '') || 0;
+  // その端末が、この端末の記録を最後に取り込んだときの、この端末の記録の日時（この端末の時計）
+  const theirSeenOfMe = Date.parse(index.live?.seen?.[myId] || '') || 0;
+  const coveredFrom = Date.parse(index.live?.coveredFrom || '') || Infinity;
+  const finish = () => {
+    const seen = prefObj('sync.liveSeen');
+    seen[dev] = index.createdAt;
+    prefs.set('sync.liveSeen', seen);
+    if (stamp) prefs.set('sync.liveFiles', { ...prefObj('sync.liveFiles'), [f.name]: stamp });
+    // 前に取り込んだときから取りこぼしがない：その端末の同じころの日時付きバックアップは、知らせなくてよい
+    if (prevAt && coveredFrom <= prevAt) sync.markLiveCovered(index.device?.prefix, at);
+  };
+  await flush();
+  const projects = await allProjects();
+  const mine = observeMine(projects);
+  // その端末が、この端末の記録をまだ取り込んだことがない（この版にしたばかりなど）：
+  // 日時付きのバックアップに送っていない変更も、この端末で書き換えたものとみなす（黙って上書きしないように）
+  const unsent = theirSeenOfMe ? null : new Map(cloudChanges(projects).map((c) => [c.p.workId, c]));
+  const isMine = (workId, key) => {
+    if ((mine[workId]?.[key] || 0) > theirSeenOfMe) return true;
+    const u = unsent?.get(workId);
+    return !!u && (key === '#materials' ? u.materials : u.episodeIds.includes(key));
+  };
+  const reader = { ...archive, source: bufferedSource(archive.source) };
+  const blockOf = (item, kind) => (index.blocks || []).find((b) => (item.blockIds || []).includes(b.id) && b.kind === kind);
+  const take = [];
+  const conflicts = [];
+  for (const item of index.items || []) {
+    if (item.type !== 'episode' && item.type !== 'materials') continue;
+    const workId = item.project?.workId;
+    const local = projects.find((p) => p.workId === workId);
+    const block = blockOf(item, item.type);
+    if (!block) continue;
+    const data = await readArchiveBlock(reader, block);
+    if (item.type === 'episode') {
+      const localEp = local?.episodes.find((e) => e.id === data.id);
+      if (localEp && episodeSignature(localEp) === episodeSignature(data)) continue; // 同じ中身
+      const entry = { item, workId, key: data.id };
+      if (localEp && isMine(workId, data.id)) conflicts.push({ ...entry, label: `「${local.title || '無題'}」${format.episodeName(localEp, local.site)}` });
+      else take.push(entry);
+    } else {
+      if (local && materialsSignature(local) === materialsSignature(normalize({ ...local, ...data, id: local.id, workId, episodes: local.episodes }))) continue;
+      const entry = { item, workId, key: '#materials' };
+      if (local && isMine(workId, '#materials')) conflicts.push({ ...entry, label: `「${local.title || '無題'}」の作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ・伏線）` });
+      else take.push(entry);
+    }
+  }
+  if (conflicts.length) {
+    const names = conflicts.slice(0, 8).map((c) => `・${c.label}`).join('\n') + (conflicts.length > 8 ? `\n・ほか${conflicts.length - 8}件` : '');
+    const r = await choose(`${who} とこの端末の両方で、同じところを書き換えています。\n\n${names}\n\nどちらの内容を使いますか？\n`
+      + `・${who}：この端末の内容は「変更履歴と復元ポイント」に残します。\n`
+      + `・この端末：この端末の内容を ${who} に届けます（${who} で次に確かめたとき）。\n`
+      + '・あとで：今は取り込みません。',
+    [{ value: 'theirs', label: who }, { value: 'mine', label: 'この端末', primary: true }], { cancel: 'あとで' });
+    if (r === null) {
+      // あとで：このファイルが次に書き換わるまで聞かない（日時付きバックアップの知らせからも読み込める）
+      if (stamp) prefs.set('sync.liveFiles', { ...prefObj('sync.liveFiles'), [f.name]: stamp });
+      return false;
+    }
+    if (r === 'theirs') take.push(...conflicts);
+    else {
+      // この端末の内容を届ける：累積に入れ、最新の記録を書き直す
+      prefs.set('sync.cumulative', addToCumulative(cumulativeRecord(), conflicts.map((c) => ({ workId: c.workId, episodeIds: c.key === '#materials' ? [] : [c.key], materials: c.key === '#materials' }))));
+      sync.markDirty();
+    }
+  }
+  if (take.length) {
+    const keys = take.map((t) => t.item.key);
+    await flush();
+    const keep = await unsentSnapshot();
+    await protectBeforeRestore(archive.pack, keys, f.name, { light: true });
+    const restored = await restoreArchive(archive, { selected: keys });
+    await markRestoredAsSent(keep, { reset: false });
+    // 取り込んだ話・資料は、この端末の累積にも入れる（ほかの端末にも届くように）。中身の印も合わせる（この端末で書いたことにしない）
+    const after = await allProjects();
+    const known = prefObj('sync.liveKnown');
+    const mineNow = prefObj('sync.liveMine');
+    const changes = [];
+    for (const t of take) {
+      const p = after.find((x) => x.workId === t.workId);
+      if (!p) continue;
+      const k = known[t.workId] || (known[t.workId] = {});
+      if (t.key === '#materials') {
+        k['#materials'] = materialsSignature(p);
+        changes.push({ workId: t.workId, episodeIds: [], materials: true });
+      } else {
+        const ep = p.episodes.find((e) => e.id === t.key);
+        if (!ep) continue;
+        k[t.key] = episodeSignature(ep);
+        changes.push({ workId: t.workId, episodeIds: [t.key], materials: false });
+      }
+      if (mineNow[t.workId]) delete mineNow[t.workId][t.key];
+    }
+    prefs.set('sync.liveKnown', known);
+    prefs.set('sync.liveMine', mineNow);
+    prefs.set('sync.cumulative', addToCumulative(cumulativeRecord(), changes));
+    // 開いている作品が変わったら、画面を読み直す（古い中身が画面に残って、あとで上書きしないように）
+    if (project && restored.updatedList.some((x) => x.id === project.id)) {
+      const p = await db.get(project.id);
+      if (p) showProject(p);
+    }
+    const labels = take.map((t) => {
+      const p = after.find((x) => x.workId === t.workId);
+      const ep = t.key === '#materials' ? null : p?.episodes.find((e) => e.id === t.key);
+      return ep ? format.episodeName(ep, p.site) : '作品資料';
+    });
+    toast(`${who} で書いた内容を取り込みました：${labels.slice(0, 3).join('、')}${labels.length > 3 ? ` ほか${labels.length - 3}件` : ''}`);
+  }
+  finish();
+  return take.length > 0;
 }
 
 async function openSyncTargets() {
@@ -4089,6 +4320,8 @@ async function syncResumeIfReady() {
   if (sync.isPaused()) { syncCheckDeferred = true; return; }
   await sync.refresh();
   if (sync.getState() === 'on' && !sync.isChecked() && !syncPending) await runSyncCheck();
+  // 画面に戻ってきたとき：ほかの端末の最新の記録を取り込む（0.97）
+  else if (sync.getState() === 'on' && sync.isChecked()) await sync.pullLive();
 }
 
 async function resolveSyncAttention() {
@@ -5967,7 +6200,10 @@ async function saveNow() {
     if (syncPending || !sync.isChecked()) return;
   }
   const ok = await withBusy('保存中…', () => sync.backupNow({ build: () => buildEpisodeBackup('manual-episode', currentSyncTarget()) }));
-  if (ok) toast(`保存が完了しました\n表示中のエピソードと、読み込んでから変えた話 → ${sync.folderName()}`);
+  if (ok) {
+    toast(`保存が完了しました\n表示中のエピソードと、読み込んでから変えた話 → ${sync.folderName()}`);
+    sync.saveLive().catch(() => {}); // 端末ごとの最新の記録も書き直す（0.97）
+  }
   else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください') + '\nもう一度「編集エピソード保存」を押すとやり直せます', true);
   // 他の端末のほうが新しかったときは、sync.onNewer から確認の画面が出る
   } finally {
@@ -6707,6 +6943,8 @@ async function init() {
     provider: drive,
     makeAutoBackup: () => buildEpisodeBackup('auto-episode', null, { onlyChanged: true }),
     hasChanges: cloudHasChanges,
+    makeLive: buildLiveBackup,
+    pullLive: pullLiveRecords,
   }).catch((e) => console.warn('自動バックアップの準備に失敗', e));
   renderSyncState();
   let login = null;

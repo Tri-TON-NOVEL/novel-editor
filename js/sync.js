@@ -36,6 +36,12 @@ const DIR_KEY = 'autoBackupDir';
 // 前の名前（…20261030T073000Z.json。世界時）と、今の名前（…_20261030-073000.ayabackup。端末の時刻）の両方を読む。
 // 0.50 までの .json（…_20261030-073000.json）も、一覧に出して読めるようにする
 const NAME_RE = /^(.*?)(\d{8}T\d{6}Z|\d{8}-\d{6})\.(?:ayabackup|json)$/;
+// 端末ごとの「最新の記録」（0.97）：「同期_端末名端末ID.ayabackup」を端末ごとに1つだけ置き、こまめに上書きする。
+// 名前に日時がないので、日時付きのバックアップの一覧（NAME_RE）には入らない（前の版のアプリにも、残す件数の整理にも関係しない）
+const LIVE_RE = /^同期_.+\.ayabackup$/;
+const LIVE_IDLE_MS = 60_000;    // 入力がこれだけ止まったら、最新の記録を上書きする
+const LIVE_PULL_MS = 60_000;    // 開いている間に、ほかの端末の最新の記録を確かめる間隔
+const LIVE_GRACE_MS = 120_000;  // 最新の記録を取り込んだ端末の、同じころの日時付きバックアップは知らせない
 
 export const folderSupported = 'showDirectoryPicker' in window;
 
@@ -65,6 +71,9 @@ export function folderName() { return mode() === 'cloud' ? drive?.backups.folder
 // クラウド方式で使うサービス（Google ドライブ／OneDrive）
 export function cloud() { return drive; }
 
+export function liveName() { return `同期_${prefix()}${deviceId()}.ayabackup`; }
+export function isLiveName(name) { return LIVE_RE.test(String(name || '')); }
+
 export function deviceId() {
   let id = prefs.get('sync.deviceId', '');
   if (!id) { id = Math.random().toString(36).slice(2) + Date.now().toString(36); prefs.set('sync.deviceId', id); }
@@ -86,6 +95,10 @@ let dirtySince = 0;    // 保存していない変更が始まった時刻（前
 let running = false;
 let autoBuilder = null;
 let changeCheck = null; // 前に保存したときから中身が本当に変わったか（アプリが決める）
+let liveBuilder = null; // 最新の記録を作る（アプリが決める）。入れるものがなければ null
+let livePuller = null;  // ほかの端末の最新の記録を取り込む（アプリが決める）
+let liveDirty = !!prefs.get('sync.liveDirty', false);
+let lastPull = 0;
 let listener = () => {};
 let newerHandler = () => {};
 
@@ -99,10 +112,12 @@ export function isChecked() { return checked; }
 export function isDirty() { return dirty; }
 export function isRunning() { return running; }
 
-export async function init({ provider, makeAutoBackup = null, hasChanges = null }) {
+export async function init({ provider, makeAutoBackup = null, hasChanges = null, makeLive = null, pullLive: puller = null }) {
   drive = provider || null;
   autoBuilder = makeAutoBackup;
   changeCheck = hasChanges;
+  liveBuilder = makeLive;
+  livePuller = puller;
   setInterval(tick, CHECK_MS);
   await refresh();
 }
@@ -198,6 +213,22 @@ function target() {
         await w.close();
       },
       async remove(id) { await dir.removeEntry(id); },
+      // 同じ名前なら上書き（書き終わったときに入れ替わる）
+      async writeOver(name, text) {
+        const f = await dir.getFileHandle(name, { create: true });
+        const w = await f.createWritable();
+        await w.write(text);
+        await w.close();
+      },
+      async listLive() {
+        const out = [];
+        for await (const [name, h] of dir.entries()) {
+          if (h.kind !== 'file' || !LIVE_RE.test(name)) continue;
+          const file = await h.getFile().catch(() => null);
+          out.push({ id: name, name, modifiedTime: file ? String(file.lastModified) : '', size: file?.size });
+        }
+        return out;
+      },
       async listAny() {
         const out = [];
         for await (const [name, h] of dir.entries()) {
@@ -220,6 +251,8 @@ function target() {
       readStart: (id, maxBytes) => drive.silently(async () => (b.readStart ? b.readStart(id, maxBytes) : { text: await b.read(id), complete: true })),
       readRange: (id, start, end) => drive.silently(() => b.readRange(id, start, end)),
       write: (name, text) => drive.silently(() => b.write(name, text)),
+      writeOver: (name, text) => drive.silently(() => (b.writeOver ? b.writeOver(name, text) : b.write(name, text))),
+      listLive: () => drive.silently(async () => (await (b.listAny ? b.listAny() : b.list())).filter((f) => LIVE_RE.test(f.name))),
       remove: (id) => drive.silently(() => b.remove(id)),
       removeForever: (id) => drive.silently(async () => (b.removeForever ? b.removeForever(id) : (await b.remove(id), 'recycled'))),
     };
@@ -334,6 +367,7 @@ export async function removeForever(entry) {
 // 書き換えた印（編集のたびに呼ぶ）
 export function markDirty() {
   lastEdit = Date.now();
+  if (!liveDirty) { liveDirty = true; prefs.set('sync.liveDirty', true); }
   if (dirty) return;
   dirtySince = lastEdit;
   dirty = true;
@@ -489,15 +523,81 @@ export function onBackupResult(fn) { resultHandler = fn || (() => {}); }
 // 一定時間ごとに確認し、変更の印があって、入力が「入力が止まってから」の分（既定30分）止まっていれば保存する。
 // 前回の起動から残っていた変更（閉じたときの保存が途中で切れたなど）は、起動時の確認が済んだらすぐ
 function tick() {
-  if (state !== 'on' || !checked || !dirty) return;
+  if (state !== 'on' || !checked) return;
   const now = Date.now();
+  // 最新の記録：書いたら、入力が少し止まったときに上書きする。書いていないときは、ほかの端末の分を確かめる
+  if (!isPaused() && now - lastEdit >= LIVE_IDLE_MS) {
+    if (liveDirty) saveLive();
+    else if (now - lastPull >= LIVE_PULL_MS) pullLive();
+  }
+  if (!dirty) return;
   if (now - lastRun < LEAVE_MIN_MS) return;
   if (now - lastEdit >= intervalMin() * 60_000) backupNow({ auto: true });
 }
 
 // 画面を閉じる・切り替えるときに呼ぶ。未保存の変更があれば保存する
 export function flushNow() {
+  if (state === 'on' && checked && liveDirty) saveLive(); // 先に、小さい最新の記録を（iPhone は閉じるとすぐ止まる）
   if (state === 'on' && checked && dirty && Date.now() - lastRun >= LEAVE_MIN_MS) backupNow({ auto: true });
+}
+
+// ---------- 端末ごとの最新の記録（0.97） ----------
+
+// 自分の最新の記録を上書きする。入れるものがなければ書かない
+export function saveLive() {
+  if (state !== 'on' || !checked || !liveBuilder) return Promise.resolve(false);
+  return exclusive(async () => {
+    const t = target();
+    if (!t?.writeOver) return false;
+    const startedAt = Date.now();
+    try {
+      const made = await liveBuilder();
+      if (made) await t.writeOver(made.name || liveName(), made.blob || made.text);
+      liveDirty = lastEdit > startedAt;
+      prefs.set('sync.liveDirty', liveDirty);
+      if (made) prefs.set('sync.liveSavedAt', new Date().toISOString());
+      return !!made;
+    } catch (e) {
+      if (e?.name === 'NeedLoginError') setState('need-login');
+      console.warn('最新の記録を保存できませんでした', e);
+      return false;
+    }
+  });
+}
+
+// 保存先にある、全端末の最新の記録 [{ id, name, modifiedTime }]
+export async function listLive() {
+  const t = target();
+  if (!t?.listLive) return [];
+  return t.listLive();
+}
+
+// ほかの端末の最新の記録を取り込む（中身はアプリが行う）。同時に二つは動かさない
+let pulling = null;
+export function pullLive() {
+  if (state !== 'on' || !livePuller || isPaused()) return Promise.resolve(false);
+  lastPull = Date.now();
+  if (!pulling) {
+    pulling = Promise.resolve().then(() => livePuller())
+      .catch((e) => { console.warn('ほかの端末の最新の記録を取り込めませんでした', e); return false; })
+      .finally(() => { pulling = null; });
+  }
+  return pulling;
+}
+
+// 最新の記録を取り込み、取りこぼしがないと分かった端末：{ 端末名: その記録の日時(ms) }。
+// その端末の、その日時のころまでの日時付きバックアップは「他の端末の更新」として知らせない
+export function markLiveCovered(devicePrefix, at) {
+  const key = String(devicePrefix || '').replace(/_+$/, '');
+  if (!key || !at) return;
+  const map = { ...(prefs.get('sync.liveCovered', {}) || {}) };
+  map[key] = Math.max(Number(map[key]) || 0, at);
+  prefs.set('sync.liveCovered', map);
+}
+function liveCovers(entry) {
+  const key = String(entry?.prefix || '').replace(/_+$/, '');
+  const at = Number((prefs.get('sync.liveCovered', {}) || {})[key]) || 0;
+  return !!(key && at && entry.at <= at + LIVE_GRACE_MS);
 }
 
 // ---------- 起動時の確認と同期 ----------
@@ -507,10 +607,13 @@ export function flushNow() {
  * 戻り値: null（何もしなくてよい）／{ entry, localChanged }
  */
 export async function findNewer({ ignoreSeen = false } = {}) {
+  // 先に、ほかの端末の最新の記録を取り込む（取り込めた端末の、同じころの日時付きバックアップは知らせない）
+  await pullLive();
   const list = await listAll();
   const newest = list[0];
   const last = lastBackup();
   if (!newest || newest.mine) return null;
+  if (!ignoreSeen && liveCovers(newest)) return null;
   if (last && newest.name === last.name) return null;
   // この端末が置いたバックアップパック（中身を読まずに分かる）
   if (prefs.get('sync.myPacks', []).includes(newest.name)) return null;

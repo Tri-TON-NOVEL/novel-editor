@@ -262,6 +262,9 @@ export async function makeArchive(plan = {}) {
     createdAt, appVersion: plan.appVersion || '', reason: plan.reason || 'manual-pack',
     device: plan.device || null, scope: items.length ? (plan.scope || null) : null,
     environment, items, blocks,
+    // 端末ごとの最新の記録（0.97）：{ coveredFrom, seen: { [端末ID]: その端末の記録を最後に取り込んだときの、その記録の日時 } }。
+    // 前の版のアプリは読まない（あっても困らない）
+    ...(plan.live ? { live: plan.live } : {}),
   };
   const indexBytes = encoder.encode(JSON.stringify(index));
   if (indexBytes.byteLength > MAX_INDEX_BYTES) throw new Error('バックアップの索引が大きすぎます');

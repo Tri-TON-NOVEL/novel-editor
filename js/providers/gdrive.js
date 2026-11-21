@@ -474,6 +474,23 @@ export const gdrive = {
       const meta = { name, mimeType: mime, parents: [folder], appProperties: { [APP_KEY]: 'autobackup' } };
       return sendFile(null, meta, text, mime);
     },
+    // 同じ名前のファイルがあれば中身を差し替え、なければ作る（端末ごとの「最新の記録」。0.97）。
+    // 差し替えは、送り終わったときに一度に入れ替わる（途中で切れても、前の中身が残る）
+    async writeOver(name, text) {
+      const folder = await backupFolderId();
+      const mime = 'application/x-ayatuzuri-backup';
+      const query = `name = ${q(name)} and ${q(folder)} in parents and trashed=false`;
+      const res = await api(`${API}/files?q=${encodeURIComponent(query)}&fields=files(id)&pageSize=10`);
+      const same = (await res.json()).files || [];
+      if (same.length) {
+        try {
+          return await sendFile(same[0].id, { name, appProperties: { [APP_KEY]: 'live' } }, text, mime);
+        } catch (e) {
+          if (!/not found|404/i.test(e.message)) throw e; // 消されていたら作り直す
+        }
+      }
+      return sendFile(null, { name, mimeType: mime, parents: [folder], appProperties: { [APP_KEY]: 'live' } }, text, mime);
+    },
     // 「バックアップファイルの管理」用：.ayabackup と、前の版の .json
     async listAny() {
       const id = await backupFolderId();

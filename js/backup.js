@@ -697,7 +697,8 @@ async function putVersionsKeepingLocal(localProjectId, remote, episodeId = null,
 // ---------- 累積の自動バックアップ（0.97） ----------
 // 起点（この端末でバックアップを読み込んだとき。はじめはその時点）から今までに変えたエピソードと作品資料を覚えておき、
 // 保存するたびに全部を入れる。いちばん新しいファイルを1つ読めば、起点からの変更を取りこぼさない。
-// cum = { since: 日時, works: { [workId]: { episodeIds: [...], materials: true|false } } }
+// cum = { since: 日時, works: { [workId]: { episodeIds: [...], materials: true|false, at: { [エピソードの id | '#materials']: 足した時刻(ms) } } },
+//         prunedTo?: 古い分を外した境目(ms) }
 export function emptyCumulative(since = new Date().toISOString()) {
   return { since, works: {} };
 }
@@ -706,22 +707,52 @@ export function normalizeCumulative(cum) {
   const c = cum && typeof cum === 'object' ? cum : {};
   const works = {};
   for (const [workId, w] of Object.entries(c.works && typeof c.works === 'object' ? c.works : {})) {
-    works[workId] = { episodeIds: [...new Set((Array.isArray(w?.episodeIds) ? w.episodeIds : []).map(String))], materials: !!w?.materials };
+    const at = {};
+    for (const [k, v] of Object.entries(w?.at && typeof w.at === 'object' ? w.at : {})) if (Number(v)) at[k] = Number(v);
+    works[workId] = { episodeIds: [...new Set((Array.isArray(w?.episodeIds) ? w.episodeIds : []).map(String))], materials: !!w?.materials, at };
   }
-  return { since: typeof c.since === 'string' ? c.since : new Date().toISOString(), works };
+  const out = { since: typeof c.since === 'string' ? c.since : new Date().toISOString(), works };
+  if (Number(c.prunedTo)) out.prunedTo = Number(c.prunedTo);
+  return out;
 }
 
 // 前に送ったときから変わったもの changes（[{ p: { workId }, episodeIds, materials }]）を足す（cum は変えない）
-export function addToCumulative(cum, changes) {
+export function addToCumulative(cum, changes, now = Date.now()) {
   const out = normalizeCumulative(cum);
   for (const c of changes || []) {
     const workId = c.p?.workId || c.workId;
     if (!workId) continue;
-    const w = out.works[workId] || (out.works[workId] = { episodeIds: [], materials: false });
-    for (const id of c.episodeIds || []) if (!w.episodeIds.includes(id)) w.episodeIds.push(id);
-    if (c.materials) w.materials = true;
+    const w = out.works[workId] || (out.works[workId] = { episodeIds: [], materials: false, at: {} });
+    for (const id of c.episodeIds || []) {
+      if (!w.episodeIds.includes(id)) w.episodeIds.push(id);
+      w.at[id] = now;
+    }
+    if (c.materials) { w.materials = true; w.at['#materials'] = now; }
   }
   return out;
+}
+
+// cutoff(ms) より前に足したものを外す（端末ごとの最新の記録が大きくなりすぎないように）。時刻のない分は起点の時刻とみなす
+export function pruneCumulative(cum, cutoff) {
+  const out = normalizeCumulative(cum);
+  const base = Date.parse(out.since) || 0;
+  let pruned = false;
+  for (const [workId, w] of Object.entries(out.works)) {
+    const keep = w.episodeIds.filter((id) => (w.at[id] ?? base) >= cutoff);
+    if (keep.length !== w.episodeIds.length) pruned = true;
+    for (const id of w.episodeIds) if (!keep.includes(id)) delete w.at[id];
+    w.episodeIds = keep;
+    if (w.materials && (w.at['#materials'] ?? base) < cutoff) { w.materials = false; delete w.at['#materials']; pruned = true; }
+    if (!w.episodeIds.length && !w.materials) delete out.works[workId];
+  }
+  if (pruned) out.prunedTo = Math.max(out.prunedTo || 0, cutoff);
+  return out;
+}
+
+// この累積で、取りこぼしなく分かる変更の始まり(ms)：起点か、古い分を外した境目の遅いほう
+export function cumulativeCoveredFrom(cum) {
+  const c = normalizeCumulative(cum);
+  return Math.max(Date.parse(c.since) || 0, c.prunedTo || 0);
 }
 
 // 保存の対象 targets（[{ workId, episodeIds }]）に、累積の分を足す。今ある作品・エピソードだけを残す
