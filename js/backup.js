@@ -310,6 +310,7 @@ function projectMaterials(p) {
     memos: clone(n.memos),
     foreshadows: clone(n.foreshadows),
     chapters: clone(n.chapters),
+    outlineRest: n.outlineRest || '', // 0.97：全体プロットの「以降」
     world: clone(n.world),
     characters: clone(n.characters),
     createdAt: n.createdAt,
@@ -693,6 +694,57 @@ async function putVersionsKeepingLocal(localProjectId, remote, episodeId = null,
   for (const v of remote) await versions.put(v);
 }
 
+// ---------- 累積の自動バックアップ（0.97） ----------
+// 起点（この端末でバックアップを読み込んだとき。はじめはその時点）から今までに変えたエピソードと作品資料を覚えておき、
+// 保存するたびに全部を入れる。いちばん新しいファイルを1つ読めば、起点からの変更を取りこぼさない。
+// cum = { since: 日時, works: { [workId]: { episodeIds: [...], materials: true|false } } }
+export function emptyCumulative(since = new Date().toISOString()) {
+  return { since, works: {} };
+}
+
+export function normalizeCumulative(cum) {
+  const c = cum && typeof cum === 'object' ? cum : {};
+  const works = {};
+  for (const [workId, w] of Object.entries(c.works && typeof c.works === 'object' ? c.works : {})) {
+    works[workId] = { episodeIds: [...new Set((Array.isArray(w?.episodeIds) ? w.episodeIds : []).map(String))], materials: !!w?.materials };
+  }
+  return { since: typeof c.since === 'string' ? c.since : new Date().toISOString(), works };
+}
+
+// 前に送ったときから変わったもの changes（[{ p: { workId }, episodeIds, materials }]）を足す（cum は変えない）
+export function addToCumulative(cum, changes) {
+  const out = normalizeCumulative(cum);
+  for (const c of changes || []) {
+    const workId = c.p?.workId || c.workId;
+    if (!workId) continue;
+    const w = out.works[workId] || (out.works[workId] = { episodeIds: [], materials: false });
+    for (const id of c.episodeIds || []) if (!w.episodeIds.includes(id)) w.episodeIds.push(id);
+    if (c.materials) w.materials = true;
+  }
+  return out;
+}
+
+// 保存の対象 targets（[{ workId, episodeIds }]）に、累積の分を足す。今ある作品・エピソードだけを残す
+// 戻り値：{ targets: [{ workId, episodeIds }], materials: Set(作品資料も入れる workId) }
+export function withCumulative(targets, cum, projects) {
+  const byWork = new Map();
+  const materials = new Set();
+  const live = new Map((projects || []).map((p) => [p.workId, new Set((p.episodes || []).map((e) => e.id))]));
+  const add = (workId, ids) => {
+    if (!live.has(workId)) return;
+    const set = byWork.get(workId) || new Set();
+    for (const id of ids || []) if (live.get(workId).has(id)) set.add(id);
+    byWork.set(workId, set);
+  };
+  for (const t of targets || []) add(t.workId, t.episodeIds);
+  for (const [workId, w] of Object.entries(normalizeCumulative(cum).works)) {
+    if (!live.has(workId)) continue;
+    add(workId, w.episodeIds);
+    if (w.materials) materials.add(workId);
+  }
+  return { targets: [...byWork].map(([workId, ids]) => ({ workId, episodeIds: [...ids] })), materials };
+}
+
 // 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）が変わったかを見分ける印。日時は含めない
 function signatureOf(s) {
   let h = 0x811c9dc5;
@@ -702,6 +754,8 @@ function signatureOf(s) {
 
 export function materialsSignature(p) {
   const { createdAt, updatedAt, ...rest } = projectMaterials(p);
+  // 全体プロットの「以降」（0.97）が空なら印に入れない（版を上げただけで、全部の作品の資料を送り直さないように）
+  if (!rest.outlineRest) delete rest.outlineRest;
   return signatureOf(JSON.stringify(rest));
 }
 

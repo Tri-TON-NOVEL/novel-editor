@@ -10,6 +10,7 @@
 //   kakuyomu: { catchphrase, tags: [] }（v4。カクヨムのキャッチコピー・タグ）, shortStory（v4。短編）,
 //   memos: [{ id, title, body }]（作品全体のメモ。タブで切り替える。1つ以上）,
 //   projectMemo（1つ目のメモの本文の写し。前の版で読んでも1つ目のメモが残るように）,
+//   outlineRest（全体プロットの「以降」。どの章にも結び付けない、これから先のプロット：0.97）,
 //   chapters: [{ id, title, plot, order, level }],                章（全体プロットの章と同じもの）。
 //               level（v4）：1＝大見出し、2＝小見出し（カクヨムだけの作品で使う。ほかの作品ではどちらも「章」として扱う）。並びは1列のまま
 //   episodes: [{
@@ -90,6 +91,7 @@ export function newProject(content = {}) {
     kakuyomu: { catchphrase: '', tags: [] },
     shortStory: false,
     synopsis: '',
+    outlineRest: '', // 0.97：全体プロットの「以降」
     projectMemo: '',
     episodes: [newEpisode({ chapterId: first.id })],
     chapters: [first],
@@ -245,6 +247,7 @@ export function normalize(p) {
   project.sitesV2 = true;
   project.kakuyomu = normalizeKakuyomuInfo(p.kakuyomu);
   project.shortStory = !!p.shortStory;
+  project.outlineRest = String(p.outlineRest ?? ''); // 0.97：全体プロットの「以降」（前の版のデータにはない）
   for (const k of ['kakuyomuUrl', 'kakuyomuWorkId']) project[k] = String(p[k] ?? '');
   if (!project.workId) project.workId = makeId();
   // 作品のメモ（複数）。前の版のデータ（projectMemo だけ）は、1つ目のメモにする

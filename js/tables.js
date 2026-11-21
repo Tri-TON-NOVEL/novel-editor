@@ -720,12 +720,63 @@ export function categorizedTable(container, getData, opts) {
 export function chapterList(container, getChapters, ops) {
   const { onChange, toast, copy } = ops;
   let current = 0;
+  // 「以降」（章に結び付かない、これから先のプロット：0.97）。ops.rest = { get() → 文字, set(文字) }。プルダウンの最後に出す
+  const REST = 'rest';
+  let onRest = false;
   // 名前と印は呼び出し側に合わせる（カクヨムだけの作品では大見出し・小見出し：0.97）
   const chapterName = (ch) => ops.name?.(ch) ?? (ch.title || '（無題の章）');
   const chapterLabel = (ch) => ops.label?.(ch) ?? chapterName(ch);
 
+  function chapterSelect(chapters) {
+    const select = h('select');
+    select.setAttribute('aria-label', '章を選ぶ');
+    chapters.forEach((c, i) => select.append(new Option(chapterLabel(c), String(i))));
+    if (ops.rest) select.append(new Option('以降（章に結び付けないプロット）', REST));
+    select.value = onRest ? REST : String(current);
+    select.addEventListener('change', () => {
+      onRest = select.value === REST;
+      if (!onRest) current = Number(select.value);
+      render();
+    });
+    return select;
+  }
+
+  // 「以降」の画面：章タイトル・章の操作はなく、プロットの欄だけ
+  function renderRest(chapters) {
+    const select = chapterSelect(chapters);
+    const add = () => {
+      const created = ops.addChapter(chapters.length - 1);
+      onRest = false;
+      current = getChapters().indexOf(created);
+      render(true);
+    };
+    const count = h('span', { className: 'count' });
+    const plot = h('textarea', { className: 'chapter-plot rest-plot', value: ops.rest.get(), placeholder: 'これから先のプロット（どの章にも結び付きません。まだ章に分けていない先の展開などを書けます）', spellcheck: false });
+    plot.setAttribute('aria-label', '以降のプロット');
+    const updateCount = () => { count.textContent = `${countChars(plot.value).all.toLocaleString()}字`; };
+    updateCount();
+    plot.addEventListener('input', () => { ops.rest.set(plot.value); updateCount(); onChange(); });
+    container.replaceChildren(
+      h('div', { className: 'chapter-bar' },
+        select,
+        h('span', { className: 'count', textContent: chapters.length ? `${chapters.length}章のあと` : 'まだ章がありません' }),
+        btn('＋ 章を追加', add)),
+      h('div', { className: 'field-head' },
+        h('label', { textContent: '以降のプロット' }),
+        h('span', { className: 'spacer' }),
+        count,
+        btn('検索', () => ops.find?.(plot, '「以降」のプロット')),
+        btn('コピー', () => (plot.value ? copy(plot.value, '「以降」のプロット') : toast('プロットは空です')), 'copy')),
+      plot);
+  }
+
   function render(focusTitle = false) {
     const chapters = getChapters();
+    if (ops.rest && (onRest || !chapters.length)) {
+      onRest = true;
+      renderRest(chapters);
+      return;
+    }
     if (!chapters.length) {
       container.replaceChildren(
         h('p', { className: 'hint', textContent: 'まだ章がありません。' }),
@@ -735,11 +786,7 @@ export function chapterList(container, getChapters, ops) {
     current = Math.max(0, Math.min(current, chapters.length - 1));
     const ch = chapters[current];
 
-    const select = h('select');
-    select.setAttribute('aria-label', '章を選ぶ');
-    chapters.forEach((c, i) => select.append(new Option(chapterLabel(c), String(i))));
-    select.value = String(current);
-    select.addEventListener('change', () => { current = Number(select.value); render(); });
+    const select = chapterSelect(chapters);
 
     const move = (d) => {
       if (!ops.moveChapter(ch, d)) return;
@@ -792,8 +839,10 @@ export function chapterList(container, getChapters, ops) {
   // 目次から「この章のプロット」を開くとき
   function select(chapterId) {
     const i = getChapters().findIndex((c) => c.id === chapterId);
-    if (i >= 0) current = i;
+    if (i >= 0) { current = i; onRest = false; }
   }
+  // 串刺し検索から「以降」を開くとき
+  function selectRest() { if (ops.rest) onRest = true; }
 
-  return { render, select };
+  return { render, select, selectRest };
 }

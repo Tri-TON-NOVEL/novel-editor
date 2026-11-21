@@ -11,7 +11,7 @@ import { CHARACTER_COLUMNS, WORLD_COLUMNS } from './tables.js';
 
 export const SEARCH_TARGETS = [
   { key: 'synopsis', label: 'あらすじ', group: 'work' },
-  { key: 'outline', label: '全体プロット（章）', group: 'work' },
+  { key: 'outline', label: '全体プロット', group: 'work' },
   { key: 'world', label: '世界観・用語', group: 'work' },
   { key: 'characters', label: '登場人物', group: 'work' },
   { key: 'memo', label: 'メモ', group: 'work' },
@@ -68,6 +68,8 @@ export function searchUnits(project, { targets = SEARCH_TARGET_KEYS, sites = SIT
       const name = ch.title || `（名前なしの章 ${i + 1}）`;
       add('outline', name, [ch.title, ch.plot].filter(Boolean).join('\n'), { kind: 'outline', chapterId: ch.id, titleLen: ch.title ? ch.title.length + 1 : 0 }, `第${i + 1}章`);
     });
+    // 「以降」：章に結び付けない、これから先のプロット（0.97）
+    add('outline', '以降', project.outlineRest, { kind: 'outline-rest' }, '全体プロット');
   }
   const table = (key, data, columns) => {
     const cat = new Map((data?.categories || []).map((c) => [c.id, c.name]));

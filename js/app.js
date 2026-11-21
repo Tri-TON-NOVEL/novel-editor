@@ -11,6 +11,7 @@ import {
   requestPersistence,
   makeEpisodeFile, isEpisodeFile, parseEpisodeFile,
   packFileName, describePack, packSummary, materialsSignature, episodeSignature, environmentSignature,
+  emptyCumulative, normalizeCumulative, addToCumulative, withCumulative,
   // 前の版の .json バックアップ（全体・バックアップパック）を読むためのもの
   fileFormat, isBackup, isPack, parseBackup, restoreBackup, mergeSharedPrefs, environmentSummary, applyEnvironment, backupFileName,
   parseAnyBackup, parseBackupHead, packFromHead, restorePack, PACK_FORMAT,
@@ -275,7 +276,7 @@ function isEmptyProject(p) {
   const e = p.episodes[0];
   const er = e.report || {};
   return !p.title && !p.synopsis && !p.projectMemo && !(p.memos || []).some((m) => m.body) && !(p.foreshadows || []).length && !r.x && !r.narouTitle && !r.narouBody
-    && !p.chapters.some((c) => c.plot) && !p.world.items.length && !p.characters.items.length
+    && !p.chapters.some((c) => c.plot) && !p.outlineRest && !p.world.items.length && !p.characters.items.length
     && p.episodes.length === 1 && !e.plot && !e.freeMemo && !er.x && !er.narouTitle && !er.narouBody
     && SITE_KEYS.every((s) => DRAFT_FIELDS.every((f) => !draftOf(e, s)[f]));
 }
@@ -2278,7 +2279,7 @@ function itemDetail(item) {
   }
   if (item.type === 'materials') {
     const d = item.data || {};
-    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].concat((d.foreshadows || []).length ? [`伏線：${d.foreshadows.length}件`] : []).join('\n');
+    return [`作品資料：${item.project?.title || '無題'}`, `あらすじ：${d.synopsis ? 'あり' : 'なし'}`, `全体プロット：${(d.chapters || []).length}章${d.outlineRest ? '・以降あり' : ''}`, `世界観・用語：${d.world?.items?.length || 0}件`, `登場人物：${d.characters?.items?.length || 0}人`, `メモ：${(d.memos || []).some((m) => m.body) || d.projectMemo ? `あり（${(d.memos || []).length || 1}件）` : 'なし'}`].concat((d.foreshadows || []).length ? [`伏線：${d.foreshadows.length}件`] : []).join('\n');
   }
   const ep = item.episode || {};
   const sites = SITE_KEYS.filter((site) => LEGACY_SITES.includes(site) || (item.versions || []).some((v) => v.site === site) || draftOf(ep, site).body).map((site) => {
@@ -3434,6 +3435,18 @@ async function markRestoredAsSent(keep) {
   }
   prefs.set('sync.cloudSent', sent);
   prefs.set('sync.materialsSent', mat);
+  // 累積バックアップの起点を、読み込んだ今にする（0.97）。読み込みで消えなかった、この端末のまだ送っていない変更は、
+  // 次の保存で「前に送ったときから変わったもの」として、また累積に入る
+  prefs.set('sync.cumulative', emptyCumulative());
+}
+
+// 累積バックアップ（0.97）：起点から今までに変えたエピソードと作品資料。記録がなければ、今を起点にする
+function cumulativeRecord() {
+  const c = prefs.get('sync.cumulative', null);
+  if (c && typeof c === 'object') return normalizeCumulative(c);
+  const fresh = emptyCumulative();
+  prefs.set('sync.cumulative', fresh);
+  return fresh;
 }
 
 // 自動バックアップの前に呼ぶ：中身が本当に変わったか
@@ -3469,7 +3482,12 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null, { onl
       chosen = currentSyncTarget();
     }
   }
-  // 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）は、前に送ったときから変わっていれば一緒に入れる
+  // 累積（0.97）：起点から今までに変えたエピソード・作品資料も、毎回すべて入れる（いちばん新しいファイルだけで足りるように）
+  const cum = addToCumulative(cumulativeRecord(), changes);
+  prefs.set('sync.cumulative', cum);
+  const merged = withCumulative(chosen.map((t) => ({ workId: t.workId || projects.find((x) => x.id === t.projectId)?.workId, episodeIds: t.episodeIds })), cum, projects);
+  chosen = merged.targets;
+  // 作品資料（章・あらすじ・全体プロット・世界観・登場人物・メモ）は、前に送ったときから変わっていれば、または起点から変えていれば一緒に入れる
   const sent = prefs.get('sync.materialsSent', {}) || {};
   const nowSigs = {};
   const epSigs = {}; // 入れたエピソードの、今の中身の印（保存できたら「送った」と記録する）
@@ -3477,7 +3495,7 @@ async function buildEpisodeBackup(reason = 'auto-episode', targets = null, { onl
     const p = projects.find((x) => x.workId === t.workId || x.id === t.projectId);
     if (!p) return null;
     const sig = materialsSignature(p);
-    const materials = sent[p.workId] !== sig && !(p.workId in nowSigs);
+    const materials = (sent[p.workId] !== sig || merged.materials.has(p.workId)) && !(p.workId in nowSigs);
     if (materials) nowSigs[p.workId] = sig;
     const ids = (t.episodeIds || []).filter((id) => p.episodes.some((e) => e.id === id));
     for (const id of ids) (epSigs[p.workId] ||= {})[id] = episodeSignature(p.episodes.find((e) => e.id === id));
@@ -4403,6 +4421,8 @@ const outline = chapterList($('chapters'), () => project.chapters, {
   removeChapter: (ch) => removeChapter(ch),
   episodeCount: (ch) => episodeCountIn(ch),
   find: (target, label) => openFind(target, label),
+  // 「以降」：章に結び付けない、これから先のプロット（0.97）
+  rest: { get: () => project.outlineRest || '', set: (v) => { project.outlineRest = v; } },
 });
 // 設定・登場人物の「テキストに書き出す」→「ファイルに保存」
 const tableOpts = {
@@ -4475,6 +4495,11 @@ function openSearchHit(ref, first) {
       else selectInField(box.querySelector('.chapter-plot'), index - ref.titleLen, length);
       break;
     }
+    case 'outline-rest': // 全体プロットの「以降」（0.97）
+      outline.selectRest();
+      setView('outline');
+      selectInField($('chapters').querySelector('.rest-plot'), index, length);
+      break;
     case 'world':
     case 'characters':
       if (!(ref.kind === 'world' ? project.world : project.characters)?.items?.some((x) => x.id === ref.itemId)) { toast('その項目は削除されています'); return; }
@@ -5942,7 +5967,7 @@ async function saveNow() {
     if (syncPending || !sync.isChecked()) return;
   }
   const ok = await withBusy('保存中…', () => sync.backupNow({ build: () => buildEpisodeBackup('manual-episode', currentSyncTarget()) }));
-  if (ok) toast(`保存が完了しました\n表示中のエピソード → ${sync.folderName()}`);
+  if (ok) toast(`保存が完了しました\n表示中のエピソードと、読み込んでから変えた話 → ${sync.folderName()}`);
   else if (sync.isChecked() && sync.getState() === 'on') toast('保存できませんでした：' + (sync.getError() || '保存先を確認してください') + '\nもう一度「編集エピソード保存」を押すとやり直せます', true);
   // 他の端末のほうが新しかったときは、sync.onNewer から確認の画面が出る
   } finally {

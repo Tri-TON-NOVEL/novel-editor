@@ -57,7 +57,7 @@ function projectMaterials(p) {
   const n = normalize(p);
   return {
     ...Object.fromEntries(PROJECT_INFO_KEYS.map((k) => [k, n[k]])),
-    projectMemo: n.projectMemo || '', memos: n.memos, foreshadows: n.foreshadows, chapters: n.chapters, world: n.world,
+    projectMemo: n.projectMemo || '', memos: n.memos, foreshadows: n.foreshadows, chapters: n.chapters, outlineRest: n.outlineRest || '', world: n.world,
     characters: n.characters, createdAt: n.createdAt, updatedAt: n.updatedAt,
   };
 }
